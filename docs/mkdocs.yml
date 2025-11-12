@@ -266,10 +266,13 @@ extra_javascript:
   - js/jac.monarch.js
   - js/run-code.js
   - js/feedback.js
+  - js/logo.js
 
 plugins:
   - search
-  - open-in-new-tab
+  - open-in-new-tab:
+      excluded_selectors:
+        - .md-logo
   - mkdocs-video:
       is_video: True
       video_autoplay: True
