@@ -170,6 +170,7 @@ jobs:
           # Copy documentation files
           COPY docs/ ./docs/
           COPY jac/ ./jac/
+          COPY jac-client/ ./jac-client/
           COPY scripts/ ./scripts/
 
           # Install Python dependencies
