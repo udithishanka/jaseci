@@ -43,28 +43,28 @@ def answer_question(question: str) -> str by llm(
 
 with entry {
     print("Testing ReAct with streaming...\n");
-    
+
     question = "What is today's date and what is 25 * 4?";
     print(f"Question: {question}\n");
     print("Answer (streaming): ");
-    
+
     result = answer_question(question);
-    
+
     # Result should be a generator (for streaming)
     assert result is not str, "Expected generator for streaming, got string";
-    
+
     # Collect all chunks
     full_response = "";
     for chunk in result {
         print(chunk, end='', flush=True);
         full_response += chunk;
     }
-    
+
     print("\n");
-    
+
     # Verify the response contains expected content
     assert "29-10-2025" in full_response, "Response should mention the date";
     assert "100" in full_response, "Response should mention the calculation result";
-    
+
     print("\nTest passed! ✓");
 }

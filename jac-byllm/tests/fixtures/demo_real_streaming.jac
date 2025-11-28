@@ -12,7 +12,7 @@ import from os { environ }
 
 # Real LLM - change this to your preferred model
 glob llm = Model(
-    model_name="gpt-4o-mini", 
+    model_name="gpt-4o-mini",
     verbose=True,
 );
 
@@ -45,12 +45,12 @@ with entry {
     print("=" * 70);
     print("\nThis will make real API calls and stream the response token-by-token!");
     print("\nWatch closely - you should see the text appear gradually...\n");
-    
+
     question = "What is the current date and time, and what is 127 multiplied by 89?";
     print(f"Question: {question}\n");
     print("Answer (streaming in real-time): ");
     print("-" * 70);
-    
+
     # This will ACTUALLY stream from the LLM!
     # You'll see:
     # 1. Tool calls execute (not streamed)
@@ -58,7 +58,7 @@ with entry {
     for chunk in answer_question(question) {
         print(chunk, end='', flush=True);
     }
-    
+
     print("\n" + "-" * 70);
     print("\n✓ Streaming complete!");
     print("\nWhat happened:");
