@@ -157,7 +157,7 @@ obj BaseLLM {
 
         tool_calls: list[ToolCall] = [];
         for tool_call in message.tool_calls or [] {  # type: ignore
-        
+
             if tool := mtir.get_tool(tool_call.function.name) {
                 args_json = json.loads(tool_call.function.arguments);
                 args = tool.parse_arguments(args_json);
@@ -217,10 +217,10 @@ obj BaseLLM {
     }
 
     """Stream the final answer after ReAct tool calls complete.
-    
+
     This creates a new streaming LLM call with all the context from tool calls
     to generate the final answer in real-time streaming mode.
-    
+
     The difference from _stream_finish_output:
     - This makes a REAL streaming API call to the LLM
     - _stream_finish_output just splits an already-complete string
