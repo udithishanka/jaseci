@@ -27,8 +27,14 @@ class JacCmd:
         """Create Jac CLI cmds."""
 
         @cmd_registry.register
-        def scale(file_path: str, build: bool = False) -> None:
-            """Jac Scale functionality."""
+        def scale(file_path: str, build: bool = False, platform: str | None = None) -> None:
+            """Jac Scale functionality.
+            
+            Args:
+                file_path: Path to the .jac file to deploy
+                build: Build and push Docker image before deploying
+                platform: Target platform (e.g. 'linux/amd64', 'linux/arm64')
+            """
 
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"File not found: '{file_path}'")
@@ -39,7 +45,7 @@ class JacCmd:
             code_folder = pathlib.Path(code_folder).as_posix()
             base_file_path = os.path.basename(file_path)
             if build:
-                build_and_push_docker(code_folder)
+                build_and_push_docker(code_folder, platform=platform)
             deploy_k8(code_folder, base_file_path, build)
 
         @cmd_registry.register

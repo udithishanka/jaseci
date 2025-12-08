@@ -7,7 +7,7 @@ from docker.errors import APIError, BuildError
 
 
 def build_docker_image(
-    image_name: str, code_folder: str, dockerfile: str = "Dockerfile"
+    image_name: str, code_folder: str, dockerfile: str = "Dockerfile", platform: str | None = None
 ) -> None:
     """
     Build a Docker image programmatically.
@@ -16,6 +16,7 @@ def build_docker_image(
         image_name (str): Name and tag for the image (e.g. 'jusail/fastapi-app:latest').
         code_folder (str): Path to the build context (where Dockerfile and app code reside).
         dockerfile (str): Dockerfile name (default: 'Dockerfile').
+        platform (str | None): Target platform (e.g. 'linux/amd64', 'linux/arm64').
 
     Returns:
         Tuple[str, str]: The image name and its ID.
@@ -30,10 +31,12 @@ def build_docker_image(
     except Exception as e:
         raise RuntimeError("Docker daemon is down or unreachable.") from e
 
-    # print(f"Building Docker image '{image_name}' from {context_path}...")
+    if platform:
+        print(f"Building for platform: {platform}")
+
     try:
         image, logs = docker_client.images.build(
-            path=code_folder, dockerfile=dockerfile, tag=image_name, rm=True
+            path=code_folder, dockerfile=dockerfile, tag=image_name, rm=True, platform=platform
         )
         print("image is built sucessfully with image id", image.id)
     except (BuildError, APIError) as e:
@@ -71,15 +74,26 @@ def push_docker_image(
         print("pushed image sucessfully to dockerhub")
 
 
-def build_and_push_docker(code_folder: str) -> None:
+def build_and_push_docker(code_folder: str, platform: str | None = None) -> None:
     """Build and push docker image to dockerhub."""
     app_name = os.getenv("APP_NAME", "jaseci")
     image_name = os.getenv("DOCKER_IMAGE_NAME", f"{app_name}:latest")
     docker_username = os.getenv("DOCKER_USERNAME", "juzailmlwork")
     docker_password = os.getenv("DOCKER_PASSWORD", "12345")
     repository_name = f"{docker_username}/{image_name}"
+    
+    # Use environment variable if platform not explicitly provided
+    if platform is None:
+        platform = os.getenv("JAC_TARGET_PLATFORM")
+    
+    # Default to linux/amd64 for cloud compatibility
+    if platform is None:
+        platform = "linux/amd64"
+        print("No platform specified, defaulting to linux/amd64 for cloud compatibility")
+    
+    print(f"Building for target platform: {platform}")
     print("the repo name is", repository_name)
-    build_docker_image(image_name=repository_name, code_folder=code_folder)
+    build_docker_image(image_name=repository_name, code_folder=code_folder, platform=platform)
     push_docker_image(
         image_name=repository_name, username=docker_username, password=docker_password
     )
