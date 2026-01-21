@@ -10,6 +10,10 @@ if not any(isinstance(f, JacMetaImporter) for f in sys.meta_path):
     sys.meta_path.insert(0, JacMetaImporter())
 
 
+# Flag to ensure _setup_jac_packages_path runs only once per process
+_jac_packages_path_setup_done = False
+
+
 def _setup_jac_packages_path() -> None:
     """Set up .jac/packages path early if in a Jac project.
 
@@ -18,10 +22,11 @@ def _setup_jac_packages_path() -> None:
     user code is loaded. This fixes GitHub issue #4210 where package version
     conflicts occur because venv packages shadow .jac/packages packages.
     """
+    global _jac_packages_path_setup_done
     # Only try once per process
-    if getattr(_setup_jac_packages_path, "_done", False):
+    if _jac_packages_path_setup_done:
         return
-    _setup_jac_packages_path._done = True
+    _jac_packages_path_setup_done = True
 
     # Look for jac.toml in current directory or parents
     cwd = os.getcwd()
@@ -63,10 +68,13 @@ _setup_jac_packages_path()
 # Import compiler first to ensure generated parsers exist before pycore.parser is loaded
 # Backwards-compatible import path for older plugins/tests.
 # Prefer `jaclang.pycore.runtime` going forward.
-import jaclang.pycore.runtime as _runtime_mod
-from jaclang import compiler as _compiler  # noqa: F401
-from jaclang.pycore.helpers import get_disabled_plugins, load_plugins_with_disabling
-from jaclang.pycore.runtime import (
+import jaclang.pycore.runtime as _runtime_mod  # noqa: E402
+from jaclang import compiler as _compiler  # noqa: F401, E402
+from jaclang.pycore.helpers import (  # noqa: E402
+    get_disabled_plugins,
+    load_plugins_with_disabling,
+)
+from jaclang.pycore.runtime import (  # noqa: E402
     JacRuntime,
     JacRuntimeImpl,
     JacRuntimeInterface,

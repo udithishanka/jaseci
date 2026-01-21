@@ -39,26 +39,19 @@ impl DependencyInstaller._run_pip(args: list[str]) -> tuple[int, str, str] {
 }
 
 impl DependencyInstaller._cleanup_duplicate_dist_info(name: str) -> None {
-    """Clean up duplicate dist-info directories for a package.
-
-    When using pip install --target --upgrade, pip can leave behind old
-    dist-info directories, causing importlib.metadata to find the wrong
-    version. This method finds all dist-info dirs for a package and keeps
-    only the newest one.
-
-    This fixes GitHub issue #4210 where version conflicts occur due to
-    duplicate dist-info directories in .jac/packages.
-    """
+    # Clean up duplicate dist-info directories for a package.
+    # When using pip install --target --upgrade, pip can leave behind old
+    # dist-info directories, causing importlib.metadata to find the wrong
+    # version. This method finds all dist-info dirs for a package and keeps
+    # only the newest one.
+    # This fixes GitHub issue #4210 where version conflicts occur due to
+    # duplicate dist-info directories in .jac/packages.
     import shutil;
-    import re;
-
     if not self.packages_dir or not self.packages_dir.exists() {
         return;
     }
-
     # Normalize name for matching (pip uses underscores in dist-info names)
     normalized_name = name.lower().replace("-", "_");
-
     # Find all dist-info directories for this package
     dist_infos: list = [];
     for item in self.packages_dir.iterdir() {
@@ -75,12 +68,10 @@ impl DependencyInstaller._cleanup_duplicate_dist_info(name: str) -> None {
             }
         }
     }
-
     # If there's more than one dist-info, keep only the newest by mtime
     if len(dist_infos) > 1 {
         # Sort by modification time (newest first)
         dist_infos.sort(key=lambda x: float : x[0].stat().st_mtime, reverse=True);
-
         # Remove all but the newest
         for (dist_info_path, version) in dist_infos[1:] {
             try {
@@ -90,7 +81,7 @@ impl DependencyInstaller._cleanup_duplicate_dist_info(name: str) -> None {
                 shutil.rmtree(dist_info_path);
             } except Exception {
                 # Silently ignore cleanup failures
-                pass;
+                _ = None;
             }
         }
     }

@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from functools import lru_cache
 from traceback import TracebackException
-from typing import TYPE_CHECKING, get_args, get_origin
+from typing import TYPE_CHECKING, Any, get_args, get_origin
 
 if TYPE_CHECKING:
     import pluggy
@@ -672,7 +672,7 @@ def load_plugins_with_disabling(
 # This ensures importlib.metadata finds distributions from .jac/packages
 # before falling back to the venv's site-packages.
 
-_jac_packages_finder = None
+_jac_packages_finder: Any = None
 
 
 def setup_jac_packages_finder(packages_path: str) -> bool:
@@ -691,24 +691,28 @@ def setup_jac_packages_finder(packages_path: str) -> bool:
         True if the finder was set up successfully, False otherwise
     """
     global _jac_packages_finder
-    import sys
     import importlib
     import importlib.metadata
+    import sys
+    from collections.abc import Iterable
 
     if _jac_packages_finder is not None:
         # Already set up
         return True
 
-    class JacPackagesFinder(importlib.metadata.MetaPathFinder):
+    class JacPackagesFinder:
         """Custom finder that ensures .jac/packages distributions are found first."""
 
         def __init__(self, path: str) -> None:
             self.packages_path = path
 
         def find_distributions(
-            self, context=importlib.metadata.DistributionFinder.Context()
-        ):
+            self,
+            context: Any = None,  # noqa: ANN401
+        ) -> Iterable[importlib.metadata.Distribution]:
             """Find distributions in .jac/packages with priority over venv."""
+            if context is None:
+                context = importlib.metadata.DistributionFinder.Context()
             jac_context = importlib.metadata.DistributionFinder.Context(
                 name=context.name, path=[self.packages_path]
             )
@@ -727,8 +731,8 @@ def remove_jac_packages_finder() -> bool:
         True if the finder was removed successfully, False otherwise
     """
     global _jac_packages_finder
-    import sys
     import importlib
+    import sys
 
     if _jac_packages_finder is None:
         return False
