@@ -664,3 +664,79 @@ def load_plugins_with_disabling(
         except Exception:
             # Skip plugins that fail to load
             pass
+
+
+# ===============================================================================
+# Package Isolation for .jac/packages (GitHub Issue #4210)
+# ===============================================================================
+# This ensures importlib.metadata finds distributions from .jac/packages
+# before falling back to the venv's site-packages.
+
+_jac_packages_finder = None
+
+
+def setup_jac_packages_finder(packages_path: str) -> bool:
+    """Set up a custom MetaPathFinder for .jac/packages isolation.
+
+    When a Jac project has dependencies installed in .jac/packages/, those
+    packages may have different versions than what's in the venv. Without
+    this finder, importlib.metadata would find the venv versions first,
+    causing version conflicts (e.g., transformers expecting huggingface-hub<1.0
+    but finding huggingface-hub==1.3.2 from byllm/litellm in the venv).
+
+    Args:
+        packages_path: Path to the .jac/packages directory
+
+    Returns:
+        True if the finder was set up successfully, False otherwise
+    """
+    global _jac_packages_finder
+    import sys
+    import importlib
+    import importlib.metadata
+
+    if _jac_packages_finder is not None:
+        # Already set up
+        return True
+
+    class JacPackagesFinder(importlib.metadata.MetaPathFinder):
+        """Custom finder that ensures .jac/packages distributions are found first."""
+
+        def __init__(self, path: str) -> None:
+            self.packages_path = path
+
+        def find_distributions(
+            self, context=importlib.metadata.DistributionFinder.Context()
+        ):
+            """Find distributions in .jac/packages with priority over venv."""
+            jac_context = importlib.metadata.DistributionFinder.Context(
+                name=context.name, path=[self.packages_path]
+            )
+            return importlib.metadata.MetadataPathFinder.find_distributions(jac_context)
+
+    _jac_packages_finder = JacPackagesFinder(packages_path)
+    sys.meta_path.insert(0, _jac_packages_finder)
+    importlib.invalidate_caches()
+    return True
+
+
+def remove_jac_packages_finder() -> bool:
+    """Remove the custom MetaPathFinder for .jac/packages.
+
+    Returns:
+        True if the finder was removed successfully, False otherwise
+    """
+    global _jac_packages_finder
+    import sys
+    import importlib
+
+    if _jac_packages_finder is None:
+        return False
+
+    if _jac_packages_finder in sys.meta_path:
+        sys.meta_path.remove(_jac_packages_finder)
+        _jac_packages_finder = None
+        importlib.invalidate_caches()
+        return True
+
+    return False

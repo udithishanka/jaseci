@@ -38,6 +38,64 @@ impl DependencyInstaller._run_pip(args: list[str]) -> tuple[int, str, str] {
     }
 }
 
+impl DependencyInstaller._cleanup_duplicate_dist_info(name: str) -> None {
+    """Clean up duplicate dist-info directories for a package.
+
+    When using pip install --target --upgrade, pip can leave behind old
+    dist-info directories, causing importlib.metadata to find the wrong
+    version. This method finds all dist-info dirs for a package and keeps
+    only the newest one.
+
+    This fixes GitHub issue #4210 where version conflicts occur due to
+    duplicate dist-info directories in .jac/packages.
+    """
+    import shutil;
+    import re;
+
+    if not self.packages_dir or not self.packages_dir.exists() {
+        return;
+    }
+
+    # Normalize name for matching (pip uses underscores in dist-info names)
+    normalized_name = name.lower().replace("-", "_");
+
+    # Find all dist-info directories for this package
+    dist_infos: list = [];
+    for item in self.packages_dir.iterdir() {
+        if item.is_dir() and item.name.endswith(".dist-info") {
+            # Parse package name from dist-info dir (format: name-version.dist-info)
+            dir_name = item.name[:-10];  # Remove .dist-info suffix
+            parts = dir_name.rsplit("-", 1);
+            if len(parts) == 2 {
+                pkg_name = parts[0].lower().replace("-", "_");
+                version = parts[1];
+                if pkg_name == normalized_name {
+                    dist_infos.append((item, version));
+                }
+            }
+        }
+    }
+
+    # If there's more than one dist-info, keep only the newest by mtime
+    if len(dist_infos) > 1 {
+        # Sort by modification time (newest first)
+        dist_infos.sort(key=lambda x: float : x[0].stat().st_mtime, reverse=True);
+
+        # Remove all but the newest
+        for (dist_info_path, version) in dist_infos[1:] {
+            try {
+                if self.verbose {
+                    print(f"  Cleaning up old dist-info: {dist_info_path.name}");
+                }
+                shutil.rmtree(dist_info_path);
+            } except Exception {
+                # Silently ignore cleanup failures
+                pass;
+            }
+        }
+    }
+}
+
 impl DependencyInstaller.install_all(include_dev: bool = False) -> bool {
     import sys;
     self.ensure_packages_dir();
@@ -83,6 +141,9 @@ impl DependencyInstaller.install_package(name: str, version: str = "") -> bool {
         ["install", "--target", str(self.packages_dir), "--upgrade", spec]
     );
     if returncode == 0 {
+        # Clean up duplicate dist-info directories (fixes GitHub issue #4210)
+        # pip --target --upgrade can leave behind old dist-info dirs
+        self._cleanup_duplicate_dist_info(name);
         print(f"  {name} installed successfully");
         return True;
     } else {
@@ -283,6 +344,7 @@ impl add_packages_to_path(
 ) -> None {
     import sys;
     import from jaclang.project.config { get_config }
+    import from jaclang.pycore.helpers { setup_jac_packages_finder }
     if config is None {
         config = get_config();
     }
@@ -293,12 +355,16 @@ impl add_packages_to_path(
     packages_str = str(packages_dir);
     if packages_dir.exists() and packages_str not in sys.path {
         sys.path.insert(0, packages_str);
+        # Register our custom finder to ensure importlib.metadata finds
+        # distributions from .jac/packages first (fixes GitHub issue #4210)
+        setup_jac_packages_finder(packages_str);
     }
 }
 
 impl remove_packages_from_path(config: JacConfig | None = None) -> None {
     import sys;
     import from jaclang.project.config { get_config }
+    import from jaclang.pycore.helpers { remove_jac_packages_finder }
     if config is None {
         config = get_config();
     }
@@ -309,6 +375,8 @@ impl remove_packages_from_path(config: JacConfig | None = None) -> None {
     packages_str = str(packages_dir);
     if packages_str in sys.path {
         sys.path.remove(packages_str);
+        # Remove our custom finder when removing the packages path
+        remove_jac_packages_finder();
     }
 }
 
