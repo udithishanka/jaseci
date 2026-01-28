@@ -108,13 +108,16 @@ impl _type_to_schema(
                 info=field
             )  # type: ignore
              for field in info_fields
+        } if info_fields else {
+            name: _type_to_schema(field_type, name)
+            for (name, field_type) in fields.items()
         };
         return {
             "title": title or ty.__name__,
             "description": semstr,
             "type": "object",
             "properties": properties,
-            "required": list(fields.keys()),
+            "required": list(properties.keys()),
             "additionalProperties": False,
 
         };
