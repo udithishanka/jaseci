@@ -108,7 +108,9 @@ impl _type_to_schema(
                 info=field
             )  # type: ignore
              for field in info_fields
-        } if info_fields else {
+        }
+        if info_fields
+        else {
             name: _type_to_schema(field_type, name)
             for (name, field_type) in fields.items()
         };
