@@ -543,7 +543,10 @@ class KubernetesTarget(DeploymentTarget) {
         ensure_namespace_exists(namespace);
 
         # 3. Load environment variables
-        self.env_list = load_env_variables(app_config.code_folder);
+        self.env_list = load_env_variables(
+            app_config.code_folder,
+            self.k8s_config.env
+        );
 
         # 4. Determine cluster type
         cluster_env = cluster_type();

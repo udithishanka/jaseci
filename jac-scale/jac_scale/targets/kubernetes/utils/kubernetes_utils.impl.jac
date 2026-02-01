@@ -493,17 +493,89 @@ impl check_K8s_status -> None {
     }
 }
 
-"""Load env variables in .env to aws beanstalk environment."""
-impl load_env_variables(code_folder: str) -> list {
+"""Load environment variables from .env file and kubernetes config.
+
+Merges variables from:
+1. .env file (if exists)
+2. kubernetes.env.* configuration (from jac.toml)
+
+kubernetes.env.* values take precedence over .env file.
+
+Args:
+    code_folder: Path to the code directory containing .env file
+    config_env_vars: Environment variables from kubernetes.env.* config
+
+Returns:
+    List of {'name': key, 'value': value} dicts for Kubernetes pod spec
+"""
+impl load_env_variables(
+    code_folder: str,
+    config_env_vars: dict[str, str] | None = None
+) -> list {
     env_file = os.path.join(code_folder, '.env');
     env_vars = dotenv_values(env_file);
-    env_list = [];
+    env_dict = {};
+
+    # First load from .env file
     if os.path.exists(env_file) {
         for (key, value) in env_vars.items() {
-            env_list.append({'name': key, 'value': value});
+            env_dict[key] = value;
         }
     }
+
+    # Then overlay kubernetes.env.* config (takes precedence)
+    if config_env_vars {
+        for (key, raw_value) in config_env_vars.items() {
+            resolved_value = resolve_env_value(raw_value, key);
+            env_dict[key] = resolved_value;
+        }
+    }
+
+    # Convert to Kubernetes env list format
+    env_list = [];
+    for (key, value) in env_dict.items() {
+        env_list.append({'name': key, 'value': value});
+    }
+
     return env_list;
+}
+
+"""Resolve environment variable references in config values.
+
+Supports ${VAR_NAME} syntax for environment variable substitution.
+Static values are passed through unchanged.
+
+Args:
+    value: The config value (may contain ${VAR_NAME} references)
+    var_name: The environment variable name (for error messages)
+
+Returns:
+    Resolved value (static or substituted from os.environ)
+"""
+impl resolve_env_value(value: str, var_name: str) -> str {
+    import re;
+    # Pattern matches ${VAR_NAME}
+    pattern = r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}';
+    match = re.fullmatch(pattern, value);
+
+    if match {
+        # This is a reference like ${OPENAI_API_KEY}
+        env_var_name = match.group(1);
+        resolved = os.environ.get(env_var_name);
+
+        if resolved is None {
+            console.print(
+                f"[yellow]Warning: Environment variable '{env_var_name}' "
+                f"referenced in kubernetes.env.{var_name} is not set. "
+                f"Using empty string.[/yellow]"
+            );
+            return '';
+        }
+        return resolved;
+    }
+
+    # Static value - return as-is
+    return value;
 }
 
 """

@@ -14,6 +14,7 @@ from jac_scale.targets.kubernetes.utils.kubernetes_utils import (
     load_env_variables,
     parse_cpu_quantity,
     parse_memory_quantity,
+    resolve_env_value,
     validate_resource_limits,
 )
 
@@ -154,3 +155,76 @@ def test_create_tarball_missing_source(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         create_tarball(str(tmp_path / "missing"), str(tar_path))
+
+
+def test_resolve_env_value_static():
+    """Static values pass through unchanged."""
+    assert resolve_env_value("my-static-value", "KEY") == "my-static-value"
+    assert resolve_env_value("production", "ENV") == "production"
+
+
+def test_resolve_env_value_substitution(monkeypatch):
+    """${VAR} is substituted from environment."""
+    monkeypatch.setenv("MY_VAR", "substituted-value")
+    assert resolve_env_value("${MY_VAR}", "KEY") == "substituted-value"
+
+
+def test_resolve_env_value_missing_warns(monkeypatch, capsys):
+    """Warning when env var is missing."""
+    result = resolve_env_value("${MISSING_VAR}", "API_KEY")
+    assert result == ""
+    captured = capsys.readouterr()
+    assert "MISSING_VAR" in captured.out
+    assert "Warning" in captured.out
+
+
+def test_load_env_variables_merges_config(tmp_path, monkeypatch):
+    """Test merging .env file with kubernetes.env config."""
+    env_dir = tmp_path / "app"
+    env_dir.mkdir()
+    env_file = env_dir / ".env"
+    env_file.write_text("FILE_VAR=from-file\nOVERRIDE=file-value\n")
+
+    monkeypatch.setenv("CONFIG_VAR", "from-env")
+    config_vars = {
+        "CONFIG_VAR": "${CONFIG_VAR}",
+        "STATIC_VAR": "static-value",
+        "OVERRIDE": "config-value"
+    }
+
+    env_list = load_env_variables(str(env_dir), config_vars)
+    env_dict = {e["name"]: e["value"] for e in env_list}
+
+    assert env_dict["FILE_VAR"] == "from-file"
+    assert env_dict["CONFIG_VAR"] == "from-env"
+    assert env_dict["STATIC_VAR"] == "static-value"
+    assert env_dict["OVERRIDE"] == "config-value"  # Config wins
+
+
+def test_load_env_variables_backward_compatible(tmp_path):
+    """Existing code works without config vars."""
+    env_dir = tmp_path / "app"
+    env_dir.mkdir()
+    env_file = env_dir / ".env"
+    env_file.write_text("VAR1=value1\n")
+
+    env_list = load_env_variables(str(env_dir))
+    assert {"name": "VAR1", "value": "value1"} in env_list
+
+
+def test_load_env_variables_only_config(tmp_path, monkeypatch):
+    """Works with only config vars, no .env file."""
+    env_dir = tmp_path / "app"
+    env_dir.mkdir()
+
+    monkeypatch.setenv("API_KEY", "secret123")
+    config_vars = {
+        "API_KEY": "${API_KEY}",
+        "APP_NAME": "my-app"
+    }
+
+    env_list = load_env_variables(str(env_dir), config_vars)
+    env_dict = {e["name"]: e["value"] for e in env_list}
+
+    assert env_dict["API_KEY"] == "secret123"
+    assert env_dict["APP_NAME"] == "my-app"

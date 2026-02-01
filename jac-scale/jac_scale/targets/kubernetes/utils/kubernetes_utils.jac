@@ -26,7 +26,12 @@ def validate_resource_limits(
     memory_limit: (str | None)
 ) -> None;
 
-def load_env_variables(code_folder: str) -> list;
+def load_env_variables(
+    code_folder: str,
+    config_env_vars: dict[str, str] | None = None
+) -> list;
+
+def resolve_env_value(value: str, var_name: str) -> str;
 
 def check_K8s_status -> None;
 

@@ -39,7 +39,8 @@ class KubernetesConfig(BaseConfig) {
         jaseci_commit: (str | None) = None,
         install_jaseci: bool = True,
         additional_packages: list[str] = [],
-        plugin_versions: dict[str, str] = {};
+        plugin_versions: dict[str, str] = {},
+        env: dict[str, str] = {};
 
     def init(
         self: KubernetesConfig,
@@ -76,7 +77,8 @@ class KubernetesConfig(BaseConfig) {
         jaseci_commit: (str | None) = None,
         install_jaseci: bool = True,
         additional_packages: list[str] = [],
-        plugin_versions: dict[str, str] = {}
+        plugin_versions: dict[str, str] = {},
+        env: dict[str, str] = {}
     ) -> None {
         self.app_name = app_name;
         self.namespace = namespace;
@@ -118,6 +120,7 @@ class KubernetesConfig(BaseConfig) {
         self.install_jaseci = install_jaseci;
         self.additional_packages = additional_packages;
         self.plugin_versions = plugin_versions;
+        self.env = env;
     }
 
     override def to_dict(self: KubernetesConfig) -> dict[str, Any] {
@@ -160,7 +163,8 @@ class KubernetesConfig(BaseConfig) {
                 'jaseci_commit': self.jaseci_commit,
                 'install_jaseci': self.install_jaseci,
                 'additional_packages': self.additional_packages,
-                'plugin_versions': self.plugin_versions
+                'plugin_versions': self.plugin_versions,
+                'env': self.env
             }
         );
         return base;
@@ -203,7 +207,8 @@ class KubernetesConfig(BaseConfig) {
             jaseci_commit=config.get('jaseci_commit'),
             install_jaseci=config.get('install_jaseci', True),
             additional_packages=config.get('additional_packages', []),
-            plugin_versions=config.get('plugin_versions', {})
+            plugin_versions=config.get('plugin_versions', {}),
+            env=config.get('env', {})
         );
     }
 }

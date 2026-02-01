@@ -104,11 +104,34 @@ impl JacScaleConfig.get_database_config(self: JacScaleConfig) -> dict[str, Any] 
 impl JacScaleConfig.get_kubernetes_config(self: JacScaleConfig) -> dict[str, Any] {
     config = self.load();
     k8s_config = config.get('kubernetes', {});
+
+    # Extract env.* sub-keys from kubernetes config
+    env_vars = {};
+    keys_to_remove = [];
+    for (key, value) in k8s_config.items() {
+        if key.startswith('env.') {
+            env_key = key[4:];  # Remove 'env.' prefix
+            env_vars[env_key] = value;
+            keys_to_remove.append(key);
+        }
+    }
+
+    # Remove env.* keys from main config (they're stored separately)
+    for key in keys_to_remove {
+        k8s_config.pop(key);
+    }
+
+    # Store env vars in the config dict
+    if env_vars {
+        k8s_config['env'] = env_vars;
+    }
+
     # Handle docker_image_name default (needs app_name)
     if not k8s_config.get('docker_image_name') {
         app_name = k8s_config.get('app_name', 'jaseci');
         k8s_config['docker_image_name'] = f"{app_name}:latest";
     }
+
     # Convert to dict using KubernetesConfig.from_dict() which handles all defaults
     import from jac_scale.targets.kubernetes.kubernetes_config { KubernetesConfig }
     k8s_config_obj = KubernetesConfig.from_dict(KubernetesConfig, k8s_config);
