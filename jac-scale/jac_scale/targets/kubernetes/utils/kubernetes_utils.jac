@@ -27,8 +27,7 @@ def validate_resource_limits(
 ) -> None;
 
 def load_env_variables(
-    code_folder: str,
-    config_env_vars: dict[str, str] | None = None
+    code_folder: str, config_env_vars: dict[str, str] | None = None
 ) -> list;
 
 def resolve_env_value(value: str, var_name: str) -> str;

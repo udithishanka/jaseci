@@ -189,7 +189,7 @@ def test_load_env_variables_merges_config(tmp_path, monkeypatch):
     config_vars = {
         "CONFIG_VAR": "${CONFIG_VAR}",
         "STATIC_VAR": "static-value",
-        "OVERRIDE": "config-value"
+        "OVERRIDE": "config-value",
     }
 
     env_list = load_env_variables(str(env_dir), config_vars)
@@ -218,10 +218,7 @@ def test_load_env_variables_only_config(tmp_path, monkeypatch):
     env_dir.mkdir()
 
     monkeypatch.setenv("API_KEY", "secret123")
-    config_vars = {
-        "API_KEY": "${API_KEY}",
-        "APP_NAME": "my-app"
-    }
+    config_vars = {"API_KEY": "${API_KEY}", "APP_NAME": "my-app"}
 
     env_list = load_env_variables(str(env_dir), config_vars)
     env_dict = {e["name"]: e["value"] for e in env_list}
