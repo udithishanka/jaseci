@@ -130,22 +130,24 @@ cl def:pub app -> any {
                     Add
                 </button>
             </div>
-            {[<div key={t.id} class="todo-item">
-                <input
-                    type="checkbox"
-                    checked={t.done}
-                    onChange={lambda -> None { toggle(t.id);}}
-                />
-                <span class={"todo-title " + ("todo-done" if t.done else "")}>
-                    {t.title}
-                </span>
-                <button
-                    class="btn-delete"
-                    onClick={lambda -> None { remove(t.id);}}
-                >
-                    X
-                </button>
-            </div> for t in items]}
+            {[
+                <div key={t.id} class="todo-item">
+                    <input
+                        type="checkbox"
+                        checked={t.done}
+                        onChange={lambda -> None { toggle(t.id);}}
+                    />
+                    <span class={"todo-title " + ("todo-done" if t.done else "")}>
+                        {t.title}
+                    </span>
+                    <button
+                        class="btn-delete"
+                        onClick={lambda -> None { remove(t.id);}}
+                    >
+                        X
+                    </button>
+                </div> for t in items
+            ]}
         </div>;
 }
 ```
@@ -169,6 +171,7 @@ Open http://localhost:8000 - you have a working app!
 | `await func()` | Call server function from client (automatic HTTP) |
 | `cl { }` | Client-side code block |
 | `has x: type` | Reactive state (like useState) |
+| `can with entry` | Lifecycle ability (replaces useEffect) |
 
 ---
 
@@ -181,14 +184,15 @@ Update `main.jac` - just add the AI parts:
 ```jac
 import from uuid { uuid4 }
 import from byllm.lib { Model }
+cl import "./styles.css";
 
 glob llm = Model(model_name="claude-sonnet-4-20250514");
 
 node Todo {
-    has id: str;
-    has title: str;
-    has done: bool = False;
-    has category: str = "other";  # NEW: AI-assigned category
+    has id: str,
+        title: str,
+        done: bool = False,
+        category: str = "other";  # NEW: AI-assigned category
 }
 
 """Categorize a todo. Returns: work, personal, shopping, health, or other."""
@@ -198,20 +202,33 @@ def categorize(title: str) -> str by llm();
 def:pub add_todo(title: str) -> dict {
     category = categorize(title);  # NEW: AI categorizes
     todo = root ++> Todo(id=str(uuid4()), title=title, category=category);
-    return {"id": todo[0].id, "title": todo[0].title, "done": todo[0].done, "category": todo[0].category};
+    return {
+        "id": todo[0].id,
+        "title": todo[0].title,
+        "done": todo[0].done,
+        "category": todo[0].category
+    };
 }
 
 """Get all todos."""
-def:pub get_todos() -> list {
-    return [{"id": t.id, "title": t.title, "done": t.done, "category": t.category} for t in [root -->](`?Todo)];
+def:pub get_todos -> list {
+    return [
+        {"id": t.id, "title": t.title, "done": t.done, "category": t.category}
+        for t in [root-->](`?Todo)
+    ];
 }
 
 """Toggle a todo's done status."""
 def:pub toggle_todo(id: str) -> dict {
-    for todo in [root -->](`?Todo) {
+    for todo in [root-->](`?Todo) {
         if todo.id == id {
             todo.done = not todo.done;
-            return {"id": todo.id, "title": todo.title, "done": todo.done, "category": todo.category};
+            return {
+                "id": todo.id,
+                "title": todo.title,
+                "done": todo.done,
+                "category": todo.category
+            };
         }
     }
     return {};
@@ -219,7 +236,7 @@ def:pub toggle_todo(id: str) -> dict {
 
 """Delete a todo."""
 def:pub delete_todo(id: str) -> dict {
-    for todo in [root -->](`?Todo) {
+    for todo in [root-->](`?Todo) {
         if todo.id == id {
             del todo;
             return {"deleted": id};
@@ -228,55 +245,82 @@ def:pub delete_todo(id: str) -> dict {
     return {};
 }
 
-cl {
-    import from react { useEffect }
-    import "./styles.css";
+cl def:pub app -> any {
+    has items: list = [],
+        text: str = "";
 
-    def:pub app -> any {
-        has items: list = [];
-        has text: str = "";
-
-        useEffect(lambda -> None {
-            async def load -> None { items = await get_todos(); }
-            load();
-        }, []);
-
-        async def add -> None {
-            if text.trim() {
-                todo = await add_todo(text.trim());
-                items = items.concat([todo]);
-                text = "";
-            }
-        }
-
-        async def toggle(id: str) -> None {
-            await toggle_todo(id);
-            items = items.map(lambda t: any -> any {
-                return {"id": t.id, "title": t.title, "done": not t.done, "category": t.category} if t.id == id else t;
-            });
-        }
-
-        async def remove(id: str) -> None {
-            await delete_todo(id);
-            items = items.filter(lambda t: any -> bool { return t.id != id; });
-        }
-
-        return <div class="container">
-            <h1>AI Todo App</h1>
-            <div class="input-row">
-                <input class="input" value={text} onChange={lambda e: any -> None { text = e.target.value; }}
-                    onKeyPress={lambda e: any -> None { if e.key == "Enter" { add(); }}}
-                    placeholder="What needs to be done?" />
-                <button class="btn-add" onClick={add}>Add</button>
-            </div>
-            {[<div key={t.id} class="todo-item">
-                <input type="checkbox" checked={t.done} onChange={lambda -> None { toggle(t.id); }} />
-                <span class={"todo-title " + ("todo-done" if t.done else "")}>{t.title}</span>
-                <span class="category">{t.category}</span>
-                <button class="btn-delete" onClick={lambda -> None { remove(t.id); }}>X</button>
-            </div> for t in items]}
-        </div>;
+    async can with entry {
+        items = await get_todos();
     }
+
+    async def add -> None {
+        if text.trim() {
+            todo = await add_todo(text.trim());
+            items = items.concat([todo]);
+            text = "";
+        }
+    }
+
+    async def toggle(id: str) -> None {
+        await toggle_todo(id);
+        items = items.map(
+            lambda t: any  -> any { return {
+                "id": t.id,
+                "title": t.title,
+                "done": not t.done,
+                "category": t.category
+            }
+            if t.id == id
+            else t; }
+        );
+    }
+
+    async def remove(id: str) -> None {
+        await delete_todo(id);
+        items = items.filter(lambda t: any  -> bool { return t.id != id; });
+    }
+
+    return
+        <div class="container">
+            <h1>
+                AI Todo App
+            </h1>
+            <div class="input-row">
+                <input
+                    class="input"
+                    value={text}
+                    onChange={lambda e: any  -> None { text = e.target.value;}}
+                    onKeyPress={lambda e: any  -> None { if e.key == "Enter" {
+                        add();
+                    }}}
+                    placeholder="What needs to be done?"
+                />
+                <button class="btn-add" onClick={add}>
+                    Add
+                </button>
+            </div>
+            {[
+                <div key={t.id} class="todo-item">
+                    <input
+                        type="checkbox"
+                        checked={t.done}
+                        onChange={lambda -> None { toggle(t.id);}}
+                    />
+                    <span class={"todo-title " + ("todo-done" if t.done else "")}>
+                        {t.title}
+                    </span>
+                    <span class="category">
+                        {t.category}
+                    </span>
+                    <button
+                        class="btn-delete"
+                        onClick={lambda -> None { remove(t.id);}}
+                    >
+                        X
+                    </button>
+                </div> for t in items
+            ]}
+        </div>;
 }
 ```
 
@@ -309,14 +353,16 @@ Update `main.jac`:
 ```jac
 import from uuid { uuid4 }
 import from byllm.lib { Model }
+cl import from "@jac/runtime" { jacSignup, jacLogin, jacLogout, jacIsLoggedIn }
+cl import "./styles.css";
 
 glob llm = Model(model_name="claude-sonnet-4-20250514");
 
 node Todo {
-    has id: str;
-    has title: str;
-    has done: bool = False;
-    has category: str = "other";
+    has id: str,
+        title: str,
+        done: bool = False,
+        category: str = "other";
 }
 
 """Categorize a todo. Returns: work, personal, shopping, health, or other."""
@@ -329,28 +375,52 @@ walker:priv AddTodo {
     can create with `root entry {
         category = categorize(self.title);
         new_todo = here ++> Todo(id=str(uuid4()), title=self.title, category=category);
-        report {"id": new_todo[0].id, "title": new_todo[0].title, "done": new_todo[0].done, "category": new_todo[0].category};
+        report {
+            "id": new_todo[0].id,
+            "title": new_todo[0].title,
+            "done": new_todo[0].done,
+            "category": new_todo[0].category
+        };
     }
 }
 
 walker:priv ListTodos {
     has todos: list = [];
 
-    can collect with `root entry { visit [-->](`?Todo); }
-    can gather with Todo entry {
-        self.todos.append({"id": here.id, "title": here.title, "done": here.done, "category": here.category});
+    can collect with `root entry {
+        visit [-->](`?Todo);
     }
-    can report_all with `root exit { report self.todos; }
+    can gather with Todo entry {
+        self.todos.append(
+            {
+                "id": here.id,
+                "title": here.title,
+                "done": here.done,
+                "category": here.category
+            }
+        );
+    }
+
+    can report_all with `root exit {
+        report self.todos;
+    }
 }
 
 walker:priv ToggleTodo {
     has todo_id: str;
 
-    can find with `root entry { visit [-->](`?Todo); }
+    can find with `root entry {
+        visit [-->](`?Todo);
+    }
     can toggle with Todo entry {
         if here.id == self.todo_id {
             here.done = not here.done;
-            report {"id": here.id, "title": here.title, "done": here.done, "category": here.category};
+            report {
+                "id": here.id,
+                "title": here.title,
+                "done": here.done,
+                "category": here.category
+            };
         }
     }
 }
@@ -358,7 +428,9 @@ walker:priv ToggleTodo {
 walker:priv DeleteTodo {
     has todo_id: str;
 
-    can find with `root entry { visit [-->](`?Todo); }
+    can find with `root entry {
+        visit [-->](`?Todo);
+    }
     can remove with Todo entry {
         if here.id == self.todo_id {
             del here;
@@ -367,109 +439,183 @@ walker:priv DeleteTodo {
     }
 }
 
-cl {
-    import from react { useEffect }
-    import from "@jac/runtime" { jacSignup, jacLogin, jacLogout, jacIsLoggedIn }
-    import "./styles.css";
+cl def:pub app -> any {
+    has items: list = [],
+        text: str = "",
+        isLoggedIn: bool = False,
+        username: str = "",
+        password: str = "",
+        isSignup: bool = False,
+        error: str = "";
 
-    def:pub app -> any {
-        has items: list = [];
-        has text: str = "";
-        has isLoggedIn: bool = False;
-        has username: str = "";
-        has password: str = "";
-        has isSignup: bool = False;
-        has error: str = "";
+    can with entry {
+        isLoggedIn = jacIsLoggedIn();
+    }
 
-        useEffect(lambda -> None { isLoggedIn = jacIsLoggedIn(); }, []);
+    async can with (isLoggedIn) entry {
+        if isLoggedIn {
+            result = root spawn ListTodos();
+            items = result.reports[0] if result.reports else [];
+        }
+    }
 
-        useEffect(lambda -> None {
-            if isLoggedIn {
-                async def load -> None {
-                    result = root spawn ListTodos();
-                    items = result.reports[0] if result.reports else [];
-                }
-                load();
-            }
-        }, [isLoggedIn]);
-
-        async def handleAuth -> None {
-            error = "";
-            if isSignup {
-                result = await jacSignup(username, password);
-                if result["success"] { isLoggedIn = True; }
-                else { error = result["error"] if result["error"] else "Signup failed"; }
+    async def handleAuth -> None {
+        error = "";
+        if isSignup {
+            result = await jacSignup(username, password);
+            if result["success"] {
+                isLoggedIn = True;
             } else {
-                success = await jacLogin(username, password);
-                if success { isLoggedIn = True; }
-                else { error = "Invalid credentials"; }
+                error = result["error"] if result["error"] else "Signup failed";
+            }
+        } else {
+            success = await jacLogin(username, password);
+            if success {
+                isLoggedIn = True;
+            } else {
+                error = "Invalid credentials";
             }
         }
+    }
 
-        def handleLogout -> None {
-            jacLogout();
-            isLoggedIn = False;
-            items = [];
+    def handleLogout -> None {
+        jacLogout();
+        isLoggedIn = False;
+        items = [];
+    }
+
+    async def add -> None {
+        if text.trim() {
+            result = root spawn AddTodo(title=text.trim());
+            items = items.concat([result.reports[0]]);
+            text = "";
         }
+    }
 
-        async def add -> None {
-            if text.trim() {
-                result = root spawn AddTodo(title=text.trim());
-                items = items.concat([result.reports[0]]);
-                text = "";
-            }
-        }
+    async def toggle(id: str) -> None {
+        result = root spawn ToggleTodo(todo_id=id);
+        items = items.map(
+            lambda t: any  -> any { return result.reports[0] if t.id == id else t; }
+        );
+    }
 
-        async def toggle(id: str) -> None {
-            result = root spawn ToggleTodo(todo_id=id);
-            items = items.map(lambda t: any -> any {
-                return result.reports[0] if t.id == id else t;
-            });
-        }
+    async def remove(id: str) -> None {
+        root spawn DeleteTodo(todo_id=id);
+        items = items.filter(lambda t: any  -> bool { return t.id != id; });
+    }
 
-        async def remove(id: str) -> None {
-            root spawn DeleteTodo(todo_id=id);
-            items = items.filter(lambda t: any -> bool { return t.id != id; });
-        }
-
-        if not isLoggedIn {
-            return <div class="container">
-                <h1>{("Sign Up" if isSignup else "Log In")}</h1>
-                {(<div style={{"color": "red", "marginBottom": "10px"}}>{error}</div>) if error else None}
-                <input class="input" value={username} onChange={lambda e: any -> None { username = e.target.value; }}
-                    placeholder="Username" style={{"marginBottom": "10px", "width": "100%"}} />
-                <input class="input" type="password" value={password} onChange={lambda e: any -> None { password = e.target.value; }}
-                    placeholder="Password" style={{"marginBottom": "10px", "width": "100%"}} />
-                <button class="btn-add" onClick={handleAuth} style={{"width": "100%", "marginBottom": "10px"}}>
+    if not isLoggedIn {
+        return
+            <div class="container">
+                <h1>
+                    {("Sign Up" if isSignup else "Log In")}
+                </h1>
+                {(
+                    <div style={{"color": "red", "marginBottom": "10px"}}>
+                        {error}
+                    </div>
+                )
+                if error
+                else None}
+                <input
+                    class="input"
+                    value={username}
+                    onChange={lambda e: any  -> None { username = e.target.value;}}
+                    placeholder="Username"
+                    style={{"marginBottom": "10px", "width": "100%"}}
+                />
+                <input
+                    class="input"
+                    type="password"
+                    value={password}
+                    onChange={lambda e: any  -> None { password = e.target.value;}}
+                    placeholder="Password"
+                    style={{"marginBottom": "10px", "width": "100%"}}
+                />
+                <button
+                    class="btn-add"
+                    onClick={handleAuth}
+                    style={{"width": "100%", "marginBottom": "10px"}}
+                >
                     {("Sign Up" if isSignup else "Log In")}
                 </button>
                 <div style={{"textAlign": "center"}}>
-                    <span onClick={lambda -> None { isSignup = not isSignup; error = ""; }} style={{"cursor": "pointer", "color": "#4CAF50"}}>
-                        {("Already have an account? Log In" if isSignup else "Need an account? Sign Up")}
+                    <span
+                        onClick={lambda -> None { isSignup = not isSignup;error = "";}}
+                        style={{"cursor": "pointer", "color": "#4CAF50"}}
+                    >
+                        {(
+                            "Already have an account? Log In"
+                            if isSignup
+                            else "Need an account? Sign Up"
+                        )}
                     </span>
                 </div>
             </div>;
-        }
+    }
 
-        return <div class="container">
-            <div style={{"display": "flex", "justifyContent": "space-between", "alignItems": "center", "marginBottom": "20px"}}>
-                <h1 style={{"margin": "0"}}>AI Todo App</h1>
-                <button onClick={handleLogout} style={{"padding": "8px 16px", "background": "#f0f0f0", "border": "1px solid #ddd", "borderRadius": "4px", "cursor": "pointer"}}>Log Out</button>
+    return
+        <div class="container">
+            <div
+                style={{
+                    "display": "flex",
+                    "justifyContent": "space-between",
+                    "alignItems": "center",
+                    "marginBottom": "20px"
+                }}
+            >
+                <h1 style={{"margin": "0"}}>
+                    AI Todo App
+                </h1>
+                <button
+                    onClick={handleLogout}
+                    style={{
+                        "padding": "8px 16px",
+                        "background": "#f0f0f0",
+                        "border": "1px solid #ddd",
+                        "borderRadius": "4px",
+                        "cursor": "pointer"
+                    }}
+                >
+                    Log Out
+                </button>
             </div>
             <div class="input-row">
-                <input class="input" value={text} onChange={lambda e: any -> None { text = e.target.value; }}
-                    onKeyPress={lambda e: any -> None { if e.key == "Enter" { add(); }}}
-                    placeholder="What needs to be done?" />
-                <button class="btn-add" onClick={add}>Add</button>
+                <input
+                    class="input"
+                    value={text}
+                    onChange={lambda e: any  -> None { text = e.target.value;}}
+                    onKeyPress={lambda e: any  -> None { if e.key == "Enter" {
+                        add();
+                    }}}
+                    placeholder="What needs to be done?"
+                />
+                <button class="btn-add" onClick={add}>
+                    Add
+                </button>
             </div>
-            {[<div key={t.id} class="todo-item">
-                <input type="checkbox" checked={t.done} onChange={lambda -> None { toggle(t.id); }} />
-                <span class={"todo-title " + ("todo-done" if t.done else "")}>{t.title}</span>
-                <span class="category">{t.category}</span>
-                <button class="btn-delete" onClick={lambda -> None { remove(t.id); }}>X</button>
-            </div> for t in items]}
+            {[
+                <div key={t.id} class="todo-item">
+                    <input
+                        type="checkbox"
+                        checked={t.done}
+                        onChange={lambda -> None { toggle(t.id);}}
+                    />
+                    <span class={"todo-title " + ("todo-done" if t.done else "")}>
+                        {t.title}
+                    </span>
+                    <span class="category">
+                        {t.category}
+                    </span>
+                    <button
+                        class="btn-delete"
+                        onClick={lambda -> None { remove(t.id);}}
+                    >
+                        X
+                    </button>
+                </div> for t in items
+            ]}
         </div>;
-    }
 }
 ```
 
@@ -499,6 +645,7 @@ Now create accounts and see each user has their own todo list!
 | `with Todo entry` | Ability triggered when entering Todo node |
 | `root spawn Walker()` | Start walker at graph root |
 | `report` | Return data from walker |
+| `can with [deps] entry` | Ability triggered when dependencies change (like useEffect) |
 | `jacLogin/jacSignup` | Built-in authentication utilities |
 
 ---
