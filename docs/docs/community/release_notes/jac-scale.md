@@ -4,7 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.1.6 (Unreleased)
 
--**support horizontal scaling**:  based on average cpu usage k8s pods are horizontally scaled
+- **support horizontal scaling**:  based on average cpu usage k8s pods are horizontally scaled
 
 ## jac-scale 0.1.5 (Latest Release)
 
