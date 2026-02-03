@@ -158,6 +158,19 @@ def test_deploy_all_in_one():
         f"✓ Deployment status: {status.status.value}, replicas: {status.replicas}/{status.ready_replicas}"
     )
 
+    # Validate HPA was created with correct configuration
+    autoscaling_v2 = client.AutoscalingV2Api()
+    hpa = autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(
+        name=f"{app_name}-hpa", namespace=namespace
+    )
+    assert hpa.metadata.name == f"{app_name}-hpa"
+    assert hpa.spec.min_replicas == 1
+    assert hpa.spec.max_replicas == 3
+    assert hpa.spec.metrics[0].resource.target.average_utilization == 50
+    print(
+        f"✓ HPA verified: min_replicas={hpa.spec.min_replicas}, max_replicas={hpa.spec.max_replicas}, cpu_target=50%"
+    )
+
     # Send POST request to create a todo (with retry for 503)
     url = f"http://localhost:{node_port}/walker/create_todo"
     payload = {"text": "first-task"}
@@ -185,6 +198,15 @@ def test_deploy_all_in_one():
     try:
         core_v1.read_namespaced_service(f"{app_name}-service", namespace=namespace)
         raise AssertionError("Service should have been deleted")
+    except ApiException as e:
+        assert e.status == 404, f"Expected 404, got {e.status}"
+
+    try:
+        autoscaling_v2 = client.AutoscalingV2Api()
+        autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(
+            name=f"{app_name}-hpa", namespace=namespace
+        )
+        raise AssertionError("HPA should have been deleted")
     except ApiException as e:
         assert e.status == 404, f"Expected 404, got {e.status}"
 

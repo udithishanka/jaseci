@@ -26,6 +26,7 @@ import from jac_scale.providers.database.kubernetes_mongo { KubernetesMongoProvi
 import from jac_scale.providers.database.kubernetes_redis { KubernetesRedisProvider }
 import from jac_scale.factories.database_factory { DatabaseProviderFactory }
 import from jac_scale.factories.registry_factory { ImageRegistryFactory }
+import from jac_scale.targets.kubernetes.hpa.hpa { create_hpa }
 import time;
 import from kubernetes { client, config as k8s_config }
 import from kubernetes.client.exceptions { ApiException }
@@ -650,6 +651,15 @@ class KubernetesTarget(DeploymentTarget) {
         self._wait_for_deployment(app_name, namespace, health_check_path, is_aws);
         service_url = self.get_service_url(app_name);
 
+        # 16. Enable horizontal pod autoscaling
+        create_hpa(
+            namespace=namespace,
+            deployment_name=app_name,
+            min_replicas=1,
+            max_replicas=3,
+            cpu_target=50
+        );
+
         if self.logger {
             self.logger.info(
                 f"Deployment complete for '{app_name}'", {'service_url': service_url}
@@ -842,7 +852,16 @@ class KubernetesTarget(DeploymentTarget) {
             k8s_config.load_kube_config();
             apps_v1 = client.AppsV1Api();
             core_v1 = client.CoreV1Api();
+            autoscaling_v2 = client.AutoscalingV2Api();
             namespace = self.k8s_config.namespace;
+
+            # Delete HPA
+            delete_if_exists(
+                autoscaling_v2.delete_namespaced_horizontal_pod_autoscaler,
+                f"{app_name}-hpa",
+                namespace,
+                'HorizontalPodAutoscaler'
+            );
 
             # Delete main deployment and service
             delete_if_exists(

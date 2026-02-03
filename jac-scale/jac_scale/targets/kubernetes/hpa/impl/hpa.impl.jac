@@ -38,13 +38,8 @@ impl create_hpa(
         autoscaling_v2.create_namespaced_horizontal_pod_autoscaler(
             namespace=namespace, body=hpa
         );
-        print(
-            f"HPA created for Deployment '{deployment_name}' (CPU target: {cpu_target}%)"
-        );
     } except ApiException as e {
-        if (e.status == 409) {
-            print(f"HPA for '{deployment_name}' already exists, skipping creation.");
-        } else {
+        if (e.status != 409) {
             raise ;
         }
     }
