@@ -180,10 +180,18 @@ impl JacScaleConfig.get_metrics_config(self: JacScaleConfig) -> dict[str, Any] {
         5.0,
         10.0
     ];
+    # Derive namespace from kubernetes config if not explicitly set
+    namespace = metrics_config.get('namespace');
+    if not namespace {
+        k8s_config = config.get('kubernetes', {});
+        k8s_namespace = k8s_config.get('namespace', 'jac_scale');
+        # Convert to Prometheus-compatible format (replace hyphens with underscores)
+        namespace = k8s_namespace.replace('-', '_');
+    }
     return {
         'enabled': metrics_config.get('enabled', False),
         'endpoint': metrics_config.get('endpoint', '/metrics'),
-        'namespace': metrics_config.get('namespace', 'jac_scale'),
+        'namespace': namespace,
         'walker_metrics': metrics_config.get('walker_metrics', False),
         'histogram_buckets': metrics_config.get('histogram_buckets', default_buckets)
     };
