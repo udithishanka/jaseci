@@ -161,6 +161,26 @@ impl JacScaleConfig.get_webhook_config(self: JacScaleConfig) -> dict[str, Any] {
     };
 }
 
+"""Sanitize a string to be a valid Prometheus metric namespace.
+
+Prometheus metric names must match [a-zA-Z_:][a-zA-Z0-9_:]*.
+This converts any invalid characters and ensures a valid prefix.
+"""
+impl sanitize_prometheus_namespace(name: str) -> str {
+    import re;
+    # Replace any non-alphanumeric characters with underscores
+    sanitized = re.sub(r'[^a-zA-Z0-9]', '_', name);
+    # Collapse multiple consecutive underscores
+    sanitized = re.sub(r'_+', '_', sanitized);
+    # Strip leading/trailing underscores
+    sanitized = sanitized.strip('_');
+    # Prefix with underscore if starts with digit
+    if sanitized and sanitized[0].isdigit() {
+        sanitized = f"_{sanitized}";
+    }
+    return sanitized or 'jac_scale';
+}
+
 """Get metrics configuration from jac.toml."""
 impl JacScaleConfig.get_metrics_config(self: JacScaleConfig) -> dict[str, Any] {
     config = self.load();
@@ -183,10 +203,9 @@ impl JacScaleConfig.get_metrics_config(self: JacScaleConfig) -> dict[str, Any] {
     # Derive namespace from kubernetes config if not explicitly set
     namespace = metrics_config.get('namespace');
     if not namespace {
-        k8s_config = config.get('kubernetes', {});
-        k8s_namespace = k8s_config.get('namespace', 'jac_scale');
-        # Convert to Prometheus-compatible format (replace hyphens with underscores)
-        namespace = k8s_namespace.replace('-', '_');
+        k8s_config = self.get_kubernetes_config();
+        k8s_namespace = k8s_config.get('namespace', 'default');
+        namespace = sanitize_prometheus_namespace(k8s_namespace);
     }
     return {
         'enabled': metrics_config.get('enabled', False),
