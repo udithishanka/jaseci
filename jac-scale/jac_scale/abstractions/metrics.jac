@@ -51,7 +51,6 @@ This ensures zero overhead when metrics are not needed.
 """
 class NoOpMetricsCollector(MetricsCollector) {
     def init(self: NoOpMetricsCollector, config: dict[str, Any] = {}) -> None { }
-
     def record_request(
         self: NoOpMetricsCollector,
         method: str,
@@ -61,9 +60,7 @@ class NoOpMetricsCollector(MetricsCollector) {
     ) -> None { }
 
     def request_started(self: NoOpMetricsCollector) -> None { }
-
     def request_finished(self: NoOpMetricsCollector) -> None { }
-
     def record_walker(
         self: NoOpMetricsCollector,
         walker_name: str,
@@ -72,7 +69,7 @@ class NoOpMetricsCollector(MetricsCollector) {
     ) -> None { }
 
     def get_endpoint_handler(self: NoOpMetricsCollector) -> Callable[..., Any] {
-        def noop() -> None { }
+        def noop -> None { }
         return noop;
     }
 

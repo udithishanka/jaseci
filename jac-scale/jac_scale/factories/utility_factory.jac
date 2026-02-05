@@ -51,7 +51,9 @@ class UtilityFactory {
         }
 
         if metrics_type == 'prometheus' {
-            import from jac_scale.utilities.metrics.prometheus_metrics { PrometheusMetricsCollector }
+            import from jac_scale.utilities.metrics.prometheus_metrics {
+                PrometheusMetricsCollector
+            }
             return PrometheusMetricsCollector(config=config);
         } elif metrics_type == 'none' {
             return NoOpMetricsCollector();

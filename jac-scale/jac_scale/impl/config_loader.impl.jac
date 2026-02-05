@@ -66,7 +66,21 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'endpoint': '/metrics',
             'namespace': 'jac_scale',
             'walker_metrics': False,
-            'histogram_buckets': [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0]
+            'histogram_buckets': [
+                0.005,
+                0.01,
+                0.025,
+                0.05,
+                0.075,
+                0.1,
+                0.25,
+                0.5,
+                0.75,
+                1.0,
+                2.5,
+                5.0,
+                10.0
+            ]
         }
     };
 }
@@ -151,7 +165,21 @@ impl JacScaleConfig.get_webhook_config(self: JacScaleConfig) -> dict[str, Any] {
 impl JacScaleConfig.get_metrics_config(self: JacScaleConfig) -> dict[str, Any] {
     config = self.load();
     metrics_config = config.get('metrics', {});
-    default_buckets = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0];
+    default_buckets = [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        10.0
+    ];
     return {
         'enabled': metrics_config.get('enabled', False),
         'endpoint': metrics_config.get('endpoint', '/metrics'),

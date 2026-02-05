@@ -17,9 +17,22 @@ import from prometheus_client {
 import from fastapi.responses { Response }
 
 # Default histogram buckets (in seconds) - optimized for typical web latencies
-glob DEFAULT_BUCKETS: tuple = (
-    0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0
-);
+glob DEFAULT_BUCKETS:
+         tuple = (
+         0.005,
+         0.01,
+         0.025,
+         0.05,
+         0.075,
+         0.1,
+         0.25,
+         0.5,
+         0.75,
+         1.0,
+         2.5,
+         5.0,
+         10.0
+     );
 
 """Prometheus-based metrics collector.
 
@@ -107,7 +120,9 @@ class PrometheusMetricsCollector(MetricsCollector) {
         self._request_count.labels(
             method=method, path=path, status_code=str(status_code)
         ).inc();
-        self._request_latency.labels(method=method, path=path).observe(duration_seconds);
+        self._request_latency.labels(method=method, path=path).observe(
+            duration_seconds
+        );
     }
 
     def request_started(self: PrometheusMetricsCollector) -> None {
@@ -131,16 +146,17 @@ class PrometheusMetricsCollector(MetricsCollector) {
         if self._enabled and self._walker_latency {
             self._walker_latency.labels(
                 walker_name=walker_name, success=str(success).lower()
-            ).observe(duration_seconds);
+            ).observe(
+                duration_seconds
+            );
         }
     }
 
     def get_endpoint_handler(self: PrometheusMetricsCollector) -> Callable[..., Any] {
         registry = self._registry;
-        def metrics_endpoint() -> Response {
+        def metrics_endpoint -> Response {
             return Response(
-                content=generate_latest(registry),
-                media_type=CONTENT_TYPE_LATEST
+                content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST
             );
         }
         return metrics_endpoint;
