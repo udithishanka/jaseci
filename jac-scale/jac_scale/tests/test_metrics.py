@@ -163,7 +163,9 @@ class TestMetricsInterface:
 
     def test_prometheus_implements_interface(self):
         """PrometheusMetricsCollector should implement all interface methods."""
-        collector = PrometheusMetricsCollector(config={"enabled": True, "namespace": "iface_test"})
+        collector = PrometheusMetricsCollector(
+            config={"enabled": True, "namespace": "iface_test"}
+        )
         assert hasattr(collector, "init")
         assert hasattr(collector, "record_request")
         assert hasattr(collector, "request_started")
