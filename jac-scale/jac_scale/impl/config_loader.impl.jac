@@ -60,6 +60,13 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'signature_header': 'X-Webhook-Signature',
             'verify_signature': True,
             'api_key_expiry_days': 365
+        },
+        'metrics': {
+            'enabled': False,
+            'endpoint': '/metrics',
+            'namespace': 'jac_scale',
+            'walker_metrics': False,
+            'histogram_buckets': [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0]
         }
     };
 }
@@ -137,6 +144,20 @@ impl JacScaleConfig.get_webhook_config(self: JacScaleConfig) -> dict[str, Any] {
         ),
         'verify_signature': webhook_config.get('verify_signature', True),
         'api_key_expiry_days': int(webhook_config.get('api_key_expiry_days', 365))
+    };
+}
+
+"""Get metrics configuration from jac.toml."""
+impl JacScaleConfig.get_metrics_config(self: JacScaleConfig) -> dict[str, Any] {
+    config = self.load();
+    metrics_config = config.get('metrics', {});
+    default_buckets = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0];
+    return {
+        'enabled': metrics_config.get('enabled', False),
+        'endpoint': metrics_config.get('endpoint', '/metrics'),
+        'namespace': metrics_config.get('namespace', 'jac_scale'),
+        'walker_metrics': metrics_config.get('walker_metrics', False),
+        'histogram_buckets': metrics_config.get('histogram_buckets', default_buckets)
     };
 }
 

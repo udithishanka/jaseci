@@ -27,6 +27,7 @@ import from fastapi_sso.sso.google { GoogleSSO }
 import from jac_scale.utils { generate_random_password }
 import from jac_scale.config_loader { get_scale_config }
 import from jac_scale.webhook { ApiKeyManager, WebhookUtils }
+import from jac_scale.abstractions.metrics { MetricsCollector }
 import from typing { AsyncGenerator }
 import from inspect { isgenerator }
 import from fastapi.responses { StreamingResponse }
@@ -50,7 +51,8 @@ obj JacAPIServer(JServer) {
     # HMR (Hot Module Replacement) support fields
     has _hmr_pending: bool = False,
         _hot_reloader: Any | None = None,
-        _api_key_manager: ApiKeyManager | None = None;
+        _api_key_manager: ApiKeyManager | None = None,
+        _metrics: MetricsCollector | None = None;
 
     def postinit -> None;
     def login(username: str, password: str) -> TransportResponse;
