@@ -45,7 +45,7 @@ impl Model.invoke(mt_run: MTRuntime) -> object {
                 fresh_mt_run = MTRuntime.factory(mt_run.mtir);
                 return self._pool.invoke(fresh_mt_run);
             }
-            raise;
+            raise ;
         }
     }
     if self._mock_delegate {

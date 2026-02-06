@@ -21,7 +21,7 @@ impl ModelPool.postinit -> None {
     self._lock = threading.Lock();
     self._cooldown_until = {};
     if len(self.models) == 0 {
-        raise ValueError("ModelPool requires at least one model.");
+        raise ValueError("ModelPool requires at least one model.") ;
     }
 }
 
@@ -34,7 +34,6 @@ impl ModelPool.invoke(mt_run: MTRuntime) -> object {
     ordered_models = self._select_models_order();
     last_exception: Exception | None = None;
     is_first_attempt = True;
-
     for (idx, model) in ordered_models {
         for attempt in range(self.max_retries_per_model) {
             try {
@@ -60,30 +59,31 @@ impl ModelPool.invoke(mt_run: MTRuntime) -> object {
                         f"ModelPool: {model.model_name} failed "
                         f"(attempt {attempt + 1}/{self.max_retries_per_model}): "
                         f"{type(e).__name__}: {e}. "
-                        f"{'Retrying same model...' if attempt + 1 < self.max_retries_per_model else 'Falling back to next model...'}"
+                        f"{'Retrying same model...'
+                        if attempt + 1 < self.max_retries_per_model
+                        else 'Falling back to next model...'}"
                     );
                     if isinstance(e, RateLimitError) {
                         self._mark_cooldown(idx);
                     }
                 } else {
                     # Non-retriable error — raise immediately, no fallback
-                    raise;
+                    raise ;
                 }
             }
         }
     }
     # All models exhausted
     if last_exception is not None {
-        raise last_exception;
+        raise last_exception ;
     }
-    raise RuntimeError("All models in ModelPool are unavailable.");
+    raise RuntimeError("All models in ModelPool are unavailable.") ;
 }
 
 """Select model order based on strategy, skipping cooled-down models."""
 impl ModelPool._select_models_order -> list {
     result: list = [];
     n = len(self.models);
-
     if self.strategy == "round_robin" {
         with self._lock {
             start = self._current_index;
@@ -101,18 +101,23 @@ impl ModelPool._select_models_order -> list {
             }
         }
     } else {
-        raise ValueError(f"Unknown ModelPool strategy: '{self.strategy}'. Use 'fallback' or 'round_robin'.");
+        raise ValueError(
+            f"Unknown ModelPool strategy: '{self.strategy}'. Use 'fallback' or 'round_robin'."
+        ) ;
     }
-
     # If all models are cooled down, try them all anyway
     # (cooldowns may expire during execution)
     if len(result) == 0 {
-        logger.warning("ModelPool: All models are cooled down. Trying all models anyway.");
+        logger.warning(
+            "ModelPool: All models are cooled down. Trying all models anyway."
+        );
         if self.strategy == "round_robin" {
             with self._lock {
                 start = self._current_index;
             }
-            result = [((start + i) % n, self.models[(start + i) % n]) for i in range(n)];
+            result = [
+                ((start + i) % n, self.models[(start + i) % n]) for i in range(n)
+            ];
         } else {
             result = [(idx, self.models[idx]) for idx in range(n)];
         }
@@ -140,11 +145,15 @@ impl ModelPool._mark_cooldown(index: int) -> None {
 
 """Check if an exception is retriable (transient errors only)."""
 impl ModelPool._is_retriable(exc: Exception) -> bool {
-    return isinstance(exc, (
-        RateLimitError,
-        ServiceUnavailableError,
-        APIConnectionError,
-        Timeout,
-        InternalServerError,
-    ));
+    return isinstance(
+        exc,
+        (
+            RateLimitError,
+            ServiceUnavailableError,
+            APIConnectionError,
+            Timeout,
+            InternalServerError,
+
+        )
+    );
 }

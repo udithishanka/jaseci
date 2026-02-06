@@ -80,7 +80,10 @@ impl BaseLLM.make_model_params(mt_run: MTRuntime) -> dict {
     default_max_tokens = _call_params_config.get("max_tokens");
     params = {
         "model": self.model_name,
-        "api_key": self.api_key or self.config.get("api_key") or _model_config.get("api_key") or None,
+        "api_key": self.api_key
+        or self.config.get("api_key")
+        or _model_config.get("api_key")
+        or None,
         "api_base": (
             self.config.get("base_url")
             or self.config.get("host")

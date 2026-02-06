@@ -5,7 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## byllm 0.4.18 (Unreleased)
 
 - **ModelPool for LLM Fallback & Load-Balancing**: Introduced `ModelPool` class that wraps multiple `BaseLLM` instances with configurable fallback strategies (`"fallback"` ordered priority, `"round_robin"` rotating). When a model hits a rate limit or transient error, the pool seamlessly falls back to the next available model. Includes automatic cooldown for rate-limited models, fresh `MTRuntime` per retry to avoid state pollution, and thread-safe operation. Also added a convenience `fallbacks` parameter on `Model` for simple use cases.
-- **API Key Passthrough Fix**: Fixed a bug where `Model(api_key=...)` was silently ignored — the `api_key` parameter is now correctly passed through to `litellm.completion()`.
+- **API Key Passthrough Fix**: Fixed a bug where `Model(api_key=...)` was silently ignored -- the `api_key` parameter is now correctly passed through to `litellm.completion()`.
 - **MockLLM Error Simulation**: `MockLLM` now supports error simulation via `config={"errors": [...]}` for testing fallback scenarios.
 
 ## byllm 0.4.17 (Latest Release)

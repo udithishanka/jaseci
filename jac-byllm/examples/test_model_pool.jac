@@ -4,14 +4,20 @@ import from byllm.lib { Model, ModelPool }
 
 # KEY1: free-tier key (will rate-limit quickly)
 # KEY2: paid key (fallback)
-glob llm1 = Model(model_name="gemini/gemini-2.5-flash", api_key=os.getenv("GEMINI_API_KEY_1", "")),
-     llm2 = Model(model_name="gemini/gemini-2.5-flash", api_key=os.getenv("GEMINI_API_KEY_2", "")),
+glob llm1 = Model(
+         model_name="gemini/gemini-2.5-flash",
+         api_key=os.getenv("GEMINI_API_KEY_1", "")
+     ),
+     llm2 = Model(
+         model_name="gemini/gemini-2.5-flash",
+         api_key=os.getenv("GEMINI_API_KEY_2", "")
+     ),
      pool = ModelPool(models=[llm1, llm2], strategy="fallback", cooldown_seconds=30.0);
 
 def answer(question: str) -> str by pool();
 
+# Fire 60 rapid requests to try to hit the free-tier rate limit
 with entry {
-    # Fire 60 rapid requests to try to hit the free-tier rate limit
     for i in range(60) {
         try {
             result = answer(f"Say just the number {i}. Nothing else.");

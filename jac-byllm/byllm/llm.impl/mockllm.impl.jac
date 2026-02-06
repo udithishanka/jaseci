@@ -20,7 +20,7 @@ impl MockLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
     if errors and len(errors) > 0 {
         error = errors.pop(0);
         if error is not None {
-            raise error;
+            raise error ;
         }
     }
     params = self.make_model_params(mt_run);
