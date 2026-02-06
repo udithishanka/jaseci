@@ -86,7 +86,7 @@ impl ModelPool._select_models_order -> list {
     n = len(self.models);
     if self.strategy == "round_robin" {
         with self._lock {
-            start = self._current_index;
+            start: int = self._current_index;
         }
         for i in range(n) {
             idx = (start + i) % n;
@@ -113,7 +113,7 @@ impl ModelPool._select_models_order -> list {
         );
         if self.strategy == "round_robin" {
             with self._lock {
-                start = self._current_index;
+                start: int = self._current_index;
             }
             result = [
                 ((start + i) % n, self.models[(start + i) % n]) for i in range(n)

@@ -16,8 +16,8 @@ before processing output — useful for testing ModelPool fallback.
 """
 impl MockLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
     # Error simulation for ModelPool testing
-    errors = self.config.get("errors");
-    if errors and len(errors) > 0 {
+    errors: list | None = self.config.get("errors");
+    if errors is not None and len(errors) > 0 {
         error = errors.pop(0);
         if error is not None {
             raise error ;
