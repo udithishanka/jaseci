@@ -78,6 +78,32 @@ obj MockLLM(BaseLLM) {
     override def dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None];
 }
 
+"""Pool of LLM models with fallback and load-balancing strategies.
+
+Manages multiple BaseLLM instances and provides resilient invocation
+with automatic failover on retriable errors like rate limits.
+Strategies: 'fallback' (ordered) or 'round_robin' (rotating).
+"""
+obj ModelPool {
+    has models: list[BaseLLM],
+        strategy: str = "fallback",
+        max_retries_per_model: int = 1,
+        cooldown_seconds: float = 60.0,
+        call_params: dict[(str, object)] = {};
+
+    has _current_index: int = 0,
+        _cooldown_until: dict[(int, float)] = {},
+        _lock: object = None;
+
+    def postinit -> None;
+    def __call__(**kwargs: object) -> ModelPool;
+    def invoke(mt_run: MTRuntime) -> object;
+    def _select_models_order -> list;
+    def _is_cooled_down(index: int) -> bool;
+    def _mark_cooldown(index: int) -> None;
+    def _is_retriable(exc: Exception) -> bool;
+}
+
 """Primary LLM connector that abstracts LiteLLM functionality.
 
 Provides a unified interface for interacting with various language models
@@ -88,7 +114,9 @@ is 'mockllm'.
 obj Model(BaseLLM) {
     has proxy: bool = False,
         http_client: bool = False,
-        _mock_delegate: MockLLM | None = None;
+        _mock_delegate: MockLLM | None = None,
+        fallbacks: list[BaseLLM] = [],
+        _pool: ModelPool | None = None;
 
     def postinit -> None;
     override def invoke(mt_run: MTRuntime) -> object;

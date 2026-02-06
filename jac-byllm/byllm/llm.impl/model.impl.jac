@@ -19,12 +19,34 @@ impl Model.postinit -> None {
         # Use drop_params from config
         litellm.drop_params = _litellm_config.get("drop_params", True);
     }
+    # If fallbacks provided, create a ModelPool with ONLY the fallback models.
+    # Self is tried first in invoke(), then the pool is used on retriable failure.
+    # This avoids infinite recursion (self -> pool -> self -> pool -> ...).
+    if len(self.fallbacks) > 0 {
+        self._pool = ModelPool(models=self.fallbacks);
+    }
 }
 
 """Invoke the LLM, delegating to MockLLM if applicable."""
 impl Model.invoke(mt_run: MTRuntime) -> object {
     if self._mock_delegate {
         return self._mock_delegate.invoke(mt_run);
+    }
+    if self._pool {
+        # Try self first, then fall back to pool on retriable error
+        try {
+            return super.invoke(mt_run);
+        } except Exception as e {
+            if self._pool._is_retriable(e) {
+                logger.warning(
+                    f"ModelPool: Primary model {self.model_name} failed: "
+                    f"{type(e).__name__}: {e}. Trying fallbacks..."
+                );
+                fresh_mt_run = MTRuntime.factory(mt_run.mtir);
+                return self._pool.invoke(fresh_mt_run);
+            }
+            raise;
+        }
     }
     return super.invoke(mt_run);
 }

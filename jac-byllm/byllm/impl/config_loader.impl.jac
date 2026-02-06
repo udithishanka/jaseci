@@ -26,6 +26,11 @@ impl JacByllmConfig.get_default_config(self: JacByllmConfig) -> dict[str, Any] {
         },
         'call_params': {'temperature': 0.7, 'max_tokens': 0},
         'litellm': {'local_cost_map': True, 'drop_params': True},
+        'fallback': {
+            'strategy': 'fallback',
+            'max_retries_per_model': 1,
+            'cooldown_seconds': 60.0
+        },
         'system_prompt': ''
     };
 }
@@ -64,6 +69,17 @@ impl JacByllmConfig.get_litellm_config(self: JacByllmConfig) -> dict[str, Any] {
     return {
         'local_cost_map': bool(litellm_config.get('local_cost_map', True)),
         'drop_params': bool(litellm_config.get('drop_params', True))
+    };
+}
+
+"""Get fallback/resilience configuration from jac.toml."""
+impl JacByllmConfig.get_fallback_config(self: JacByllmConfig) -> dict[str, Any] {
+    config = self.load();
+    fallback_config = config.get('fallback', {});
+    return {
+        'strategy': fallback_config.get('strategy', 'fallback'),
+        'max_retries_per_model': int(fallback_config.get('max_retries_per_model', 1)),
+        'cooldown_seconds': float(fallback_config.get('cooldown_seconds', 60.0))
     };
 }
 

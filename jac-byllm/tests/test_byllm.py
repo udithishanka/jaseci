@@ -394,3 +394,44 @@ def test_max_react_iterations(fixture_path: Callable[[str], str]) -> None:
         "Based on the tool calls and their results above, provide only your final answer."
         in stdout_value
     )
+
+
+def test_model_pool_fallback(fixture_path: Callable[[str], str]) -> None:
+    """Test ModelPool fallback: first model errors with RateLimitError, second succeeds."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import("model_pool_fallback", base_path=fixture_path("./"))
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "fallback_success" in stdout_value
+
+
+def test_model_pool_round_robin(fixture_path: Callable[[str], str]) -> None:
+    """Test ModelPool round-robin: alternates between models across calls."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import("model_pool_round_robin", base_path=fixture_path("./"))
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "response_from_model_1" in stdout_value
+    assert "response_from_model_2" in stdout_value
+
+
+def test_model_pool_all_fail(fixture_path: Callable[[str], str]) -> None:
+    """Test ModelPool when all models fail — should raise the last exception."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import("model_pool_all_fail", base_path=fixture_path("./"))
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "EXPECTED_ERROR: RateLimitError" in stdout_value
+
+
+def test_model_fallbacks_convenience(fixture_path: Callable[[str], str]) -> None:
+    """Test Model with fallbacks parameter — convenience API."""
+    captured_output = io.StringIO()
+    sys.stdout = captured_output
+    jac_import("model_fallbacks_convenience", base_path=fixture_path("./"))
+    sys.stdout = sys.__stdout__
+    stdout_value = captured_output.getvalue()
+    assert "fallback_via_convenience" in stdout_value

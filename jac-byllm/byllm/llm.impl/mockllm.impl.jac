@@ -11,8 +11,18 @@ impl MockLLM.postinit -> None {
 
 Pops the next output from the configured 'outputs' list and returns it.
 Supports both regular outputs and MockToolCall objects.
+If config["errors"] is set, pops and raises the next error (if non-None)
+before processing output — useful for testing ModelPool fallback.
 """
 impl MockLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
+    # Error simulation for ModelPool testing
+    errors = self.config.get("errors");
+    if errors and len(errors) > 0 {
+        error = errors.pop(0);
+        if error is not None {
+            raise error;
+        }
+    }
     params = self.make_model_params(mt_run);
     message = "{'role': 'assistant', 'content': {'text': 'Mock response'}}";
     mt_run.add_message(message);
