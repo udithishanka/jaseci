@@ -29,12 +29,12 @@ impl Model.postinit -> None {
 
 """Invoke the LLM, delegating to MockLLM if applicable."""
 impl Model.invoke(mt_run: MTRuntime) -> object {
-    if self._mock_delegate {
-        return self._mock_delegate.invoke(mt_run);
-    }
     if self._pool {
-        # Try self first, then fall back to pool on retriable error
+        # Try primary (mock delegate or real LLM) first, then fall back to pool
         try {
+            if self._mock_delegate {
+                return self._mock_delegate.invoke(mt_run);
+            }
             return super.invoke(mt_run);
         } except Exception as e {
             if self._pool._is_retriable(e) {
@@ -47,6 +47,9 @@ impl Model.invoke(mt_run: MTRuntime) -> object {
             }
             raise;
         }
+    }
+    if self._mock_delegate {
+        return self._mock_delegate.invoke(mt_run);
     }
     return super.invoke(mt_run);
 }

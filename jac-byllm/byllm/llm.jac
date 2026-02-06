@@ -89,9 +89,8 @@ obj ModelPool {
         strategy: str = "fallback",
         max_retries_per_model: int = 1,
         cooldown_seconds: float = 60.0,
-        call_params: dict[(str, object)] = {};
-
-    has _current_index: int = 0,
+        call_params: dict[(str, object)] = {},
+        _current_index: int = 0,
         _cooldown_until: dict[(int, float)] = {},
         _lock: object = None;
 
