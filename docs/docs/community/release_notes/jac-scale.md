@@ -5,7 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.1.8 (Unreleased)
 
 - **Code refactors**: Backtick escape, etc.
-- **Native Kubernetes Secret support**: Added `[plugins.scale.kubernetes.secrets]` config section for declaring environment variable secrets with `${ENV_VAR}` syntax. Secrets are auto-resolved from the environment at deploy time and created as a proper K8s Secret with `envFrom.secretRef`, eliminating post-deployment `kubectl patch` workarounds in CI/CD.
+- **Native Kubernetes Secret support**: New `[plugins.scale.secrets]` config section. Declare secrets with `${ENV_VAR}` syntax, auto-resolved at deploy time into a K8s Secret with `envFrom.secretRef`.
 
 ## jac-scale 0.1.7 (Latest Release)
 
