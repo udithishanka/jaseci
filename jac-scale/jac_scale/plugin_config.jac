@@ -177,6 +177,7 @@ class JacScalePluginConfig {
                                 }
                             }
                         },
+
                     }
                 },
                 "secrets": {

@@ -14,6 +14,7 @@ from kubernetes.client.exceptions import ApiException
 from pytest import MonkeyPatch
 
 from jac_scale.config_loader import JacScaleConfig, reset_scale_config
+from jac_scale.targets.kubernetes.kubernetes_target import KubernetesTarget
 from jac_scale.targets.kubernetes.utils.kubernetes_utils import (
     create_k8s_secret,
     delete_k8s_secret,
@@ -176,7 +177,7 @@ class TestGetSecretsConfig:
 class TestContainerConfigSecretInjection:
     """Tests that _build_container_config correctly adds envFrom.secretRef."""
 
-    def _create_target(self) -> object:
+    def _create_target(self) -> KubernetesTarget:
         """Create a KubernetesTarget with minimal config."""
         from jac_scale.factories.deployment_factory import DeploymentTargetFactory
         from jac_scale.factories.utility_factory import UtilityFactory
