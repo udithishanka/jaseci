@@ -52,9 +52,9 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'readiness_period': 20,
             'liveness_initial_delay': 10,
             'liveness_period': 20,
-            'liveness_failure_threshold': 80,
-            'secrets': {}
+            'liveness_failure_threshold': 80
         },
+        'secrets': {},
         'server': {'port': 8000, 'host': '0.0.0.0'},
         'webhook': {
             'secret': 'webhook-secret-key',
@@ -141,13 +141,13 @@ impl JacScaleConfig.get_webhook_config(self: JacScaleConfig) -> dict[str, Any] {
     };
 }
 
-"""Get secrets from [plugins.scale.kubernetes.secrets] section.
+"""Get secrets from [plugins.scale.secrets] section.
 
 Values using ${ENV_VAR} syntax are auto-resolved by core's interpolate_env_vars.
 """
 impl JacScaleConfig.get_secrets_config(self: JacScaleConfig) -> dict[str, str] {
     config = self.load();
-    return config.get('kubernetes', {}).get('secrets', {});
+    return config.get('secrets', {});
 }
 
 """Get or create the global JacScaleConfig instance."""

@@ -177,12 +177,12 @@ class JacScalePluginConfig {
                                 }
                             }
                         },
-                        "secrets": {
-                            "type": "dict",
-                            "default": {},
-                            "description": "Environment variable secrets for K8s deployment. Values use ${ENV_VAR} syntax, resolved at deploy time and created as a K8s Secret with envFrom.secretRef."
-                        }
                     }
+                },
+                "secrets": {
+                    "type": "dict",
+                    "default": {},
+                    "description": "Environment variable secrets for K8s deployment. Values use ${ENV_VAR} syntax, resolved at deploy time and created as a K8s Secret with envFrom.secretRef."
                 },
                 "server": {
                     "type": "dict",
