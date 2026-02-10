@@ -3,6 +3,7 @@
 import base64
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -10,7 +11,7 @@ from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 
 from ..abstractions.config.app_config import AppConfig
-from ..config_loader import get_scale_config
+from ..config_loader import JacScaleConfig, get_scale_config
 from ..factories.deployment_factory import DeploymentTargetFactory
 from ..factories.utility_factory import UtilityFactory
 
@@ -104,8 +105,9 @@ def test_deploy_all_in_one():
         "kubernetes", target_config, logger
     )
 
-    # Load secrets from [plugins.scale.secrets] and pass to deployment target
-    deployment_target.secrets = scale_config.get_secrets_config()
+    # Load secrets from the app's [plugins.scale.secrets] (not CWD)
+    app_scale_config = JacScaleConfig(Path(os.path.normpath(todo_app_path)))
+    deployment_target.secrets = app_scale_config.get_secrets_config()
 
     # Create app config
     # Use experimental=True to install from repo (PyPI packages may not be available)
