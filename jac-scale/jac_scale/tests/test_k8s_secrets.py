@@ -19,7 +19,6 @@ from jac_scale.targets.kubernetes.utils.kubernetes_utils import (
     delete_k8s_secret,
 )
 
-
 # ==============================================================
 # create_k8s_secret
 # ==============================================================
@@ -151,9 +150,7 @@ class TestGetSecretsConfig:
 
         assert secrets["MY_API_KEY"] == "resolved-key-123"
 
-    def test_returns_empty_dict_when_no_secrets_section(
-        self, tmp_path: Path
-    ) -> None:
+    def test_returns_empty_dict_when_no_secrets_section(self, tmp_path: Path) -> None:
         """Returns {} when [plugins.scale.secrets] is absent (backward compatible)."""
         jac_toml = tmp_path / "jac.toml"
         jac_toml.write_text(
