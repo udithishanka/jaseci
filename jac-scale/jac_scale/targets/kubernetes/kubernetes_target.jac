@@ -13,6 +13,8 @@ import from jac_scale.targets.kubernetes.kubernetes_config { KubernetesConfig }
 import from jac_scale.targets.kubernetes.utils.kubernetes_utils {
     check_deployment_status,
     cluster_type,
+    create_k8s_secret,
+    delete_k8s_secret,
     delete_if_exists,
     check_K8s_status,
     ensure_namespace_exists,
@@ -32,7 +34,8 @@ import from kubernetes.client.exceptions { ApiException }
 
 """Kubernetes deployment target implementation."""
 class KubernetesTarget(DeploymentTarget) {
-    has k8s_config: KubernetesConfig;
+    has k8s_config: KubernetesConfig,
+        secrets: dict[str, str] = {};
 
     def init(
         self: KubernetesTarget,
@@ -42,6 +45,7 @@ class KubernetesTarget(DeploymentTarget) {
         self.config = config;
         self.k8s_config = config;
         self.env_list = [];
+        self.secrets = {};
         if logger {
             self.logger = logger;
         }
@@ -266,7 +270,8 @@ class KubernetesTarget(DeploymentTarget) {
         resources_config: dict[(str, Any)],
         command: (list[str] | None) = None,
         working_dir: (str | None) = None,
-        volume_mounts: (list[dict[(str, Any)]] | None) = None
+        volume_mounts: (list[dict[(str, Any)]] | None) = None,
+        secret_ref_name: (str | None) = None
     ) -> dict[(str, Any)] {
         container_config = {
             'name': app_name,
@@ -277,6 +282,11 @@ class KubernetesTarget(DeploymentTarget) {
             'livenessProbe': probe_configs['liveness']
         };
 
+        if secret_ref_name {
+            container_config['envFrom'] = [
+                {'secretRef': {'name': secret_ref_name}}
+            ];
+        }
         if command {
             container_config['command'] = command;
         }
@@ -542,6 +552,19 @@ class KubernetesTarget(DeploymentTarget) {
         # 3. Load environment variables
         self.env_list = load_env_variables(app_config.code_folder);
 
+        # 3b. Create K8s Secret from resolved secrets if configured
+        secret_ref_name: str | None = None;
+        if self.secrets {
+            secret_ref_name = f"{app_name}-secrets";
+            if create_k8s_secret(core_v1, namespace, secret_ref_name, self.secrets) {
+                if self.logger {
+                    self.logger.info(f"Created K8s Secret '{secret_ref_name}'");
+                }
+            } else {
+                secret_ref_name = None;
+            }
+        }
+
         # 4. Determine cluster type
         cluster_env = cluster_type();
         is_aws = cluster_env == 'aws';
@@ -565,7 +588,8 @@ class KubernetesTarget(DeploymentTarget) {
 
         # 9. Build container configuration
         container_config = self._build_container_config(
-            app_name, repository_name, probe_configs, resources_config
+            app_name, repository_name, probe_configs, resources_config,
+            secret_ref_name=secret_ref_name
         );
 
         # 10. Handle volumes and build container if not building image
@@ -587,7 +611,8 @@ class KubernetesTarget(DeploymentTarget) {
                 working_dir=self.k8s_config.app_mount_path,
                 volume_mounts=[
                     {'name': 'app-code', 'mountPath': self.k8s_config.app_mount_path}
-                ]
+                ],
+                secret_ref_name=secret_ref_name
             );
         }
 
@@ -851,6 +876,9 @@ class KubernetesTarget(DeploymentTarget) {
                 namespace,
                 'Service'
             );
+
+            # Delete K8s Secret if it exists
+            delete_k8s_secret(core_v1, namespace, f"{app_name}-secrets");
 
             # Delete databases
             self._destroy_databases(app_name, namespace, apps_v1, core_v1);
