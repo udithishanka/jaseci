@@ -545,7 +545,7 @@ impl create_k8s_secret(
                 name=secret_name, namespace=namespace, body=secret_body
             );
         } else {
-            raise;
+            raise ;
         }
     }
     return True;
@@ -553,15 +553,13 @@ impl create_k8s_secret(
 
 """Delete a Kubernetes Secret if it exists."""
 impl delete_k8s_secret(
-    core_v1: client.CoreV1Api,
-    namespace: str,
-    secret_name: str
+    core_v1: client.CoreV1Api, namespace: str, secret_name: str
 ) -> None {
     try {
         core_v1.delete_namespaced_secret(name=secret_name, namespace=namespace);
     } except ApiException as e {
         if e.status != 404 {
-            raise;
+            raise ;
         }
     }
 }

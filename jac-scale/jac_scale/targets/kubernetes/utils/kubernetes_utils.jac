@@ -36,9 +36,7 @@ def create_k8s_secret(
 ) -> bool;
 
 def delete_k8s_secret(
-    core_v1: client.CoreV1Api,
-    namespace: str,
-    secret_name: str
+    core_v1: client.CoreV1Api, namespace: str, secret_name: str
 ) -> None;
 
 def check_K8s_status -> None;

@@ -283,9 +283,7 @@ class KubernetesTarget(DeploymentTarget) {
         };
 
         if secret_ref_name {
-            container_config['envFrom'] = [
-                {'secretRef': {'name': secret_ref_name}}
-            ];
+            container_config['envFrom'] = [{'secretRef': {'name': secret_ref_name}}];
         }
         if command {
             container_config['command'] = command;
@@ -588,7 +586,10 @@ class KubernetesTarget(DeploymentTarget) {
 
         # 9. Build container configuration
         container_config = self._build_container_config(
-            app_name, repository_name, probe_configs, resources_config,
+            app_name,
+            repository_name,
+            probe_configs,
+            resources_config,
             secret_ref_name=secret_ref_name
         );
 
