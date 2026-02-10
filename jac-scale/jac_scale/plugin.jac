@@ -54,7 +54,7 @@ def _scale_pre_hook(context: HookContext) -> None {
         deployment_target = DeploymentTargetFactory.create(
             target, target_config, logger
         );
-        # Resolve secrets from [plugins.scale.secrets] config
+        # Resolve secrets from [plugins.scale.kubernetes.secrets] config
         deployment_target.secrets = scale_config.get_secrets_config();
         # Handle image registry if build is requested
         if build {
