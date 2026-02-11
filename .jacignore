@@ -244,6 +244,7 @@ start_screen.impl.jac
 stmt.impl.jac
 storage_factory.jac
 streaming_with_react.jac
+sub_app.jac
 stub_hover.impl.jac
 symtab_build.jac
 symtable_test_helpers.jac
