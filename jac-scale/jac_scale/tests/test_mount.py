@@ -9,7 +9,6 @@ import sys
 import time
 from pathlib import Path
 
-import pytest
 import requests
 
 
@@ -73,9 +72,7 @@ class TestMountSubApp:
         for _ in range(50):
             if cls.server_process.poll() is not None:
                 stdout, stderr = cls.server_process.communicate()
-                raise RuntimeError(
-                    f"Server died.\nSTDOUT: {stdout}\nSTDERR: {stderr}"
-                )
+                raise RuntimeError(f"Server died.\nSTDOUT: {stdout}\nSTDERR: {stderr}")
             try:
                 resp = requests.get(f"{cls.base_url}/docs", timeout=2)
                 if resp.status_code in (200, 404):
