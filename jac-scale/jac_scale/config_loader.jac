@@ -26,6 +26,7 @@ class JacScaleConfig(PluginConfigBase) {
     def get_webhook_config(self: JacScaleConfig) -> dict[str, Any];
     def get_secrets_config(self: JacScaleConfig) -> dict[str, str];
     def get_metrics_config(self: JacScaleConfig) -> dict[str, Any];
+    def get_mount_config(self: JacScaleConfig) -> dict[str, str];
 }
 
 glob _scale_config_instance: JacScaleConfig | None = None;

@@ -55,6 +55,7 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'liveness_failure_threshold': 80
         },
         'secrets': {},
+        'mount': {},
         'server': {'port': 8000, 'host': '0.0.0.0'},
         'webhook': {
             'secret': 'webhook-secret-key',
@@ -224,6 +225,16 @@ impl JacScaleConfig.get_metrics_config(self: JacScaleConfig) -> dict[str, Any] {
         'walker_metrics': metrics_config.get('walker_metrics', False),
         'histogram_buckets': metrics_config.get('histogram_buckets', default_buckets)
     };
+}
+
+"""Get mount configuration from [plugins.scale.mount] section.
+
+Each entry maps a URL path to a Python import string (e.g. 'my_module:app').
+The imported object is mounted as an ASGI sub-application on the FastAPI server.
+"""
+impl JacScaleConfig.get_mount_config(self: JacScaleConfig) -> dict[str, str] {
+    config = self.load();
+    return config.get('mount', {});
 }
 
 """Get or create the global JacScaleConfig instance."""
