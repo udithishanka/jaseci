@@ -129,12 +129,9 @@ impl JacAPIServer.start(dev: bool = False, no_client: bool = False) -> None {
     # Mount sub-applications from [plugins.scale.mount] in jac.toml
     mount_config = get_scale_config().get_mount_config();
     for mount_path in mount_config {
-        import_str = mount_config[mount_path];
-        parts = import_str.rsplit(':', 1);
-        module = importlib.import_module(parts[0]);
-        sub_app = getattr(module, parts[1]);
+        sub_app = import_from_string(mount_config[mount_path]);
         self.server.app.mount(mount_path, sub_app);
-        logger.info(f"Mounted '{import_str}' at {mount_path}");
+        logger.info(f"Mounted '{mount_config[mount_path]}' at {mount_path}");
     }
     self.user_manager.create_user('__guest__', '__no_password__');
     self.server.run_server(port=self.port);
