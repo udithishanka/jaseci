@@ -661,7 +661,9 @@ class KubernetesTarget(DeploymentTarget) {
             }
             if self.k8s_config.deployment_strategy == 'rolling' {
                 try {
-                    apps_v1.read_namespaced_deployment(name=app_name, namespace=namespace);
+                    apps_v1.read_namespaced_deployment(
+                        name=app_name, namespace=namespace
+                    );
                     apps_v1.replace_namespaced_deployment(
                         name=app_name, namespace=namespace, body=deployment
                     );
@@ -671,16 +673,21 @@ class KubernetesTarget(DeploymentTarget) {
                             namespace=namespace, body=deployment
                         );
                     } else {
-                        raise;
+                        raise ;
                     }
                 }
             } else {
                 delete_if_exists(
-                    apps_v1.delete_namespaced_deployment, app_name, namespace, 'Deployment'
+                    apps_v1.delete_namespaced_deployment,
+                    app_name,
+                    namespace,
+                    'Deployment'
                 );
                 details["delete_previous_existing_resources"] = "Successful";
                 time.sleep(self.k8s_config.resource_deletion_wait);
-                apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment);
+                apps_v1.create_namespaced_deployment(
+                    namespace=namespace, body=deployment
+                );
             }
             details["create_jaseci_application_deployment"] = "Successful";
             try {

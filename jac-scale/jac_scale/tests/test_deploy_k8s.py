@@ -322,6 +322,133 @@ def test_early_exit():
     assert result.success is False
 
 
+def test_deploy_rolling_strategy():
+    """
+    Test rolling deployment strategy.
+    Deploys the all-in-one app twice using rolling strategy and validates that:
+    - K8s deployment uses RollingUpdate strategy with maxSurge=1, maxUnavailable=0
+    - Second deploy uses replace (no delete step) and succeeds
+    - Application remains accessible after rolling update
+    """
+
+    # Load kubeconfig and initialize client
+    config.load_kube_config()
+    apps_v1 = client.AppsV1Api()
+    core_v1 = client.CoreV1Api()
+
+    namespace = "rolling-deploy"
+    app_name = namespace
+
+    # Set environment (including test secret for [plugins.scale.secrets])
+    test_secret_value = "test-secret-value-12345"
+    os.environ.update(
+        {
+            "APP_NAME": app_name,
+            "K8s_NAMESPACE": namespace,
+            "TEST_SECRET_KEY": test_secret_value,
+        }
+    )
+
+    # Resolve the absolute path to the todo app folder
+    test_dir = os.path.dirname(os.path.abspath(__file__))
+    todo_app_path = os.path.join(
+        test_dir, "../../../jac-client/jac_client/examples/all-in-one"
+    )
+
+    # Get configuration with rolling strategy
+    scale_config = get_scale_config()
+    target_config = scale_config.get_kubernetes_config()
+    target_config["app_name"] = app_name
+    target_config["namespace"] = namespace
+    target_config["node_port"] = 30003
+    target_config["deployment_strategy"] = "rolling"
+
+    # Create logger
+    logger = UtilityFactory.create_logger("standard")
+
+    # Create deployment target using factory
+    deployment_target = DeploymentTargetFactory.create(
+        "kubernetes", target_config, logger
+    )
+
+    # Load secrets from the app's [plugins.scale.secrets] (not CWD)
+    app_scale_config = JacScaleConfig(Path(os.path.normpath(todo_app_path)))
+    deployment_target.secrets = app_scale_config.get_secrets_config()
+
+    # Create app config
+    # Use experimental=True to install from repo (PyPI packages may not be available)
+    app_config = AppConfig(
+        code_folder=todo_app_path,
+        file_name="main.jac",
+        build=False,
+        experimental=True,
+    )
+
+    # First deploy (creates new deployment since none exists)
+    result = deployment_target.deploy(app_config)
+    assert result.success is True
+    print(f"✓ First deployment (rolling, create) successful: {result.message}")
+
+    # Wait for services to stabilize
+    time.sleep(5)
+
+    # Validate K8s deployment strategy is RollingUpdate
+    deployment = apps_v1.read_namespaced_deployment(name=app_name, namespace=namespace)
+    assert deployment.spec.strategy.type == "RollingUpdate"
+    assert deployment.spec.strategy.rolling_update.max_surge == 1
+    assert deployment.spec.strategy.rolling_update.max_unavailable == 0
+    print("✓ Deployment strategy is RollingUpdate with maxSurge=1, maxUnavailable=0")
+
+    # Second deploy (rolling update - should use replace, not delete+create)
+    result = deployment_target.deploy(app_config)
+    details = result.details
+    assert result.success is True
+    # Rolling strategy does not add "delete_previous_existing_resources"
+    assert "delete_previous_existing_resources" not in details
+    assert "create_jaseci_application_deployment" in details
+    assert len(details) == 7
+    print(f"✓ Second deployment (rolling, replace) successful: {result.message}")
+    print(f"  Details: {details}")
+
+    # Verify deployment still exists and is healthy after rolling update
+    deployment = apps_v1.read_namespaced_deployment(name=app_name, namespace=namespace)
+    assert deployment.metadata.name == app_name
+    assert deployment.spec.replicas == 1
+
+    # Validate main service still exists
+    service = core_v1.read_namespaced_service(
+        name=f"{app_name}-service", namespace=namespace
+    )
+    assert service.spec.type == "NodePort"
+    node_port = service.spec.ports[0].node_port
+    print(f"✓ Service is exposed on NodePort: {node_port}")
+
+    # Send POST request to verify app is accessible after rolling update
+    url = f"http://localhost:{node_port}/walker/create_todo"
+    payload = {"text": "rolling-test-task"}
+    response = _request_with_retry("POST", url, json=payload, timeout=10)
+    assert response.status_code == 200
+    print(f"✓ Successfully created todo at {url}")
+
+    # Cleanup using new architecture
+    deployment_target.destroy(app_name)
+
+    # Verify cleanup - resources should no longer exist
+    try:
+        apps_v1.read_namespaced_deployment(app_name, namespace=namespace)
+        raise AssertionError("Deployment should have been deleted")
+    except ApiException as e:
+        assert e.status == 404, f"Expected 404, got {e.status}"
+
+    try:
+        core_v1.read_namespaced_service(f"{app_name}-service", namespace=namespace)
+        raise AssertionError("Service should have been deleted")
+    except ApiException as e:
+        assert e.status == 404, f"Expected 404, got {e.status}"
+
+    print("✓ Rolling deployment test complete - all resources cleaned up")
+
+
 def test_deployment_target_methods():
     """Test individual methods of KubernetesTarget."""
     # Load kubeconfig
