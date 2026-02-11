@@ -956,10 +956,10 @@ export OPENAI_API_KEY="sk-..."
 jac start app.jac --scale
 ```
 
-2. jac-scale resolves `${ENV_VAR}` references from the environment
-3. Creates a K8s Secret named `{app_name}-secrets` with the resolved values
-4. Adds `envFrom.secretRef` to the container spec so all keys are available as environment variables in the pod
-5. Secret is automatically deleted during `jac destroy`
+1. jac-scale resolves `${ENV_VAR}` references from the environment
+2. Creates a K8s Secret named `{app_name}-secrets` with the resolved values
+3. Adds `envFrom.secretRef` to the container spec so all keys are available as environment variables in the pod
+4. Secret is automatically deleted during `jac destroy`
 
 **Resulting K8s Secret:**
 
