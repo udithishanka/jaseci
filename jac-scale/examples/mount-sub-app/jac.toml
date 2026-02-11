@@ -1,0 +1,6 @@
+[project]
+name = "mount-demo"
+version = "0.1.0"
+
+[plugins.scale.mount]
+"/sub" = "sub_app:app"
