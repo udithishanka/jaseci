@@ -150,6 +150,11 @@ class JacScalePluginConfig {
                             "default": True,
                             "description": "Enable Redis deployment in Kubernetes"
                         },
+                        "deployment_strategy": {
+                            "type": "string",
+                            "default": "recreate",
+                            "description": "Deployment strategy: 'recreate' (delete-first) or 'rolling' (zero-downtime)"
+                        },
                         "plugin_versions": {
                             "type": "dict",
                             "default": {},

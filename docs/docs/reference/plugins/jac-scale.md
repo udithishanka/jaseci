@@ -715,6 +715,22 @@ jac destroy app.jac
 | `DOCKER_USERNAME` | DockerHub username | None |
 | `DOCKER_PASSWORD` | DockerHub password/token | None |
 
+### Deployment Strategy
+
+Control how redeployments are handled via `jac.toml`:
+
+```toml
+[plugins.scale.kubernetes]
+deployment_strategy = "rolling"   # or "recreate" (default)
+```
+
+| Strategy | Description |
+|----------|-------------|
+| `recreate` | Deletes existing deployment before creating a new one (default) |
+| `rolling` | Uses K8s rolling updates: new pod becomes ready before old pod is terminated (zero-downtime) |
+
+With `rolling`, the deployment spec uses `maxSurge: 1` and `maxUnavailable: 0` to ensure the old pod continues serving traffic until the new pod passes readiness probes.
+
 ### Package Version Pinning
 
 Configure specific package versions for Kubernetes deployments:

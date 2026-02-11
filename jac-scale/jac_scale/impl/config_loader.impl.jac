@@ -52,7 +52,8 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'readiness_period': 20,
             'liveness_initial_delay': 10,
             'liveness_period': 20,
-            'liveness_failure_threshold': 80
+            'liveness_failure_threshold': 80,
+            'deployment_strategy': 'recreate'
         },
         'server': {'port': 8000, 'host': '0.0.0.0'},
         'webhook': {

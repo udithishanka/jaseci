@@ -606,6 +606,10 @@ class KubernetesTarget(DeploymentTarget) {
             'spec': {
                 'replicas': 1,
                 'selector': {'matchLabels': {'app': app_name}},
+                'strategy': {
+                    'type': 'RollingUpdate',
+                    'rollingUpdate': {'maxSurge': 1, 'maxUnavailable': 0}
+                },
                 'template': {
                     'metadata': {'labels': {'app': app_name}},
                     'spec': {
@@ -617,20 +621,35 @@ class KubernetesTarget(DeploymentTarget) {
             }
         };
 
-        # 12. Delete existing resources if they exist
-        delete_if_exists(
-            apps_v1.delete_namespaced_deployment, app_name, namespace, 'Deployment'
-        );
-        time.sleep(self.k8s_config.resource_deletion_wait);
-
-        # 13. Deploy databases
+        # 12. Deploy databases
         self._deploy_databases(app_name, namespace, apps_v1, core_v1);
 
-        # 14. Deploy main application
+        # 13. Deploy main application (create or rolling update)
         if self.logger {
             self.logger.info(f'Deploying Jaseci-app app...');
         }
-        apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment);
+        if self.k8s_config.deployment_strategy == 'rolling' {
+            try {
+                apps_v1.read_namespaced_deployment(name=app_name, namespace=namespace);
+                apps_v1.replace_namespaced_deployment(
+                    name=app_name, namespace=namespace, body=deployment
+                );
+            } except ApiException as e {
+                if e.status == 404 {
+                    apps_v1.create_namespaced_deployment(
+                        namespace=namespace, body=deployment
+                    );
+                } else {
+                    raise ;
+                }
+            }
+        } else {
+            delete_if_exists(
+                apps_v1.delete_namespaced_deployment, app_name, namespace, 'Deployment'
+            );
+            time.sleep(self.k8s_config.resource_deletion_wait);
+            apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment);
+        }
         try {
             core_v1.read_namespaced_service(
                 name=f"{app_name}-service", namespace=namespace
