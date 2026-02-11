@@ -932,6 +932,98 @@ jac_byllm = "none"     # Skip installation
 | `jac_client` | Client/frontend support | latest |
 | `jac_byllm` | LLM integration (use "none" to skip) | latest |
 
+### Kubernetes Secrets
+
+Automatically inject secrets into K8s pods as environment variables. Declare secrets in `jac.toml` using `${ENV_VAR}` syntax; they are resolved at deploy time and created as a K8s Opaque Secret.
+
+**Configuration:**
+
+```toml
+[plugins.scale.secrets]
+API_KEY = "${API_KEY}"
+DATABASE_PASSWORD = "${DB_PASS}"
+OPENAI_API_KEY = "${OPENAI_API_KEY}"
+```
+
+**Deployment flow:**
+
+1. Set environment variables before deploying:
+
+```bash
+export API_KEY="sk-123456789"
+export DB_PASS="secure-pass"
+export OPENAI_API_KEY="sk-..."
+jac start app.jac --scale
+```
+
+2. jac-scale resolves `${ENV_VAR}` references from the environment
+3. Creates a K8s Secret named `{app_name}-secrets` with the resolved values
+4. Adds `envFrom.secretRef` to the container spec so all keys are available as environment variables in the pod
+5. Secret is automatically deleted during `jac destroy`
+
+**Resulting K8s Secret:**
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: myapp-secrets
+type: Opaque
+stringData:
+  API_KEY: "sk-123456789"
+  DATABASE_PASSWORD: "secure-pass"
+  OPENAI_API_KEY: "sk-..."
+```
+
+If the secret already exists, it is replaced with the updated values.
+
+---
+
+## Prometheus Metrics
+
+jac-scale supports Prometheus metrics collection for HTTP request monitoring and optional walker execution timing.
+
+### Configuration
+
+```toml
+[plugins.scale.metrics]
+enabled = true
+endpoint = "/metrics"
+namespace = "myapp"
+walker_metrics = false
+histogram_buckets = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0]
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable metrics collection |
+| `endpoint` | string | `"/metrics"` | HTTP path for Prometheus scraping |
+| `namespace` | string | K8s namespace (sanitized) | Metric name prefix |
+| `walker_metrics` | bool | `false` | Track per-walker execution timing |
+| `histogram_buckets` | list | `[0.005 ... 10.0]` | Latency histogram bucket boundaries (seconds) |
+
+### Exposed Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `{namespace}_http_requests_total` | Counter | `method`, `path`, `status_code` | Total HTTP requests |
+| `{namespace}_http_request_duration_seconds` | Histogram | `method`, `path` | Request latency |
+| `{namespace}_http_requests_in_progress` | Gauge | - | Currently active requests |
+| `{namespace}_walker_duration_seconds` | Histogram | `walker_name`, `success` | Walker execution time (requires `walker_metrics = true`) |
+
+### Scraping
+
+When enabled, metrics are available at the configured endpoint (default `GET /metrics`) in Prometheus text format.
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'jac_app'
+    static_configs:
+      - targets: ['localhost:8000']
+    metrics_path: '/metrics'
+```
+
 ---
 
 ## Health Checks
