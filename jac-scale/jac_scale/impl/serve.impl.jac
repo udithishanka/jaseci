@@ -127,7 +127,6 @@ impl JacAPIServer.start(dev: bool = False, no_client: bool = False) -> None {
     self.register_root_asset_endpoint();
     self._configure_openapi_security();
     # Mount sub-applications from [plugins.scale.mount] in jac.toml
-    import importlib;
     mount_config = get_scale_config().get_mount_config();
     for mount_path in mount_config {
         import_str = mount_config[mount_path];
