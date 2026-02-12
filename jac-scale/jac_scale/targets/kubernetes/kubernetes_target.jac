@@ -678,7 +678,15 @@ class KubernetesTarget(DeploymentTarget) {
                 }
             }
             details["create_jaseci_application_service"] = "Successful";
-
+            # 16. Enable horizontal pod autoscaling
+            create_hpa(
+                namespace=namespace,
+                deployment_name=app_name,
+                min_replicas=self.k8s_config.min_replicas,
+                max_replicas=self.k8s_config.max_replicas,
+                cpu_target=self.k8s_config.cpu_utilization_target
+            );
+            details["create_horizontal_auto_scaler"] = "Successful";
             # 15. Wait for deployment and get service URL
             deployment_details = self._wait_for_deployment(
                 app_name, namespace, health_check_path, is_aws
@@ -697,29 +705,6 @@ class KubernetesTarget(DeploymentTarget) {
             if self.logger {
                 self.logger.error(f"Error deploying application '{app_name}': {e}");
             }
-        }
-
-        # 15. Wait for deployment and get service URL
-        self._wait_for_deployment(app_name, namespace, health_check_path, is_aws);
-        service_url = self.get_service_url(app_name);
-
-        # 16. Enable horizontal pod autoscaling
-        create_hpa(
-            namespace=namespace,
-            deployment_name=app_name,
-            min_replicas=self.k8s_config.min_replicas,
-            max_replicas=self.k8s_config.max_replicas,
-            cpu_target=self.k8s_config.cpu_utilization_target
-        );
-
-        if self.logger {
-            self.logger.info(
-                f"Deployment complete for '{app_name}'", {'service_url': service_url}
-            return DeploymentResult(
-                success=success_status,
-                message=f"Deployment failed for application '{app_name}': {e}",
-                details=details
-            );
         }
     }
 
