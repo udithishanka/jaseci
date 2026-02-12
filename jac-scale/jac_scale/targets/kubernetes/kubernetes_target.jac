@@ -705,6 +705,11 @@ class KubernetesTarget(DeploymentTarget) {
             if self.logger {
                 self.logger.error(f"Error deploying application '{app_name}': {e}");
             }
+            return DeploymentResult(
+                success=success_status,
+                message=f"Deployment failed for application '{app_name}': {e}",
+                details=details
+            );
         }
     }
 
