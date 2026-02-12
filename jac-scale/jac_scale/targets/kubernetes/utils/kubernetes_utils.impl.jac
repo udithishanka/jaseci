@@ -101,7 +101,6 @@ impl sync_code_to_pvc(
     import from pathlib { Path }
     sync_pod_name = f"{app_name}-code-sync";
     same_directory_toml_path = os.path.join(code_folder, 'jac.toml');
-
     # Determine the node where the RWO PVC is already attached so the
     # code-sync pod lands on the same node and avoids Multi-Attach errors.
     pvc_node: (str | None) = None;
@@ -110,7 +109,6 @@ impl sync_code_to_pvc(
         annotations = pvc_obj.metadata.annotations or {};
         pvc_node = annotations.get('volume.kubernetes.io/selected-node');
     } except Exception { }
-
     pod_spec: dict = {
         'restartPolicy': 'Never',
         'containers': [
@@ -121,9 +119,7 @@ impl sync_code_to_pvc(
                 'volumeMounts': [{'name': 'code', 'mountPath': '/data'}]
             }
         ],
-        'volumes': [
-            {'name': 'code', 'persistentVolumeClaim': {'claimName': pvc_name}}
-        ]
+        'volumes': [{'name': 'code', 'persistentVolumeClaim': {'claimName': pvc_name}}]
     };
     if pvc_node {
         pod_spec['nodeName'] = pvc_node;
