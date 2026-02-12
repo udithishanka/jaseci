@@ -5,6 +5,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 ## jac-scale 0.1.8 (Unreleased)
 
 - **Zero-downtime deployment**: Redeployments now support K8s rolling updates via `deployment_strategy = "rolling"` in `jac.toml`. Default remains `"recreate"` (delete-first).
+- Various refactors
 - **PWA Build Detection**: Server startup now detects existing PWA builds (via `manifest.json`) and skips redundant client bundling. The `/static/client.js` endpoint serves Vite-hashed files (`client.*.js`) in PWA mode.
 - **Prometheus Metrics Integration**: Added `/metrics` endpoint with HTTP request metrics, configurable via `[plugins.scale.metrics]` in `jac.toml`.
 - Update jaseci scale k8s pipeline to support parellel test cases.
@@ -13,6 +14,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Code refactors**: Backtick escape, etc.
 - **Native Kubernetes Secret support**: New `[plugins.scale.secrets]` config section. Declare secrets with `${ENV_VAR}` syntax, auto-resolved at deploy time into a K8s Secret with `envFrom.secretRef`.
 - **Minor Internal Refactor in Tests**: Minor internal refactoring in test_direct.py to improve test structure
+- **fix**: Return 401 instead of 500 for deleted users with valid JWT tokens.
+- **1 Small Refactors**
 
 ## jac-scale 0.1.7 (Latest Release)
 
