@@ -101,14 +101,29 @@ impl sync_code_to_pvc(
     import from pathlib { Path }
     sync_pod_name = f"{app_name}-code-sync";
     same_directory_toml_path = os.path.join(code_folder, 'jac.toml');
-    # Determine the node where the RWO PVC is already attached so the
+    # Determine the node where the RWO PVC is currently attached so the
     # code-sync pod lands on the same node and avoids Multi-Attach errors.
+    # Prefer the running app pod's node (reliable) over PVC annotation (can be stale).
     pvc_node: (str | None) = None;
     try {
-        pvc_obj = core_v1.read_namespaced_persistent_volume_claim(pvc_name, namespace);
-        annotations = pvc_obj.metadata.annotations or {};
-        pvc_node = annotations.get('volume.kubernetes.io/selected-node');
+        pods = core_v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"app={app_name}"
+        );
+        for pod in pods.items {
+            if pod.status.phase == "Running" and pod.spec.node_name {
+                pvc_node = pod.spec.node_name;
+                break;
+            }
+        }
     } except Exception { }
+    if not pvc_node {
+        try {
+            pvc_obj = core_v1.read_namespaced_persistent_volume_claim(pvc_name, namespace);
+            annotations = pvc_obj.metadata.annotations or {};
+            pvc_node = annotations.get('volume.kubernetes.io/selected-node');
+        } except Exception { }
+    }
     pod_spec: dict = {
         'restartPolicy': 'Never',
         'containers': [
