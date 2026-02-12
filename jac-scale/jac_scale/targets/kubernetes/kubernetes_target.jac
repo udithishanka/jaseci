@@ -621,10 +621,65 @@ class KubernetesTarget(DeploymentTarget) {
                 );
             }
 
+            # Detect current app pod's node for rolling update affinity (RWO compatibility)
+            # During rolling updates, both old and new pods must be on the same node
+            # because RWO PVCs only allow attachment to one node at a time.
+            pvc_node: (str | None) = None;
+            if not app_config.build and self.k8s_config.deployment_strategy == 'rolling' {
+                try {
+                    pods = core_v1.list_namespaced_pod(
+                        namespace=namespace,
+                        label_selector=f"app={app_name}"
+                    );
+                    for pod in pods.items {
+                        if pod.status.phase == "Running" and pod.spec.node_name {
+                            pvc_node = pod.spec.node_name;
+                            break;
+                        }
+                    }
+                } except Exception { }
+            }
+
             # 11. Build service and deployment
             service = self._build_service_config(
                 app_name, is_aws, health_check_path, service_type
             );
+
+            # Add restart annotation for rolling strategy to force pod recreation
+            template_metadata: dict = {'labels': {'app': app_name}};
+            if self.k8s_config.deployment_strategy == 'rolling' {
+                template_metadata['annotations'] = {
+                    'kubectl.kubernetes.io/restartedAt': str(time.time())
+                };
+            }
+
+            pod_spec: dict = {
+                'initContainers': init_containers,
+                'containers': [container_config],
+                'volumes': volumes
+            };
+
+            # Pin deployment pods to PVC node for RWO compatibility
+            if pvc_node {
+                pod_spec['affinity'] = {
+                    'nodeAffinity': {
+                        'requiredDuringSchedulingIgnoredDuringExecution': {
+                            'nodeSelectorTerms': [
+                                {
+                                    'matchExpressions': [
+                                        {
+                                            'key': 'kubernetes.io/hostname',
+                                            'operator': 'In',
+                                            'values': [pvc_node]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                };
+            }
+
             deployment = {
                 'apiVersion': 'apps/v1',
                 'kind': 'Deployment',
@@ -641,12 +696,8 @@ class KubernetesTarget(DeploymentTarget) {
                         'rollingUpdate': {'maxSurge': 1, 'maxUnavailable': 0}
                     },
                     'template': {
-                        'metadata': {'labels': {'app': app_name}},
-                        'spec': {
-                            'initContainers': init_containers,
-                            'containers': [container_config],
-                            'volumes': volumes
-                        }
+                        'metadata': template_metadata,
+                        'spec': pod_spec
                     }
                 }
             };
