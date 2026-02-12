@@ -625,11 +625,11 @@ class KubernetesTarget(DeploymentTarget) {
             # During rolling updates, both old and new pods must be on the same node
             # because RWO PVCs only allow attachment to one node at a time.
             pvc_node: (str | None) = None;
-            if not app_config.build and self.k8s_config.deployment_strategy == 'rolling' {
+            if not app_config.build
+            and self.k8s_config.deployment_strategy == 'rolling' {
                 try {
                     pods = core_v1.list_namespaced_pod(
-                        namespace=namespace,
-                        label_selector=f"app={app_name}"
+                        namespace=namespace, label_selector=f"app={app_name}"
                     );
                     for pod in pods.items {
                         if pod.status.phase == "Running" and pod.spec.node_name {
@@ -695,10 +695,7 @@ class KubernetesTarget(DeploymentTarget) {
                         'type': 'RollingUpdate',
                         'rollingUpdate': {'maxSurge': 1, 'maxUnavailable': 0}
                     },
-                    'template': {
-                        'metadata': template_metadata,
-                        'spec': pod_spec
-                    }
+                    'template': {'metadata': template_metadata, 'spec': pod_spec}
                 }
             };
 
