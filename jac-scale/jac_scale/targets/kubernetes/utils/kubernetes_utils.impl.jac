@@ -107,8 +107,7 @@ impl sync_code_to_pvc(
     pvc_node: (str | None) = None;
     try {
         pods = core_v1.list_namespaced_pod(
-            namespace=namespace,
-            label_selector=f"app={app_name}"
+            namespace=namespace, label_selector=f"app={app_name}"
         );
         for pod in pods.items {
             if pod.status.phase == "Running" and pod.spec.node_name {
@@ -119,7 +118,9 @@ impl sync_code_to_pvc(
     } except Exception { }
     if not pvc_node {
         try {
-            pvc_obj = core_v1.read_namespaced_persistent_volume_claim(pvc_name, namespace);
+            pvc_obj = core_v1.read_namespaced_persistent_volume_claim(
+                pvc_name, namespace
+            );
             annotations = pvc_obj.metadata.annotations or {};
             pvc_node = annotations.get('volume.kubernetes.io/selected-node');
         } except Exception { }
