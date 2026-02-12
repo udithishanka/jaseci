@@ -340,7 +340,7 @@ def test_early_exit():
     details = result.details
     print(f"Deployment result: {details}")
     assert "health_check_of_deployment" not in details
-    assert len(details) == 7
+    assert len(details) == 8
     assert result.success is False
 
 
