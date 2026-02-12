@@ -121,10 +121,21 @@ def test_deploy_all_in_one():
 
     # Deploy using new architecture
     result = deployment_target.deploy(app_config)
+
+    # Verify PVC node annotation exists after first deploy, then redeploy
+    # to confirm the code-sync pod is pinned to the same node (RWO fix).
+    pvc_name = f"{app_name}-code-pvc"
+    pvc = core_v1.read_namespaced_persistent_volume_claim(pvc_name, namespace)
+    pvc_annotations = pvc.metadata.annotations or {}
+    selected_node = pvc_annotations.get("volume.kubernetes.io/selected-node")
+    print(f"  PVC selected-node annotation: {selected_node}")
+
     result = deployment_target.deploy(app_config)
     details = result.details
     assert len(details) == 8
-    assert result.success is True
+    assert result.success is True, (
+        f"Redeploy failed (possible RWO Multi-Attach): {result.message}"
+    )
     print(f"✓ Deployment successful: {result.message}")
 
     # Wait a moment for services to stabilize
