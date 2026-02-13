@@ -1255,6 +1255,10 @@ impl JacAPIServer.postinit -> None {
         );
         logger.info(f"Prometheus metrics enabled at {metrics_endpoint}");
     }
+    # Run registered post-init hooks
+    for hook in _post_init_hooks {
+        hook(self);
+    }
 }
 
 impl JacAPIServer.register_sso_endpoints -> None {

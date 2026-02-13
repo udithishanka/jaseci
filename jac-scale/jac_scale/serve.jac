@@ -43,7 +43,13 @@ glob _jwt_config = get_scale_config().get_jwt_config(),
      JWT_ALGORITHM = _jwt_config['algorithm'],
      JWT_EXP_DELTA_DAYS = _jwt_config['exp_delta_days'],
      SSO_HOST = _sso_config['host'],
-     logger = logging.getLogger(__name__);
+     logger = logging.getLogger(__name__),
+     _post_init_hooks: list = [];
+
+"""Register a callback to run after JacAPIServer.postinit completes."""
+def register_post_init_hook(hook: Callable) -> None {
+    _post_init_hooks.append(hook);
+}
 
 enum Platforms ( StrEnum ) { GOOGLE = 'google' }
 
