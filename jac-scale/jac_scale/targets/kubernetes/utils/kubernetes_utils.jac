@@ -1,4 +1,7 @@
-"""Kubernetes utility functions for deployment operations."""
+"""Kubernetes utility functions for deployment operations.
+
+Includes tarball creation with .git and .jac directory exclusion.
+"""
 import base64;
 import os;
 import tarfile;

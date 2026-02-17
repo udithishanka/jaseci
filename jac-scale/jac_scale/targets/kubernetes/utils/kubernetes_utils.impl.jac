@@ -461,11 +461,11 @@ impl create_or_update_configmap(
 }
 
 impl exclude_folders(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo] {
-    if tarinfo.isdir() and tarinfo.name.endswith("/.jac") {
-        return None;
-    }
-    if "/.jac/" in tarinfo.name {
-        return None;
+    parts = tarinfo.name.replace('\\', '/').split('/');
+    for part in parts {
+        if part in ('.jac', '.git') {
+            return None;
+        }
     }
     return tarinfo;
 }
@@ -475,11 +475,22 @@ impl exclude_folders(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo] {
 """
 impl create_tarball(source_dir: str, tar_path: str) -> None {
     if not os.path.exists(source_dir) {
-        raise FileNotFoundError(f"Source directory not found: {source_dir}") ;
+        raise FileNotFoundError(f"Source directory not found: {source_dir}");
     }
     os.makedirs((os.path.dirname(tar_path) or '.'), exist_ok=True);
+    excluded = {'.jac', '.git'};
     with tarfile.open(tar_path, 'w:gz') as tar {
-        tar.add(source_dir, arcname='.', filter=exclude_folders);
+        for entry in os.walk(source_dir) {
+            root = entry[0];
+            dirs = entry[1];
+            files = entry[2];
+            dirs[:] = [d for d in dirs if d not in excluded];
+            for name in files {
+                filepath = os.path.join(root, name);
+                arcname = os.path.relpath(filepath, source_dir);
+                tar.add(filepath, arcname=arcname);
+            }
+        }
     }
 }
 
