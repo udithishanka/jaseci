@@ -9,6 +9,7 @@ When HPA scales beyond 1 replica, new pods scheduled on different nodes hit a `M
 ### Live Test Evidence (AWS EKS, 8-node cluster)
 
 **Configuration:**
+
 ```toml
 [plugins.scale.kubernetes]
 min_replicas = 2
@@ -17,6 +18,7 @@ cpu_utilization_target = 50
 ```
 
 **Result:**
+
 ```
 $ kubectl get pods -n algo-test2 -o wide
 NAME                                READY   STATUS     NODE
@@ -51,6 +53,7 @@ User Machine ──(kubectl cp)──> Sync Pod ──> RWO PVC ({app_name}-code
 ```
 
 **Code distribution flow:**
+
 1. `sync_code_to_pvc()` creates a temporary sync pod that mounts the PVC
 2. User's code is tarball'd and `kubectl cp`'d to the sync pod
 3. Code is extracted to PVC at `/data/workspace/`
@@ -71,6 +74,7 @@ User Machine ──(kubectl cp)──> Sync Pod ──> RWO PVC ({app_name}-code
 | ReadWriteMany | RWX | Volume can be mounted as read-write by pods on **many nodes** |
 
 Default storage classes on all major platforms use RWO:
+
 - **AWS EKS**: `gp2`, `gp3` (EBS) → RWO
 - **GCP GKE**: `standard`, `standard-rwo` (Persistent Disk) → RWO
 - **Azure AKS**: `default`, `managed-premium` (Managed Disk) → RWO
@@ -225,6 +229,7 @@ User Machine ──(kubectl cp)──> Sync Pod ──> RWO PVC ({app_name}-code
 ### Resource Footprint
 
 The code-server pod is minimal:
+
 - **Image**: `busybox:1.36` (already used by jac-scale)
 - **CPU**: 50m request / 100m limit
 - **Memory**: 32Mi request / 64Mi limit
@@ -271,6 +276,7 @@ Only **one file** needs modification:
 ### No Configuration Changes
 
 Zero changes to:
+
 - `KubernetesConfig` (no new fields)
 - `jac.toml` (no new options)
 - `config_loader.impl.jac` (no new defaults)
