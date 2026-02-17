@@ -302,13 +302,120 @@ class KubernetesTarget(DeploymentTarget) {
         return container_config;
     }
 
-    """Build volumes and build container configuration for code sync."""
+    """Deploy a lightweight code-server for multi-node code distribution.
+
+    The code-server is a single-replica Deployment that mounts the RWO PVC
+    and serves the application code as a tarball via HTTP. This decouples
+    app pods from the PVC, allowing them to schedule on any node.
+    """
+    def _deploy_code_server(
+        self: KubernetesTarget,
+        app_name: str,
+        namespace: str,
+        core_v1: Any,
+        apps_v1: Any
+    ) -> None {
+        server_name = f"{app_name}-code-server";
+        config = self.k8s_config;
+
+        # Delete existing code-server to ensure fresh code on re-deploy
+        delete_if_exists(
+            apps_v1.delete_namespaced_deployment, server_name, namespace, 'Deployment'
+        );
+        time.sleep(2);
+
+        deployment = {
+            'apiVersion': 'apps/v1',
+            'kind': 'Deployment',
+            'metadata': {
+                'name': server_name,
+                'namespace': namespace,
+                'labels': {'app': server_name}
+            },
+            'spec': {
+                'replicas': 1,
+                'selector': {'matchLabels': {'app': server_name}},
+                'template': {
+                    'metadata': {'labels': {'app': server_name}},
+                    'spec': {
+                        'containers': [
+                            {
+                                'name': 'code-server',
+                                'image': config.busybox_image,
+                                'command': [
+                                    'sh',
+                                    '-c',
+                                    f"cd {config.workspace_path} && "
+                                    f"tar czf /tmp/code.tar.gz --exclude='.jac' . && "
+                                    f"mkdir -p /www && mv /tmp/code.tar.gz /www/ && "
+                                    f"httpd -f -p 8080 -h /www"
+                                ],
+                                'ports': [{'containerPort': 8080}],
+                                'volumeMounts': [
+                                    {
+                                        'name': 'code-source',
+                                        'mountPath': config.code_mount_path
+                                    }
+                                ],
+                                'resources': {
+                                    'requests': {'cpu': '50m', 'memory': '32Mi'},
+                                    'limits': {'cpu': '100m', 'memory': '64Mi'}
+                                }
+                            }
+                        ],
+                        'volumes': [
+                            {
+                                'name': 'code-source',
+                                'persistentVolumeClaim': {
+                                    'claimName': f"{app_name}-code-pvc"
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        };
+        apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment);
+
+        # Create ClusterIP service for in-cluster discovery (idempotent)
+        service = {
+            'apiVersion': 'v1',
+            'kind': 'Service',
+            'metadata': {'name': server_name, 'namespace': namespace},
+            'spec': {
+                'selector': {'app': server_name},
+                'ports': [{'port': 8080, 'targetPort': 8080}],
+                'type': 'ClusterIP'
+            }
+        };
+        try {
+            core_v1.create_namespaced_service(namespace=namespace, body=service);
+        } except ApiException as e {
+            if (e.status != 409) {
+                raise ;
+            }
+        }
+
+        if self.logger {
+            self.logger.info(
+                f"Code-server '{server_name}' deployed for multi-node code distribution"
+            );
+        }
+    }
+
+    """Build volumes and init container configuration for code distribution.
+
+    Syncs code to PVC, deploys code-server, and configures init container
+    to fetch code via HTTP. App pods have no PVC mount, enabling multi-node
+    scheduling with HPA.
+    """
     def _build_volumes_config(
         self: KubernetesTarget,
         app_name: str,
         app_config: AppConfig,
         namespace: str,
-        core_v1: Any
+        core_v1: Any,
+        apps_v1: Any
     ) -> dict[str, Any] {
         pvc_name = f"{app_name}-code-pvc";
         pvc_size = self.k8s_config.pvc_size;
@@ -322,24 +429,29 @@ class KubernetesTarget(DeploymentTarget) {
             core_v1, namespace, pvc_name, app_config.code_folder, app_name, sync_image
         );
 
+        # Deploy code-server for multi-node code distribution
+        self._deploy_code_server(app_name, namespace, core_v1, apps_v1);
+
+        # Init container: download code from code-server via HTTP (no PVC mount)
+        server_url = f"http://{app_name}-code-server:8080/code.tar.gz";
         build_container = {
-            'name': 'build-app',
-            'image': self.k8s_config.python_image,
+            'name': 'fetch-code',
+            'image': self.k8s_config.busybox_image,
             'command': [
                 'sh',
                 '-c',
-                f"apt-get update && apt-get install -y rsync &&  mkdir -p {self.k8s_config.app_mount_path} && rm -rf {self.k8s_config.app_mount_path}/* && rsync -av --exclude='.jac' {self.k8s_config.workspace_path}/ {self.k8s_config.app_mount_path}/"
+                f"until wget -q -O /tmp/code.tar.gz {server_url}; do "
+                f"echo 'Waiting for code-server...'; sleep 2; done && "
+                f"mkdir -p {self.k8s_config.app_mount_path} && "
+                f"tar xzf /tmp/code.tar.gz -C {self.k8s_config.app_mount_path}/"
             ],
             'volumeMounts': [
-                {'name': 'app-code', 'mountPath': self.k8s_config.app_mount_path},
-                {'name': 'code-source', 'mountPath': self.k8s_config.code_mount_path}
+                {'name': 'app-code', 'mountPath': self.k8s_config.app_mount_path}
             ]
         };
 
-        volumes = [
-            {'name': 'app-code', 'emptyDir': {}},
-            {'name': 'code-source', 'persistentVolumeClaim': {'claimName': pvc_name}}
-        ];
+        # Volumes: only emptyDir — no PVC mount on app pods
+        volumes = [{'name': 'app-code', 'emptyDir': {}}];
 
         return {'volumes': volumes, 'build_container': build_container};
     }
@@ -597,7 +709,7 @@ class KubernetesTarget(DeploymentTarget) {
             # 10. Handle volumes and build container if not building image
             if not app_config.build {
                 volumes_config = self._build_volumes_config(
-                    app_name, app_config, namespace, core_v1
+                    app_name, app_config, namespace, core_v1, apps_v1
                 );
                 details["sync_code_to_pvc"] = "Successful";
                 volumes = volumes_config['volumes'];
@@ -741,6 +853,18 @@ class KubernetesTarget(DeploymentTarget) {
             try {
                 core_v1.read_namespaced_service(
                     name=f"{app_name}-service", namespace=namespace
+                );
+                resources_exist = True;
+            } except ApiException as e {
+                if e.status != 404 {
+                    raise ;
+                }
+            }
+
+            # Check code-server deployment
+            try {
+                apps_v1.read_namespaced_deployment(
+                    name=f"{app_name}-code-server", namespace=namespace
                 );
                 resources_exist = True;
             } except ApiException as e {
@@ -910,6 +1034,20 @@ class KubernetesTarget(DeploymentTarget) {
             delete_if_exists(
                 core_v1.delete_namespaced_service,
                 f"{app_name}-service",
+                namespace,
+                'Service'
+            );
+
+            # Delete code-server deployment and service
+            delete_if_exists(
+                apps_v1.delete_namespaced_deployment,
+                f"{app_name}-code-server",
+                namespace,
+                'Deployment'
+            );
+            delete_if_exists(
+                core_v1.delete_namespaced_service,
+                f"{app_name}-code-server",
                 namespace,
                 'Service'
             );
