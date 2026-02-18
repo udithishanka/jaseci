@@ -1,9 +1,10 @@
 """Extract path parameter names from a URL path pattern.
 Example: extract_path_params("/test/{id}/items/{item_id}") -> {"id", "item_id"}
+Also handles converter syntax: "/proxy/{path:path}" -> {"path"}
 """
 def _extract_path_params(path: str) -> set[str] {
     import re;
-    pattern = r'\{([^}]+)\}';
+    pattern = r'\{([^}:]+)(?::[^}]*)?\}';
     matches = re.findall(pattern, path);
     return set(matches);
 }
