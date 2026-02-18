@@ -646,9 +646,20 @@ impl JacAPIServer.create_function_callback(
                 );
             }
         }
+        # Filter kwargs to only include parameters the function accepts
+        import inspect;
+        func = self.get_functions()[func_name];
+        sig = inspect.signature(func);
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        );
+        if not has_var_keyword {
+            accepted = set(sig.parameters.keys());
+            kwargs = {k: v for (k, v) in kwargs.items() if k in accepted};
+        }
         console.print(f"Executing function '{func_name}' with params: {kwargs}");
         result = await self.execution_manager.execute_function(
-            self.get_functions()[func_name], kwargs, (username or '__guest__')
+            func, kwargs, (username or '__guest__')
         );
         # Pass through raw HTTP Response objects directly
         if isinstance(result, dict) and '_raw_response' in result {
