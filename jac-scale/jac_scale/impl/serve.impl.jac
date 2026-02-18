@@ -1,3 +1,13 @@
+"""Extract path parameter names from a URL path pattern.
+Example: extract_path_params("/test/{id}/items/{item_id}") -> {"id", "item_id"}
+"""
+def _extract_path_params(path: str) -> set[str] {
+    import re;
+    pattern = r'\{([^}]+)\}';
+    matches = re.findall(pattern, path);
+    return set(matches);
+}
+
 """Helper function to convert TransportResponse to dict for JSONResponse."""
 def _transport_response_to_dict(
     transport_response: TransportResponse
@@ -540,7 +550,7 @@ impl JacAPIServer.register_functions_endpoints -> None {
                 path=final_path,
                 callback=self.create_function_callback(func_name),
                 parameters=self.create_function_parameters(
-                    func_name, method=spec_method
+                    func_name, method=spec_method, path=final_path
                 ),
                 response_model=None,
                 tags=['Functions'],
@@ -552,9 +562,12 @@ impl JacAPIServer.register_functions_endpoints -> None {
 }
 
 impl JacAPIServer.create_function_parameters(
-    func_name: str, method: HTTPMethod = HTTPMethod.POST
+    func_name: str, method: HTTPMethod = HTTPMethod.POST, path: str = ""
 ) -> list[APIParameter] {
     parameters: list[APIParameter] = [];
+    # Extract path parameter names from the URL path
+    path_param_names = _extract_path_params(path);
+
     if self.introspector.is_auth_required_for_function(func_name) {
         parameters.append(
             APIParameter(
@@ -573,7 +586,10 @@ impl JacAPIServer.create_function_parameters(
     for field_name in func_fields {
         field_type = func_fields[field_name]['type'];
         # Determine parameter type based on field type and method
-        if (
+        # Check if this is a path parameter first
+        if field_name in path_param_names {
+            param_type = ParameterType.PATH;
+        } elif (
             method == HTTPMethod.GET
             and not ('UploadFile' in field_type or 'uploadfile' in field_type.lower())
         ) {
@@ -673,7 +689,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                 path=f"{spec_path}/{{nd}}",
                 callback=self.create_walker_callback(walker_name, has_node_param=True),
                 parameters=self.create_walker_parameters(
-                    walker_name, invoke_on_root=False, method=spec_method
+                    walker_name, invoke_on_root=False, method=spec_method, path=f"{spec_path}/{{nd}}"
                 ),
                 response_model=None,
                 tags=['Walkers'],
@@ -687,7 +703,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
                 path=spec_path,
                 callback=self.create_walker_callback(walker_name, has_node_param=False),
                 parameters=self.create_walker_parameters(
-                    walker_name, invoke_on_root=True, method=spec_method
+                    walker_name, invoke_on_root=True, method=spec_method, path=spec_path
                 ),
                 response_model=None,
                 tags=['Walkers'],
@@ -699,9 +715,12 @@ impl JacAPIServer.register_walkers_endpoints -> None {
 }
 
 impl JacAPIServer.create_walker_parameters(
-    walker_name: str, invoke_on_root: bool, method: HTTPMethod = HTTPMethod.POST
+    walker_name: str, invoke_on_root: bool, method: HTTPMethod = HTTPMethod.POST, path: str = ""
 ) -> list[APIParameter] {
     parameters: list[APIParameter] = [];
+    # Extract path parameter names from the URL path
+    path_param_names = _extract_path_params(path);
+
     if self.introspector.is_auth_required_for_walker(walker_name) {
         parameters.append(
             APIParameter(
@@ -723,7 +742,9 @@ impl JacAPIServer.create_walker_parameters(
         }
         field_type = walker_fields[field_name]['type'];
         # Determine parameter type based on field type and method
-        if (field_name == '_jac_spawn_node') {
+        # Check if this is a path parameter first (either the field name or 'node' for _jac_spawn_node)
+        param_name = 'node' if (field_name == '_jac_spawn_node') else field_name;
+        if (field_name == '_jac_spawn_node') or (param_name in path_param_names) {
             param_type = ParameterType.PATH;
         } elif (
             method == HTTPMethod.GET
@@ -738,7 +759,7 @@ impl JacAPIServer.create_walker_parameters(
         }
         parameters.append(
             APIParameter(
-                name='node' if (field_name == '_jac_spawn_node') else field_name,
+                name=param_name,
                 data_type=field_type,
                 required=walker_fields[field_name]['required'],
                 default=walker_fields[field_name]['default'],
