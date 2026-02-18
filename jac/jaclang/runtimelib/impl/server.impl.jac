@@ -496,6 +496,42 @@ impl ModuleIntrospector._extract_access_levels -> None {
             }
         }
     }
+    # Process imported functions - look up their source module's AST
+    for (name, func) in inspect.getmembers(self._module) {
+        if (
+            inspect.isfunction(func)
+            and not name.startswith('_')
+            and name not in self._function_access
+        ) {
+            try {
+                source_file = inspect.getfile(func);
+            } except (TypeError, OSError) {
+                self._function_access[name] = True;
+                continue;
+            }
+            if source_file == mod_path {
+                continue;
+            }
+            source_ast = get_module_ast(source_file);
+            if source_ast {
+                found = False;
+                for item in source_ast.body {
+                    if isinstance(item, uni.Ability) and item.name_ref is not None
+                       and item.name_ref.sym_name == name {
+                        is_pub = item.access and item.access.tag.name == Tok.KW_PUB;
+                        self._function_access[name] = not is_pub;
+                        found = True;
+                        break;
+                    }
+                }
+                if not found {
+                    self._function_access[name] = True;
+                }
+            } else {
+                self._function_access[name] = True;
+            }
+        }
+    }
 }
 
 """Collect callable functions from module."""
