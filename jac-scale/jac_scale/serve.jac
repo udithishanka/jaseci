@@ -79,7 +79,7 @@ obj JacAPIServer(JServer) {
     def register_refresh_token_endpoint -> None;
     def register_sso_endpoints -> None;
     def create_walker_callback(
-        walker_name: str, has_node_param: bool = False
+        walker_name: str, has_node_param: bool = False, restspec: Any = None
     ) -> Callable[..., TransportResponse];
 
     def create_walker_parameters(
@@ -87,7 +87,7 @@ obj JacAPIServer(JServer) {
     ) -> list[APIParameter];
 
     def register_walkers_endpoints -> None;
-    def create_function_callback(func_name: str) -> Callable[..., TransportResponse];
+    def create_function_callback(func_name: str, restspec: Any = None) -> Callable[..., TransportResponse];
     def create_function_parameters(
         func_name: str, method: HTTPMethod = HTTPMethod.POST, path: str = ""
     ) -> list[APIParameter];

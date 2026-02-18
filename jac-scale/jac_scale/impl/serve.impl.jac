@@ -548,7 +548,7 @@ impl JacAPIServer.register_functions_endpoints -> None {
             JEndPoint(
                 method=spec_method,
                 path=final_path,
-                callback=self.create_function_callback(func_name),
+                callback=self.create_function_callback(func_name, restspec),
                 parameters=self.create_function_parameters(
                     func_name, method=spec_method, path=final_path
                 ),
@@ -615,10 +615,15 @@ impl JacAPIServer.create_function_parameters(
 }
 
 impl JacAPIServer.create_function_callback(
-    func_name: str
+    func_name: str, restspec: Any = None
 ) -> Callable[..., TransportResponse] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
-    requires_auth = self.introspector.is_auth_required_for_function(func_name);
+    # Check restspec.require_auth if available, otherwise fall back to introspector
+    if restspec and hasattr(restspec, 'require_auth') {
+        requires_auth = restspec.require_auth;
+    } else {
+        requires_auth = self.introspector.is_auth_required_for_function(func_name);
+    }
     async def callback(**kwargs: JsonValue) -> TransportResponse {
         username: (str | None) = None;
         if requires_auth {
@@ -687,7 +692,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
             JEndPoint(
                 method=spec_method,
                 path=f"{spec_path}/{{nd}}",
-                callback=self.create_walker_callback(walker_name, has_node_param=True),
+                callback=self.create_walker_callback(walker_name, has_node_param=True, restspec=restspec),
                 parameters=self.create_walker_parameters(
                     walker_name, invoke_on_root=False, method=spec_method, path=f"{spec_path}/{{nd}}"
                 ),
@@ -701,7 +706,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
             JEndPoint(
                 method=spec_method,
                 path=spec_path,
-                callback=self.create_walker_callback(walker_name, has_node_param=False),
+                callback=self.create_walker_callback(walker_name, has_node_param=False, restspec=restspec),
                 parameters=self.create_walker_parameters(
                     walker_name, invoke_on_root=True, method=spec_method, path=spec_path
                 ),
@@ -772,10 +777,15 @@ impl JacAPIServer.create_walker_parameters(
 }
 
 impl JacAPIServer.create_walker_callback(
-    walker_name: str, has_node_param: bool = False
+    walker_name: str, has_node_param: bool = False, restspec: Any = None
 ) -> Callable[..., TransportResponse] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
-    requires_auth = self.introspector.is_auth_required_for_walker(walker_name);
+    # Check restspec.require_auth if available, otherwise fall back to introspector
+    if restspec and hasattr(restspec, 'require_auth') {
+        requires_auth = restspec.require_auth;
+    } else {
+        requires_auth = self.introspector.is_auth_required_for_walker(walker_name);
+    }
     async def callback(
         nd: (str | None) = None, **kwargs: JsonValue
     ) -> TransportResponse {

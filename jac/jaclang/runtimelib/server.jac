@@ -227,7 +227,8 @@ obj JacAPIServer {
         has method: str = "",
             path: str = "",
             protocol: APIProtocol = APIProtocol.HTTP,
-            broadcast: bool = False;
+            broadcast: bool = False,
+            require_auth: bool = True;
     }
 
     def postinit -> None;
