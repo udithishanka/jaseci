@@ -619,8 +619,8 @@ impl JacAPIServer.create_function_callback(
     func_name: str, restspec: Any = None
 ) -> Callable[..., TransportResponse] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
-    # Check restspec.require_auth if available, otherwise fall back to introspector
-    if restspec and hasattr(restspec, 'require_auth') {
+    # Check restspec.require_auth if explicitly set, otherwise fall back to introspector
+    if restspec and getattr(restspec, 'require_auth', None) is not None {
         requires_auth = restspec.require_auth;
     } else {
         requires_auth = self.introspector.is_auth_required_for_function(func_name);
@@ -796,8 +796,8 @@ impl JacAPIServer.create_walker_callback(
     walker_name: str, has_node_param: bool = False, restspec: Any = None
 ) -> Callable[..., TransportResponse] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
-    # Check restspec.require_auth if available, otherwise fall back to introspector
-    if restspec and hasattr(restspec, 'require_auth') {
+    # Check restspec.require_auth if explicitly set, otherwise fall back to introspector
+    if restspec and getattr(restspec, 'require_auth', None) is not None {
         requires_auth = restspec.require_auth;
     } else {
         requires_auth = self.introspector.is_auth_required_for_walker(walker_name);
