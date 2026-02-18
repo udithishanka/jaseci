@@ -272,6 +272,11 @@ impl ExecutionManager.execute_function(
         if isgenerator(reports) or isinstance(reports, AsyncGenerator) {
             return reports;
         } else {
+            # Pass through raw HTTP Response objects without serialization
+            import from starlette.responses { Response as StarletteResponse }
+            if isinstance(result, StarletteResponse) {
+                return {'_raw_response': result, 'reports': JacSerializer.serialize(reports)};
+            }
             return {
                 'result': JacSerializer.serialize(result),
                 'reports': JacSerializer.serialize(reports)

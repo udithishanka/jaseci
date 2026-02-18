@@ -649,6 +649,10 @@ impl JacAPIServer.create_function_callback(
         result = await self.execution_manager.execute_function(
             self.get_functions()[func_name], kwargs, (username or '__guest__')
         );
+        # Pass through raw HTTP Response objects directly
+        if isinstance(result, dict) and '_raw_response' in result {
+            return result['_raw_response'];
+        }
         # Handle streaming responses (generators/async generators)
         if (isgenerator(result) or isinstance(result, AsyncGenerator)) {
             return StreamingResponse(
