@@ -83,13 +83,13 @@ obj JacAPIServer(JServer) {
     ) -> Callable[..., TransportResponse];
 
     def create_walker_parameters(
-        walker_name: str, invoke_on_root: bool, method: HTTPMethod = HTTPMethod.POST
+        walker_name: str, invoke_on_root: bool, method: HTTPMethod = HTTPMethod.POST, path: str = ""
     ) -> list[APIParameter];
 
     def register_walkers_endpoints -> None;
     def create_function_callback(func_name: str) -> Callable[..., TransportResponse];
     def create_function_parameters(
-        func_name: str, method: HTTPMethod = HTTPMethod.POST
+        func_name: str, method: HTTPMethod = HTTPMethod.POST, path: str = ""
     ) -> list[APIParameter];
 
     def register_functions_endpoints -> None;
