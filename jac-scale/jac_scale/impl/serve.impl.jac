@@ -626,8 +626,8 @@ impl JacAPIServer.create_function_callback(
     }
     async def callback(**kwargs: JsonValue) -> TransportResponse {
         username: (str | None) = None;
+        authorization = kwargs.pop('Authorization', None);
         if requires_auth {
-            authorization = kwargs.pop('Authorization', None);
             token: (str | None) = None;
             if (
                 authorization
@@ -790,8 +790,8 @@ impl JacAPIServer.create_walker_callback(
         nd: (str | None) = None, **kwargs: JsonValue
     ) -> TransportResponse {
         username: (str | None) = None;
+        authorization = kwargs.pop('Authorization', None);
         if requires_auth {
-            authorization = kwargs.pop('Authorization', None);
             token: (str | None) = None;
             if (
                 authorization
