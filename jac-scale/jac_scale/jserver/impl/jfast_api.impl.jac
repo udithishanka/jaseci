@@ -654,6 +654,11 @@ impl JFastApiServer._route_priority(
     );
     catchall_priority = 1 if is_catchall else 0;
     priority = param_count;
+    # For catch-all routes, more specific paths (more segments) must register
+    # first so they match before generic catch-alls like /{path:path}
+    if is_catchall {
+        return (catchall_priority, -segment_count, priority, path);
+    }
     return (catchall_priority, priority, -segment_count, path);
 }
 
