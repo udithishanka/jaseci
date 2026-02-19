@@ -88,12 +88,22 @@ impl JacAPIServer.start(
                         f"  ✔ Client bundle ready ({elapsed:.1f}s)", style="success"
                     );
                 } except Exception as e {
-                    console.warning(f"Failed to build client bundle: {e}");
-                    console.print(
-                        "\n  Client pages will not be available until this is fixed.\n",
-                        style="muted",
-                        file=sys.stderr
+                    # Format error with diagnostics
+                    error_output = str(e);
+                    project_dir = config.project_root if config else Path.cwd();
+                    formatted_error = Jac.format_build_error(
+                        error_output=error_output,
+                        project_dir=project_dir,
+                        config=config
                     );
+                    console.warning("Failed to build client bundle");
+                    console.print(file=sys.stderr);
+                    console.print(formatted_error, file=sys.stderr);
+                    console.warning(
+                        'Client pages will not be available until this is fixed.',
+                        emoji=True
+                    );
+                    console.print(file=sys.stderr);
                     console.info(
                         'Try again after running: jac clean --all', emoji=True
                     );
@@ -670,7 +680,7 @@ impl JacAPIServer.register_walkers_endpoints -> None {
         self.server.add_endpoint(
             JEndPoint(
                 method=spec_method,
-                path=f"{spec_path}/{{node}}",
+                path=f"{spec_path}/{{nd}}",
                 callback=self.create_walker_callback(walker_name, has_node_param=True),
                 parameters=self.create_walker_parameters(
                     walker_name, invoke_on_root=False, method=spec_method
@@ -756,7 +766,7 @@ impl JacAPIServer.create_walker_callback(
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     requires_auth = self.introspector.is_auth_required_for_walker(walker_name);
     async def callback(
-        node: (str | None) = None, **kwargs: JsonValue
+        nd: (str | None) = None, **kwargs: JsonValue
     ) -> TransportResponse {
         username: (str | None) = None;
         if requires_auth {
@@ -778,8 +788,8 @@ impl JacAPIServer.create_walker_callback(
                 );
             }
         }
-        if node {
-            kwargs['_jac_spawn_node'] = node;
+        if nd {
+            kwargs['_jac_spawn_node'] = nd;
         }
         result = await self.execution_manager.spawn_walker(
             self.get_walkers()[walker_name], kwargs, (username or '__guest__')
@@ -1208,7 +1218,7 @@ impl JacAPIServer.postinit -> None {
     # Initialize Prometheus metrics if enabled
     import from jac_scale.factories.utility_factory { UtilityFactory }
     import time;
-    metrics_config = get_scale_config().get_metrics_config();
+    metrics_config = get_scale_config().get_monitoring_config();
     self._metrics = UtilityFactory.create_metrics('prometheus', metrics_config);
     if self._metrics.is_enabled() {
         metrics_collector = self._metrics;
@@ -1355,7 +1365,7 @@ impl JacAPIServer.register_dynamic_walker_endpoint -> None {
     async def dynamic_walker_handler(
         request: Request,
         walker_name: str,
-        node: str | None = None,
+        nd: str | None = None,
         Authorization: str | None = None
     ) -> TransportResponse {
         # Parse request body or query params to get walker fields
@@ -1421,8 +1431,8 @@ impl JacAPIServer.register_dynamic_walker_endpoint -> None {
         }
 
         # Add node to kwargs if provided
-        if node {
-            kwargs['_jac_spawn_node'] = node;
+        if nd {
+            kwargs['_jac_spawn_node'] = nd;
         }
 
         result = await self.execution_manager.spawn_walker(
