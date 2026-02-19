@@ -982,28 +982,36 @@ If the secret already exists, it is replaced with the updated values.
 
 ---
 
-## Prometheus Metrics
+## Monitoring
 
-jac-scale supports Prometheus metrics collection for HTTP request monitoring and optional walker execution timing.
+The `[plugins.scale.monitoring]` section controls both the HTTP `/metrics` endpoint for Prometheus scraping and the automatic deployment of a Prometheus + Grafana monitoring stack in Kubernetes.
 
 ### Configuration
 
 ```toml
-[plugins.scale.metrics]
+[plugins.scale.monitoring]
 enabled = true
 endpoint = "/metrics"
 namespace = "myapp"
 walker_metrics = false
 histogram_buckets = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0]
+prometheus_admin_password = "Adminpassword123"
+prometheus_node_port = 30090
+grafana_node_port = 30300
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable metrics collection |
+| `enabled` | bool | `false` | Enable `/metrics` endpoint and K8s monitoring stack |
 | `endpoint` | string | `"/metrics"` | HTTP path for Prometheus scraping |
-| `namespace` | string | K8s namespace (sanitized) | Metric name prefix |
+| `namespace` | string | K8s namespace (sanitized) | Metric name prefix (e.g., `myapp_http_requests_total`) |
 | `walker_metrics` | bool | `false` | Track per-walker execution timing |
-| `histogram_buckets` | list | `[0.005 ... 10.0]` | Latency histogram bucket boundaries (seconds) |
+| `histogram_buckets` | list | `[0.005 ... 10.0]` | Histogram bucket boundaries (seconds) |
+| `prometheus_admin_password` | string | `"Adminpassword123"` | Grafana admin password |
+| `prometheus_node_port` | int | `30090` | NodePort for Prometheus (non-AWS clusters) |
+| `grafana_node_port` | int | `30300` | NodePort for Grafana (non-AWS clusters) |
+
+The `namespace` value is auto-derived from the K8s namespace if not explicitly set. Non-alphanumeric characters are replaced with `_` (e.g., `my-app` becomes `my_app`).
 
 ### Exposed Metrics
 
@@ -1014,9 +1022,34 @@ histogram_buckets = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0,
 | `{namespace}_http_requests_in_progress` | Gauge | - | Currently active requests |
 | `{namespace}_walker_duration_seconds` | Histogram | `walker_name`, `success` | Walker execution time (requires `walker_metrics = true`) |
 
-### Scraping
+### Kubernetes Monitoring Stack
 
-When enabled, metrics are available at the configured endpoint (default `GET /metrics`) in Prometheus text format.
+When `enabled = true` and deploying to Kubernetes (`jac start app.jac --scale`), jac-scale automatically deploys:
+
+**Prometheus:**
+
+- Deployment (`{app_name}-prometheus`) running `prom/prometheus:latest`
+- ClusterIP Service on port 9090 (internal only)
+- ConfigMap with `prometheus.yml` pre-configured to scrape the app's `/metrics` endpoint
+
+**Grafana:**
+
+- Deployment (`{app_name}-grafana`) running `grafana/grafana:latest`
+- Service exposed via NodePort (default `30300`) or LoadBalancer on AWS
+- Admin credentials stored in a K8s Secret
+- Pre-built dashboard ("Jac Scale - App Metrics") with 11 panels:
+    - HTTP Request Rate, Error Rate (5xx), Request Latency (p50/p95/p99)
+    - Active Requests, Requests by Status Code, Requests by Path
+    - p95 Latency by Path, p95 Latency by Method
+    - Average Request Duration, Average Latency per Path
+    - Request Duration Heatmap
+- Prometheus datasource auto-configured pointing to the internal Prometheus service
+
+All monitoring resources are automatically cleaned up during `jac destroy`.
+
+### Local Development
+
+When running locally (`jac start app.jac` without `--scale`), only the HTTP `/metrics` endpoint is enabled. You can scrape it with a local Prometheus instance:
 
 ```yaml
 # prometheus.yml
@@ -1026,6 +1059,31 @@ scrape_configs:
       - targets: ['localhost:8000']
     metrics_path: '/metrics'
 ```
+
+---
+
+## Horizontal Pod Autoscaler (HPA)
+
+jac-scale automatically creates a Kubernetes HPA for the application deployment. The HPA scales pods based on average CPU utilization.
+
+### Configuration
+
+```toml
+[plugins.scale.kubernetes]
+min_replicas = 1
+max_replicas = 3
+cpu_utilization_target = 50
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `min_replicas` | int | `1` | Minimum number of pod replicas |
+| `max_replicas` | int | `3` | Maximum number of pod replicas |
+| `cpu_utilization_target` | int | `50` | Target average CPU utilization percentage |
+
+The HPA (`{app_name}-hpa`) is created using the `autoscaling/v2` API and targets the application deployment. When average CPU across pods exceeds the target, K8s scales up to `max_replicas`. When load drops, it scales back down to `min_replicas`.
+
+The HPA is automatically deleted during `jac destroy`.
 
 ---
 
