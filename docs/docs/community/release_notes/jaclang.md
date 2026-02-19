@@ -7,6 +7,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Fix: `_jac` ES Runtime Correctness**: Fixed `str.split` with `maxsplit` to keep the remainder (matching Python behavior), `dict.eq` to compare key-by-key instead of order-dependent `JSON.stringify`, and builtin dispatch (e.g., `sorted(key=lambda...)`) to correctly pass keyword arguments to the runtime.
 - **Fix: Remove Dead `abs` Prefix Modifier**: Removed the unused `abs` prefix on archetypes (`abs obj Foo { }`) from the grammar and parser. The prefix was parsed but silently discarded; archetype abstractness is computed from contained abstract abilities. The `abs` keyword remains valid only as an ability body terminator (`can foo() abs;`).
 - **ES Codegen: Expanded Primitive Coverage**: Added `bool()` with Python truthiness semantics (empty list/dict/set are falsy), `range()` builtin (supports `for i in range(n)`), `slice()` constructor, `bytearray()` constructor, dedicated `BoolEmitter` for correct `&`/`|`/`^` bool-returning bitwise ops, enhanced `format()` with format-spec support (`f`, `d`, `b`, `o`, `x`, `e`, `%`, width, alignment), and fixed `int()` to handle booleans and floats correctly via `Math.trunc(Number(x))`.
+- 1 Minor refactors/chages
 
 ## jaclang 0.10.3 (Latest Release)
 
