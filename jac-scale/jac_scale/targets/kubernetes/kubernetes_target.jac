@@ -767,9 +767,7 @@ class KubernetesTarget(DeploymentTarget) {
             template_metadata: dict = {'labels': {'app': app_name}};
             if self.k8s_config.deployment_strategy == 'rolling' {
                 template_metadata['annotations'] = {
-                    'kubectl.kubernetes.io/restartedAt': datetime.now(
-                        timezone.utc
-                    ).isoformat()
+                    'kubectl.kubernetes.io/restartedAt': datetime.now(timezone.utc).isoformat()
                 };
             }
 
