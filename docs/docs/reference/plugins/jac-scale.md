@@ -1038,11 +1038,11 @@ When `enabled = true` and deploying to Kubernetes (`jac start app.jac --scale`),
 - Service exposed via NodePort (default `30300`) or LoadBalancer on AWS
 - Admin credentials stored in a K8s Secret
 - Pre-built dashboard ("Jac Scale - App Metrics") with 11 panels:
-    - HTTP Request Rate, Error Rate (5xx), Request Latency (p50/p95/p99)
-    - Active Requests, Requests by Status Code, Requests by Path
-    - p95 Latency by Path, p95 Latency by Method
-    - Average Request Duration, Average Latency per Path
-    - Request Duration Heatmap
+  - HTTP Request Rate, Error Rate (5xx), Request Latency (p50/p95/p99)
+  - Active Requests, Requests by Status Code, Requests by Path
+  - p95 Latency by Path, p95 Latency by Method
+  - Average Request Duration, Average Latency per Path
+  - Request Duration Heatmap
 - Prometheus datasource auto-configured pointing to the internal Prometheus service
 
 All monitoring resources are automatically cleaned up during `jac destroy`.
