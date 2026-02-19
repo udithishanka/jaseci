@@ -434,6 +434,9 @@ test "deploy all in one" {
     assert response.status_code == 200;
     print(f"Successfully reached app page at {url}");
 
+    # Restore default strategy before destroy to test the recreate cleanup path
+    deployment_target.k8s_config.deployment_strategy = "recreate";
+
     # Cleanup using new architecture
     deployment_target.destroy(app_name);
 

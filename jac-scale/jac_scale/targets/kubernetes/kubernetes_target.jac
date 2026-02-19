@@ -31,6 +31,7 @@ import from jac_scale.factories.registry_factory { ImageRegistryFactory }
 import from jac_scale.targets.kubernetes.monitoring { MonitoringDeployer }
 import from jac_scale.targets.kubernetes.hpa.hpa { create_hpa }
 import time;
+import from datetime { datetime, timezone }
 import from kubernetes { client, config as k8s_config }
 import from kubernetes.client.exceptions { ApiException }
 
@@ -748,7 +749,13 @@ class KubernetesTarget(DeploymentTarget) {
                             break;
                         }
                     }
-                } except Exception { }
+                } except Exception as e {
+                    if self.logger {
+                        self.logger.warning(
+                            f"Could not detect app pod node for RWO affinity: {e}"
+                        );
+                    }
+                }
             }
 
             # 11. Build service and deployment
@@ -760,7 +767,9 @@ class KubernetesTarget(DeploymentTarget) {
             template_metadata: dict = {'labels': {'app': app_name}};
             if self.k8s_config.deployment_strategy == 'rolling' {
                 template_metadata['annotations'] = {
-                    'kubectl.kubernetes.io/restartedAt': str(time.time())
+                    'kubectl.kubernetes.io/restartedAt': datetime.now(
+                        timezone.utc
+                    ).isoformat()
                 };
             }
 
@@ -791,6 +800,16 @@ class KubernetesTarget(DeploymentTarget) {
                 };
             }
 
+            # Build K8s strategy spec based on configured deployment strategy
+            if self.k8s_config.deployment_strategy == 'rolling' {
+                k8s_strategy = {
+                    'type': 'RollingUpdate',
+                    'rollingUpdate': {'maxSurge': 1, 'maxUnavailable': 0}
+                };
+            } else {
+                k8s_strategy = {'type': 'Recreate'};
+            }
+
             deployment = {
                 'apiVersion': 'apps/v1',
                 'kind': 'Deployment',
@@ -802,10 +821,7 @@ class KubernetesTarget(DeploymentTarget) {
                 'spec': {
                     'replicas': 1,
                     'selector': {'matchLabels': {'app': app_name}},
-                    'strategy': {
-                        'type': 'RollingUpdate',
-                        'rollingUpdate': {'maxSurge': 1, 'maxUnavailable': 0}
-                    },
+                    'strategy': k8s_strategy,
                     'template': {'metadata': template_metadata, 'spec': pod_spec}
                 }
             };
