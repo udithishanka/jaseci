@@ -2,7 +2,7 @@
 import from byllm.llm { MockLLM, Model }
 import from byllm.mtir { MTIR, MTRuntime }
 import from byllm.plugin { JacRuntime }
-import from byllm.types { Image, MockToolCall, Video }
+import from byllm.types { Image, MockToolCall, StreamEvent, Video }
 
 glob by = JacRuntime.by ,
      __all__ = [
@@ -13,5 +13,6 @@ glob by = JacRuntime.by ,
          'Model',
          'MTIR',
          'MTRuntime',
+         'StreamEvent',
          'Video'
      ];

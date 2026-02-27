@@ -13,6 +13,10 @@ Handles both streaming and non-streaming modes. For tool-enabled requests,
 implements a ReAct loop that continues until finish_tool is called.
 """
 impl BaseLLM.invoke(mt_run: MTRuntime) -> object {
+    # If logging is enabled with streaming, yield StreamEvent objects
+    if mt_run.stream and mt_run.call_params.get("logging", False) {
+        return self._invoke_streaming(mt_run);
+    }
     # If streaming without tools, stream immediately
     if mt_run.stream and len(mt_run.tools) == 0 {
         return self.dispatch_streaming(mt_run);
@@ -266,5 +270,110 @@ impl BaseLLM._stream_final_answer(mt_run: MTRuntime) -> Generator[str, None, Non
     } finally {
         # Restore tools (though we're done at this point)
         mt_run.tools = original_tools;
+    }
+}
+
+"""Invoke the LLM with logging enabled, yielding StreamEvent objects.
+
+When logging=True is set in call_params, this method replaces the default
+invoke path. It yields StreamEvent for every intermediate step (thoughts,
+tool calls, tool results) and wraps final answer tokens in StreamEvent too.
+Works for both tool and non-tool streaming paths.
+"""
+impl BaseLLM._invoke_streaming(mt_run: MTRuntime) -> Generator[StreamEvent, None, None] {
+    # No tools: wrap plain streaming tokens in StreamEvent
+    if len(mt_run.tools) == 0 {
+        for token in self.dispatch_streaming(mt_run) {
+            yield StreamEvent(event_type="chunk", data={"content": token});
+        }
+        return;
+    }
+
+    # ReAct loop with tools
+    max_iters = (
+        mt_run.call_params.get("max_react_iterations")
+        or self.call_params.get("max_react_iterations")
+        or _call_params_config.get("max_react_iterations")
+        or 0
+    );
+    iter_count = 0;
+
+    while True {
+        iter_count += 1;
+
+        if int(max_iters) > 0 and iter_count > int(max_iters) {
+            yield StreamEvent(
+                event_type="steps_done",
+                data={"iterations": iter_count - 1, "reason": "max_iterations"}
+            );
+            for token in self._stream_final_answer(mt_run) {
+                yield StreamEvent(event_type="chunk", data={"content": token});
+            }
+            return;
+        }
+
+        resp = self.dispatch_no_streaming(mt_run);
+
+        # Yield thought if the LLM produced reasoning text
+        if resp.output and str(resp.output).strip() {
+            yield StreamEvent(
+                event_type="thought",
+                data={"content": str(resp.output).strip(), "iteration": iter_count}
+            );
+        }
+
+        if resp.tool_calls {
+            for tool_call in resp.tool_calls {
+                if tool_call.is_finish_call() {
+                    mt_run.add_message(tool_call());
+                    yield StreamEvent(
+                        event_type="steps_done",
+                        data={"iterations": iter_count}
+                    );
+                    for token in self._stream_final_answer(mt_run) {
+                        yield StreamEvent(event_type="chunk", data={"content": token});
+                    }
+                    return;
+                }
+
+                # Yield tool_call event before execution
+                yield StreamEvent(
+                    event_type="tool_call",
+                    data={
+                        "tool": tool_call.tool.get_name(),
+                        "args": tool_call.args,
+                        "call_id": tool_call.call_id,
+                        "iteration": iter_count
+                    }
+                );
+
+                # Execute the tool
+                result_msg = tool_call();
+
+                # Yield tool_result event after execution
+                yield StreamEvent(
+                    event_type="tool_result",
+                    data={
+                        "tool": tool_call.tool.get_name(),
+                        "result": result_msg.content[:500],
+                        "call_id": tool_call.call_id,
+                        "iteration": iter_count
+                    }
+                );
+
+                mt_run.add_message(result_msg);
+            }
+        } else {
+            break;
+        }
+    }
+
+    # Fallback: no tool calls, no finish_tool
+    yield StreamEvent(
+        event_type="steps_done",
+        data={"iterations": iter_count}
+    );
+    if resp.output {
+        yield StreamEvent(event_type="chunk", data={"content": str(resp.output)});
     }
 }

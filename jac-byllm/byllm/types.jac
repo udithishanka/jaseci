@@ -105,6 +105,17 @@ obj CompletionResult {
         tool_calls: list[ToolCall];
 }
 
+"""Unified event type for streaming output from by llm() calls.
+
+Yielded by invoke() when logging=True is set in call_params.
+All intermediate steps (thoughts, tool calls, results) and final
+answer chunks share this single type.
+"""
+obj StreamEvent {
+    has event_type: str,
+        data: dict;
+}
+
 # -----------------------------------------------------------------------------
 # Media content types
 # -----------------------------------------------------------------------------

@@ -20,6 +20,7 @@ import from byllm.types {
     CompletionResult,
     LiteLLMMessage,
     MockToolCall,
+    StreamEvent,
     ToolCall,
     Message,
     MessageRole
@@ -65,6 +66,7 @@ obj BaseLLM {
     def model_call_no_stream(params: dict) -> dict;
     def model_call_with_stream(params: dict) -> Generator[str, None, None];
     def _stream_final_answer(mt_run: MTRuntime) -> Generator[str, None, None];
+    def _invoke_streaming(mt_run: MTRuntime) -> Generator[StreamEvent, None, None];
 }
 
 """Mock LLM connector that simulates responses for testing.
