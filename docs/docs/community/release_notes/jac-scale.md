@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.3 (Unreleased)
 
+- **Shared Ingress Support**: Auto-detect existing Ingress Controller in the cluster and route traffic through a shared `Ingress` resource instead of provisioning a dedicated NLB per namespace. Saves ~$16/mo per deployment on AWS. Cloud-agnostic — works with nginx-ingress, AWS ALB Controller, GCP Ingress, Traefik. Configurable via `use_ingress`, `ingress_base_domain`, and `ingress_class_name` in `KubernetesConfig`. Falls back to current `LoadBalancer`/`NodePort` behavior when no Ingress Controller is found.
+
 ## jac-scale 0.2.2 (Latest Release)
 
 - **Data Persists Across Server Restarts**: Graph nodes and edges created during a session now persist automatically in MongoDB. When you restart your `jac start` server, previously created data is restored and accessible - no manual save operations required.
