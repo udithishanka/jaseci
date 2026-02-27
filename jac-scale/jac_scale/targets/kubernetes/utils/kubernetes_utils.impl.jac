@@ -434,6 +434,44 @@ impl cluster_type -> str {
     }
 }
 
+"""Detect an available IngressClass in the cluster.
+
+If preferred_class is specified, returns it only if it exists.
+Otherwise returns the default IngressClass, or the first available one.
+Returns None if no IngressClass is found or on any error.
+"""
+impl detect_ingress_class(preferred_class: (str | None) = None) -> (str | None) {
+    try {
+        try {
+            config.load_kube_config();
+        } except ConfigException {
+            config.load_incluster_config();
+        }
+        networking_v1 = client.NetworkingV1Api();
+        ingress_classes = networking_v1.list_ingress_class();
+        if not ingress_classes.items {
+            return None;
+        }
+        if preferred_class {
+            for ic in ingress_classes.items {
+                if ic.metadata.name == preferred_class {
+                    return preferred_class;
+                }
+            }
+            return None;
+        }
+        for ic in ingress_classes.items {
+            annotations = ic.metadata.annotations or {};
+            if annotations.get('ingressclass.kubernetes.io/is-default-class') == 'true' {
+                return ic.metadata.name;
+            }
+        }
+        return ingress_classes.items[0].metadata.name;
+    } except Exception {
+        return None;
+    }
+}
+
 impl check_pods_restarted(namespace: str, app_name: str) -> bool {
     try {
         config.load_kube_config();

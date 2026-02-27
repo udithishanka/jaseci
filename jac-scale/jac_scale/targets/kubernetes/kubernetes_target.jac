@@ -18,6 +18,7 @@ import from jac_scale.targets.kubernetes.utils.kubernetes_utils {
     delete_k8s_secret,
     delete_if_exists,
     delete_namespace,
+    detect_ingress_class,
     check_K8s_status,
     ensure_namespace_exists,
     ensure_pvc_exists,
@@ -136,31 +137,76 @@ class KubernetesTarget(DeploymentTarget) {
         return {'readiness': probe_config, 'liveness': liveness_probe};
     }
 
+    """Determine how the application should be exposed: 'ingress', 'loadbalancer', or 'nodeport'."""
+    def _resolve_exposure_mode(
+        self: KubernetesTarget, cluster_env: str
+    ) -> tuple[str, (str | None)] {
+        if self.k8s_config.use_ingress {
+            detected_class = detect_ingress_class(self.k8s_config.ingress_class_name);
+            if detected_class {
+                if self.k8s_config.ingress_base_domain {
+                    if self.logger {
+                        self.logger.info(
+                            f"Ingress mode: using IngressClass '{detected_class}' "
+                            f"with base domain '{self.k8s_config.ingress_base_domain}'"
+                        );
+                    }
+                    return ('ingress', detected_class);
+                } else {
+                    if self.logger {
+                        self.logger.warn(
+                            f"IngressClass '{detected_class}' found but ingress_base_domain "
+                            f"is not configured. Falling back to direct service exposure."
+                        );
+                    }
+                }
+            }
+        }
+        if cluster_env == 'aws' {
+            return ('loadbalancer', None);
+        }
+        return ('nodeport', None);
+    }
+
     """Build Kubernetes service configuration."""
     def _build_service_config(
-        self: KubernetesTarget, app_name: str, cluster_env: str, health_check_path: str
+        self: KubernetesTarget,
+        app_name: str,
+        cluster_env: str,
+        health_check_path: str,
+        exposure_mode: str
     ) -> dict[(str, Any)] {
-        service_type = 'LoadBalancer' if cluster_env == 'aws' else 'NodePort';
-        service_port = 80 if cluster_env == 'aws' else self.k8s_config.container_port;
-        port_config: dict[(str, Any)] = {
-            'protocol': 'TCP',
-            'port': service_port,
-            'targetPort': self.k8s_config.container_port
-        };
-        if cluster_env != 'aws' {
-            port_config['nodePort'] = self.k8s_config.node_port;
-        }
-
         service_metadata: dict[(str, Any)] = {
             'name': f"{app_name}-service",
             'namespace': self.k8s_config.namespace,
             'labels': {'app': app_name, 'managed': 'jac-scale'}
         };
 
-        if cluster_env == 'aws' {
+        if exposure_mode == 'ingress' {
+            service_type = 'ClusterIP';
+            port_config: dict[(str, Any)] = {
+                'protocol': 'TCP',
+                'port': 80,
+                'targetPort': self.k8s_config.container_port
+            };
+        } elif exposure_mode == 'loadbalancer' {
+            service_type = 'LoadBalancer';
+            port_config = {
+                'protocol': 'TCP',
+                'port': 80,
+                'targetPort': self.k8s_config.container_port
+            };
             service_metadata['annotations'] = {
                 'service.beta.kubernetes.io/aws-load-balancer-type': 'nlb',
                 'service.beta.kubernetes.io/aws-load-balancer-healthcheck-path': health_check_path
+            };
+        } else {
+            service_type = 'NodePort';
+            port_config = {
+                'protocol': 'TCP',
+                'port': self.k8s_config.container_port,
+                'targetPort': self.k8s_config.container_port,
+                'nodePort': self.k8s_config.node_port
             };
         }
 
@@ -174,8 +220,53 @@ class KubernetesTarget(DeploymentTarget) {
                 'selector': {'app': app_name}
             }
         };
-
         return service;
+    }
+
+    """Build Kubernetes Ingress resource for host-based routing."""
+    def _build_ingress_config(
+        self: KubernetesTarget, app_name: str, ingress_class_name: str
+    ) -> dict[(str, Any)] {
+        namespace = self.k8s_config.namespace;
+        base_domain = self.k8s_config.ingress_base_domain;
+        if namespace == 'default' {
+            host = f"{app_name}.{base_domain}";
+        } else {
+            host = f"{namespace}-{app_name}.{base_domain}";
+        }
+
+        ingress = {
+            'apiVersion': 'networking.k8s.io/v1',
+            'kind': 'Ingress',
+            'metadata': {
+                'name': f"{app_name}-ingress",
+                'namespace': namespace,
+                'labels': {'app': app_name, 'managed': 'jac-scale'}
+            },
+            'spec': {
+                'ingressClassName': ingress_class_name,
+                'rules': [
+                    {
+                        'host': host,
+                        'http': {
+                            'paths': [
+                                {
+                                    'path': '/',
+                                    'pathType': 'Prefix',
+                                    'backend': {
+                                        'service': {
+                                            'name': f"{app_name}-service",
+                                            'port': {'number': 80}
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        };
+        return ingress;
     }
 
     """Build the bash command for setting up Jaseci runtime environment."""
@@ -544,11 +635,37 @@ class KubernetesTarget(DeploymentTarget) {
         app_name: str,
         namespace: str,
         health_check_path: str,
-        cluster_env: str
+        cluster_env: str,
+        exposure_mode: str = 'nodeport'
     ) -> str {
         path = health_check_path;
         deployment_details = "";
-        if cluster_env == 'aws' {
+        if exposure_mode == 'ingress' {
+            base_domain = self.k8s_config.ingress_base_domain;
+            if namespace == 'default' {
+                host = f"{app_name}.{base_domain}";
+            } else {
+                host = f"{namespace}-{app_name}.{base_domain}";
+            }
+            ingress_url = f"http://{host}";
+            time.sleep(10);
+            (deployment_status, deployment_details) = check_deployment_status(
+                self.k8s_config.node_port,
+                path,
+                nlb_url=ingress_url,
+                namespace=namespace,
+                app_name=app_name
+            );
+            if not deployment_status {
+                if self.logger {
+                    self.logger.warn(
+                        f"Could not reach app via Ingress host '{host}'. "
+                        f"Ensure DNS for '*.{base_domain}' points to the Ingress Controller."
+                    );
+                }
+                deployment_details = f"Ingress created at {host} (DNS may need configuration)";
+            }
+        } elif cluster_env == 'aws' {
             time.sleep(self.k8s_config.aws_nlb_wait);
             nlb_url = None;
             try {
@@ -685,15 +802,14 @@ class KubernetesTarget(DeploymentTarget) {
                 }
             }
 
-            # 4. Determine cluster type
+            # 4. Determine cluster type and exposure mode
             cluster_env = cluster_type();
-            service_type = 'LoadBalancer'
-                if cluster_env in ('aws', 'gcp', 'azure')
-                else 'NodePort';
+            (exposure_mode, resolved_ingress_class) = self._resolve_exposure_mode(
+                cluster_env
+            );
 
-            # 4b. On local clusters, verify that the requested NodePorts are not
-            #     already bound by a service in another namespace.
-            if cluster_env == 'local' {
+            # 4b. On local clusters with nodeport mode, verify NodePorts are not bound
+            if exposure_mode == 'nodeport' {
                 check_node_ports_available(
                     node_port=self.k8s_config.node_port,
                     prometheus_node_port=(
@@ -763,7 +879,7 @@ class KubernetesTarget(DeploymentTarget) {
 
             # 11. Build service and deployment
             service = self._build_service_config(
-                app_name, cluster_env, health_check_path
+                app_name, cluster_env, health_check_path, exposure_mode
             );
             deployment = {
                 'apiVersion': 'apps/v1',
@@ -817,6 +933,31 @@ class KubernetesTarget(DeploymentTarget) {
                 }
             }
             details["create_jaseci_application_service"] = "Successful";
+            # 14b. Create Ingress resource if in ingress mode
+            if exposure_mode == 'ingress' and resolved_ingress_class {
+                ingress_resource = self._build_ingress_config(
+                    app_name, resolved_ingress_class
+                );
+                networking_v1 = client.NetworkingV1Api();
+                ingress_name = f"{app_name}-ingress";
+                try {
+                    networking_v1.read_namespaced_ingress(
+                        name=ingress_name, namespace=namespace
+                    );
+                    networking_v1.replace_namespaced_ingress(
+                        name=ingress_name, namespace=namespace, body=ingress_resource
+                    );
+                } except ApiException as e {
+                    if e.status == 404 {
+                        networking_v1.create_namespaced_ingress(
+                            namespace=namespace, body=ingress_resource
+                        );
+                    } else {
+                        raise ;
+                    }
+                }
+                details["create_ingress_resource"] = "Successful";
+            }
             # 16. Enable horizontal pod autoscaling
             create_hpa(
                 namespace=namespace,
@@ -833,7 +974,11 @@ class KubernetesTarget(DeploymentTarget) {
 
             # 16. Wait for deployment and get service URL
             deployment_details = self._wait_for_deployment(
-                app_name, namespace, health_check_path, cluster_env
+                app_name,
+                namespace,
+                health_check_path,
+                cluster_env,
+                exposure_mode=exposure_mode
             );
             details["health_check_of_deployment"] = deployment_details;
             service_url = self.get_service_url(app_name);
@@ -885,6 +1030,19 @@ class KubernetesTarget(DeploymentTarget) {
             try {
                 core_v1.read_namespaced_service(
                     name=f"{app_name}-service", namespace=namespace
+                );
+                resources_exist = True;
+            } except ApiException as e {
+                if e.status != 404 {
+                    raise ;
+                }
+            }
+
+            # Check ingress
+            try {
+                networking_v1 = client.NetworkingV1Api();
+                networking_v1.read_namespaced_ingress(
+                    name=f"{app_name}-ingress", namespace=namespace
                 );
                 resources_exist = True;
             } except ApiException as e {
@@ -1133,6 +1291,15 @@ class KubernetesTarget(DeploymentTarget) {
                 'Service'
             );
 
+            # Delete Ingress resource if it exists
+            networking_v1 = client.NetworkingV1Api();
+            delete_if_exists(
+                networking_v1.delete_namespaced_ingress,
+                f"{app_name}-ingress",
+                namespace,
+                'Ingress'
+            );
+
             # Delete K8s Secret if it exists
             delete_k8s_secret(core_v1, namespace, f"{app_name}-secrets");
 
@@ -1315,25 +1482,39 @@ class KubernetesTarget(DeploymentTarget) {
             } except ConfigException {
                 k8s_cluster_config.load_incluster_config();
             }
-            core_v1 = client.CoreV1Api();
             namespace = self.k8s_config.namespace;
-            service_name = f"{app_name}-service";
 
+            # Check for Ingress resource first (indicates ingress mode)
+            try {
+                networking_v1 = client.NetworkingV1Api();
+                ingress_obj = networking_v1.read_namespaced_ingress(
+                    name=f"{app_name}-ingress", namespace=namespace
+                );
+                if ingress_obj.spec.rules and len(ingress_obj.spec.rules) > 0 {
+                    host = ingress_obj.spec.rules[0].host;
+                    if host {
+                        return f"http://{host}";
+                    }
+                }
+            } except ApiException as e {
+                if e.status != 404 {
+                    raise ;
+                }
+            }
+
+            # Fallback to service-based URL
+            core_v1 = client.CoreV1Api();
             service = core_v1.read_namespaced_service(
-                name=service_name, namespace=namespace
+                name=f"{app_name}-service", namespace=namespace
             );
-
             cluster_env = cluster_type();
-
             if cluster_env == 'aws' {
-                # AWS LoadBalancer
-                ingress = service.status.load_balancer.ingress;
-                if ingress and len(ingress) > 0 {
-                    endpoint = ingress[0].hostname or ingress[0].ip;
+                lb_ingress = service.status.load_balancer.ingress;
+                if lb_ingress and len(lb_ingress) > 0 {
+                    endpoint = lb_ingress[0].hostname or lb_ingress[0].ip;
                     return f"http://{endpoint}";
                 }
             } else {
-                # NodePort
                 node_port = self.k8s_config.node_port;
                 return f"http://localhost:{node_port}";
             }
@@ -1471,22 +1652,37 @@ class KubernetesTarget(DeploymentTarget) {
             }
         }
 
-        # 4. Application service URL
+        # 4. Application service URL — check Ingress first
         is_aws = cluster_type() == 'aws';
         try {
-            svc = core_v1.read_namespaced_service(
-                name=f"{app_name}-service", namespace=namespace
+            networking_v1 = client.NetworkingV1Api();
+            ingress_obj = networking_v1.read_namespaced_ingress(
+                name=f"{app_name}-ingress", namespace=namespace
             );
-            if is_aws {
-                ingress = svc.status.load_balancer.ingress;
-                if ingress and len(ingress) > 0 {
-                    endpoint = ingress[0].hostname or ingress[0].ip;
-                    urls['app'] = f"http://{endpoint}";
+            if ingress_obj.spec.rules and len(ingress_obj.spec.rules) > 0 {
+                host = ingress_obj.spec.rules[0].host;
+                if host {
+                    urls['app'] = f"http://{host}";
                 }
-            } else {
-                urls['app'] = f"http://localhost:{self.k8s_config.node_port}";
             }
-        } except Exception { }
+        } except ApiException { }
+
+        if 'app' not in urls {
+            try {
+                svc = core_v1.read_namespaced_service(
+                    name=f"{app_name}-service", namespace=namespace
+                );
+                if is_aws {
+                    lb_ingress = svc.status.load_balancer.ingress;
+                    if lb_ingress and len(lb_ingress) > 0 {
+                        endpoint = lb_ingress[0].hostname or lb_ingress[0].ip;
+                        urls['app'] = f"http://{endpoint}";
+                    }
+                } else {
+                    urls['app'] = f"http://localhost:{self.k8s_config.node_port}";
+                }
+            } except Exception { }
+        }
 
         # Grafana URL (NodePort on local, LoadBalancer on AWS)
         if grafana_running {

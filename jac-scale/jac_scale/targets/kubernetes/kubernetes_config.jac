@@ -47,7 +47,11 @@ class KubernetesConfig(BaseConfig) {
         k8s_metrics_enabled: bool = True,
         prometheus_admin_password: str = 'Adminpassword123',
         prometheus_node_port: int = 30090,
-        grafana_node_port: int = 30300;
+        grafana_node_port: int = 30300,
+        # Ingress configuration
+        use_ingress: bool = True,
+        ingress_base_domain: str = '',
+        ingress_class_name: (str | None) = None;
 
     def init(
         self: KubernetesConfig,
@@ -92,7 +96,10 @@ class KubernetesConfig(BaseConfig) {
         k8s_metrics_enabled: bool = True,
         prometheus_admin_password: str = 'Adminpassword123',
         prometheus_node_port: int = 30090,
-        grafana_node_port: int = 30300
+        grafana_node_port: int = 30300,
+        use_ingress: bool = True,
+        ingress_base_domain: str = '',
+        ingress_class_name: (str | None) = None
     ) -> None {
         self.app_name = app_name;
         self.namespace = namespace;
@@ -143,6 +150,10 @@ class KubernetesConfig(BaseConfig) {
         self.prometheus_admin_password = prometheus_admin_password;
         self.prometheus_node_port = prometheus_node_port;
         self.grafana_node_port = grafana_node_port;
+        # Ingress configuration
+        self.use_ingress = use_ingress;
+        self.ingress_base_domain = ingress_base_domain;
+        self.ingress_class_name = ingress_class_name;
     }
 
     override def to_dict(self: KubernetesConfig) -> dict[str, Any] {
@@ -194,7 +205,11 @@ class KubernetesConfig(BaseConfig) {
                 'k8s_metrics_enabled': self.k8s_metrics_enabled,
                 'prometheus_admin_password': self.prometheus_admin_password,
                 'prometheus_node_port': self.prometheus_node_port,
-                'grafana_node_port': self.grafana_node_port
+                'grafana_node_port': self.grafana_node_port,
+                # Ingress configuration
+                'use_ingress': self.use_ingress,
+                'ingress_base_domain': self.ingress_base_domain,
+                'ingress_class_name': self.ingress_class_name
             }
         );
         return base;
@@ -247,7 +262,10 @@ class KubernetesConfig(BaseConfig) {
                 'prometheus_admin_password', 'Adminpassword123'
             ),
             prometheus_node_port=config.get('prometheus_node_port', 30090),
-            grafana_node_port=config.get('grafana_node_port', 30300)
+            grafana_node_port=config.get('grafana_node_port', 30300),
+            use_ingress=config.get('use_ingress', True),
+            ingress_base_domain=config.get('ingress_base_domain', ''),
+            ingress_class_name=config.get('ingress_class_name')
         );
     }
 }

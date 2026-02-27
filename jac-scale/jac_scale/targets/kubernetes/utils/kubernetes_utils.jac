@@ -71,6 +71,8 @@ def check_deployment_status(
 
 def cluster_type -> str;
 
+def detect_ingress_class(preferred_class: (str | None) = None) -> (str | None);
+
 def check_node_ports_available(
     node_port: int,
     prometheus_node_port: int | None,
