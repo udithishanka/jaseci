@@ -274,13 +274,19 @@ class LocalSandbox(SandboxEnvironment) {
                 }
             } else {
                 previous_port = 0;
-                # Copy code to preview dir
-                if os.path.exists(preview_dir) {
-                    shutil.rmtree(preview_dir);
-                }
-                if code_path and os.path.isdir(code_path) {
-                    shutil.copytree(code_path, preview_dir, symlinks=True);
-                } else {
+                # Copy code to preview dir (skip if code_path IS the preview dir)
+                real_code = os.path.realpath(code_path) if code_path else "";
+                real_preview = os.path.realpath(preview_dir);
+                if real_code and real_code != real_preview {
+                    if os.path.exists(preview_dir) {
+                        shutil.rmtree(preview_dir);
+                    }
+                    if os.path.isdir(code_path) {
+                        shutil.copytree(code_path, preview_dir, symlinks=True);
+                    } else {
+                        os.makedirs(preview_dir, exist_ok=True);
+                    }
+                } elif not os.path.exists(preview_dir) {
                     os.makedirs(preview_dir, exist_ok=True);
                 }
             }
