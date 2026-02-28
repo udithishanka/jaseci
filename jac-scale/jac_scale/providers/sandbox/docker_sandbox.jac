@@ -1,0 +1,590 @@
+"""Docker container sandbox provider.
+
+Runs each preview in an isolated Docker container with resource limits,
+network isolation, and filesystem sandboxing. Inspired by Coolify
+(container-per-preview) and Beam (fast container startup).
+"""
+import os;
+import io;
+import tarfile;
+import time;
+import uuid;
+import from threading { Lock, Thread }
+import from typing { Any }
+import from jac_scale.abstractions.sandbox_environment { SandboxEnvironment }
+import from jac_scale.abstractions.models.sandbox_config { SandboxConfig }
+import from jac_scale.abstractions.models.sandbox_result { SandboxResult }
+import from jac_scale.abstractions.models.sandbox_status {
+    SandboxState,
+    SandboxStatus,
+    SandboxInfo
+}
+import from jac_scale.abstractions.logger { Logger }
+
+glob _SANDBOX_LABEL: str = "jac-sandbox";
+glob _INTERNAL_PORT: int = 8000;
+
+"""Docker container sandbox — runs each preview in an isolated Docker container."""
+class DockerSandbox(SandboxEnvironment) {
+    has _client: Any = None,
+        _registry: dict = {},
+        _lock: Any = None;
+
+    def init(
+        self: DockerSandbox,
+        config: SandboxConfig,
+        logger: (Logger | None) = None
+    ) -> None {
+        self.config = config;
+        self.logger = logger;
+        self._registry = {};
+        self._lock = Lock();
+        self._client = None;
+    }
+
+    def _get_client(self: DockerSandbox) -> Any {
+        if self._client is None {
+            import docker;
+            self._client = docker.from_env();
+        }
+        return self._client;
+    }
+
+    def _generate_id(self: DockerSandbox, user_id: str, project_id: str) -> str {
+        short = str(uuid.uuid4())[:8];
+        return f"jac-sandbox-{user_id}-{project_id}-{short}" if project_id
+            else f"jac-sandbox-{user_id}-{short}";
+    }
+
+    def _container_name(self: DockerSandbox, sandbox_id: str) -> str {
+        return sandbox_id;
+    }
+
+    def _ensure_network(self: DockerSandbox, sandbox_id: str) -> str {
+        if not self.config.network_isolation {
+            return "";
+        }
+        client = self._get_client();
+        net_name = f"{sandbox_id}-net";
+        try {
+            client.networks.get(net_name);
+        } except Exception {
+            client.networks.create(net_name, driver="bridge", internal=False);
+        }
+        return net_name;
+    }
+
+    def _remove_network(self: DockerSandbox, sandbox_id: str) -> None {
+        if not self.config.network_isolation {
+            return;
+        }
+        client = self._get_client();
+        net_name = f"{sandbox_id}-net";
+        try {
+            network = client.networks.get(net_name);
+            network.remove();
+        } except Exception {
+            ;
+        }
+    }
+
+    def _copy_code_to_container(
+        self: DockerSandbox, container: Any, code_path: str
+    ) -> None {
+        buf = io.BytesIO();
+        with tarfile.open(fileobj=buf, mode="w") as tar {
+            tar.add(code_path, arcname=".");
+        }
+        buf.seek(0);
+        container.put_archive("/app", buf);
+    }
+
+    def _poll_container_readiness(
+        self: DockerSandbox, sandbox_id: str, port: int
+    ) -> None {
+        import requests;
+        url = f"http://localhost:{port}";
+        start_time = time.time();
+        ready = False;
+        while time.time() - start_time < 120 {
+            try {
+                container = self._get_client().containers.get(
+                    self._container_name(sandbox_id)
+                );
+                if container.status != "running" {
+                    break;
+                }
+            } except Exception {
+                break;
+            }
+            try {
+                resp = requests.get(url, timeout=3);
+                if 200 <= resp.status_code < 400 {
+                    ready = True;
+                    break;
+                }
+            } except Exception {
+                ;
+            }
+            time.sleep(3);
+        }
+        self._lock.acquire();
+        try {
+            entry = self._registry.get(sandbox_id);
+            if entry {
+                if ready {
+                    entry["status"] = SandboxState.RUNNING;
+                } else {
+                    entry["status"] = SandboxState.ERROR;
+                }
+            }
+        } finally {
+            self._lock.release();
+        }
+    }
+
+    def create(
+        self: DockerSandbox,
+        user_id: str,
+        project_id: str,
+        code_path: str
+    ) -> SandboxResult {
+        self._lock.acquire();
+        try {
+            # Enforce max_per_user
+            user_count = 0;
+            for (sid, entry) in self._registry.items() {
+                if entry.get("user_id") == user_id
+                and entry.get("status") != SandboxState.STOPPED {
+                    user_count += 1;
+                }
+            }
+            if user_count >= self.config.max_per_user {
+                return SandboxResult(
+                    success=False,
+                    message=f"Max sandboxes per user ({self.config.max_per_user}) reached"
+                );
+            }
+        } finally {
+            self._lock.release();
+        }
+
+        client = self._get_client();
+        sandbox_id = self._generate_id(user_id, project_id);
+        container_name = self._container_name(sandbox_id);
+
+        try {
+            # Ensure base image is available
+            try {
+                client.images.get(self.config.base_image);
+            } except Exception {
+                if self.logger {
+                    self.logger.info(f"Pulling image {self.config.base_image}...");
+                }
+                client.images.pull(self.config.base_image);
+            }
+
+            # Create network for isolation
+            net_name = self._ensure_network(sandbox_id);
+
+            # Build container config
+            environment = {
+                "JAC_SANDBOX_ID": sandbox_id,
+                "JAC_SANDBOX_USER": user_id,
+                "JAC_SANDBOX_PROJECT": project_id
+            };
+
+            # Resource limits
+            mem_bytes = self._parse_memory(self.config.memory_limit);
+            nano_cpus = self._parse_cpu(self.config.cpu_limit);
+
+            volumes: dict = {};
+            tmpfs_mounts: dict = {"/tmp": f"size={self.config.storage_limit}"};
+
+            # Create container
+            networking_config = {};
+            if net_name {
+                networking_config = client.api.create_networking_config({
+                    net_name: client.api.create_endpoint_config()
+                });
+            }
+
+            container = client.containers.create(
+                image=self.config.base_image,
+                name=container_name,
+                command=f"bash -c 'pip install jaclang jac-client jac-scale 2>/dev/null; cd /app && jac install 2>/dev/null; jac start main.jac -p {_INTERNAL_PORT}'",
+                working_dir="/app",
+                environment=environment,
+                labels={
+                    _SANDBOX_LABEL: "true",
+                    "jac-sandbox-id": sandbox_id,
+                    "jac-sandbox-user": user_id,
+                    "jac-sandbox-project": project_id
+                },
+                ports={f"{_INTERNAL_PORT}/tcp": None},
+                mem_limit=mem_bytes,
+                nano_cpus=nano_cpus,
+                tmpfs=tmpfs_mounts,
+                detach=True,
+                auto_remove=False
+            );
+
+            # Copy code into container
+            if code_path and os.path.isdir(code_path) {
+                self._copy_code_to_container(container, code_path);
+            }
+
+            # Start the container
+            container.start();
+            container.reload();
+
+            # Get the mapped port
+            port_bindings = container.attrs.get("NetworkSettings", {}).get(
+                "Ports", {}
+            );
+            mapped_port = 0;
+            binding = port_bindings.get(f"{_INTERNAL_PORT}/tcp");
+            if binding and len(binding) > 0 {
+                mapped_port = int(binding[0].get("HostPort", 0));
+            }
+
+            url = f"http://localhost:{mapped_port}" if mapped_port else "";
+
+            self._lock.acquire();
+            try {
+                self._registry[sandbox_id] = {
+                    "sandbox_id": sandbox_id,
+                    "container_name": container_name,
+                    "user_id": user_id,
+                    "project_id": project_id,
+                    "port": mapped_port,
+                    "status": SandboxState.STARTING,
+                    "url": url,
+                    "network": net_name,
+                    "created_at": time.time()
+                };
+            } finally {
+                self._lock.release();
+            }
+
+            # Poll readiness in background
+            checker = Thread(
+                target=self._poll_container_readiness,
+                args=(sandbox_id, mapped_port),
+                daemon=True
+            );
+            checker.start();
+
+            return SandboxResult(
+                success=True, sandbox_id=sandbox_id,
+                url=url, port=mapped_port,
+                message="starting"
+            );
+        } except Exception as e {
+            # Clean up on failure
+            try {
+                client.containers.get(container_name).remove(force=True);
+            } except Exception {
+                ;
+            }
+            self._remove_network(sandbox_id);
+            return SandboxResult(success=False, message=str(e));
+        }
+    }
+
+    def stop(self: DockerSandbox, sandbox_id: str) -> None {
+        client = self._get_client();
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return;
+        }
+        try {
+            container = client.containers.get(entry["container_name"]);
+            container.stop(timeout=10);
+            container.remove(force=True);
+        } except Exception {
+            ;
+        }
+        self._remove_network(sandbox_id);
+        self._lock.acquire();
+        try {
+            if sandbox_id in self._registry {
+                self._registry[sandbox_id]["status"] = SandboxState.STOPPED;
+            }
+        } finally {
+            self._lock.release();
+        }
+    }
+
+    def status(self: DockerSandbox, sandbox_id: str) -> SandboxStatus {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return SandboxStatus(
+                state=SandboxState.STOPPED, sandbox_id=sandbox_id
+            );
+        }
+        # Check actual container status
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            container_status = container.status;
+            if container_status == "running" {
+                state = entry.get("status", SandboxState.RUNNING);
+            } elif container_status == "exited" {
+                state = SandboxState.STOPPED;
+            } else {
+                state = SandboxState.PENDING;
+            }
+        } except Exception {
+            state = SandboxState.STOPPED;
+        }
+        uptime = time.time() - entry.get("created_at", time.time())
+            if state == SandboxState.RUNNING else 0.0;
+        return SandboxStatus(
+            state=state, sandbox_id=sandbox_id,
+            uptime_seconds=uptime,
+            url=entry.get("url", ""),
+            port=entry.get("port", 0)
+        );
+    }
+
+    def destroy(self: DockerSandbox, sandbox_id: str) -> None {
+        self.stop(sandbox_id);
+        self._lock.acquire();
+        try {
+            self._registry.pop(sandbox_id, None);
+        } finally {
+            self._lock.release();
+        }
+    }
+
+    def list_sandboxes(self: DockerSandbox, user_id: str) -> list[SandboxInfo] {
+        results: list[SandboxInfo] = [];
+        for (sid, entry) in self._registry.items() {
+            if entry.get("user_id") == user_id {
+                results.append(SandboxInfo(
+                    sandbox_id=sid,
+                    user_id=entry.get("user_id", ""),
+                    project_id=entry.get("project_id", ""),
+                    state=entry.get("status", SandboxState.STOPPED),
+                    url=entry.get("url", ""),
+                    created_at=entry.get("created_at", 0.0)
+                ));
+            }
+        }
+        return results;
+    }
+
+    def cleanup_expired(self: DockerSandbox) -> int {
+        now = time.time();
+        expired: list[str] = [];
+        for (sid, entry) in self._registry.items() {
+            created = entry.get("created_at", now);
+            if now - created > self.config.ttl_seconds {
+                expired.append(sid);
+            }
+        }
+        for sid in expired {
+            self.destroy(sid);
+        }
+        return len(expired);
+    }
+
+    def logs(self: DockerSandbox, sandbox_id: str, offset: int = 0) -> dict {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return {"success": False, "error": "Sandbox not found"};
+        }
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            log_bytes = container.logs(stdout=True, stderr=True, tail=500);
+            content = log_bytes.decode("utf-8", errors="replace");
+            if offset > 0 and offset < len(content) {
+                content = content[offset:];
+            }
+            new_offset = offset + len(content);
+            return {"success": True, "content": content, "offset": new_offset};
+        } except Exception as e {
+            return {"success": False, "error": str(e)};
+        }
+    }
+
+    def write_file(
+        self: DockerSandbox, sandbox_id: str, path: str, content: str
+    ) -> dict {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return {"success": False, "error": "Sandbox not found"};
+        }
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            # Create tar archive with the file
+            buf = io.BytesIO();
+            content_bytes = content.encode("utf-8");
+            with tarfile.open(fileobj=buf, mode="w") as tar {
+                info = tarfile.TarInfo(name=path);
+                info.size = len(content_bytes);
+                tar.addfile(info, io.BytesIO(content_bytes));
+            }
+            buf.seek(0);
+            container.put_archive("/app", buf);
+            return {"success": True, "path": path};
+        } except Exception as e {
+            return {"success": False, "error": str(e)};
+        }
+    }
+
+    def read_file(
+        self: DockerSandbox, sandbox_id: str, path: str
+    ) -> dict {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return {"success": False, "error": "Sandbox not found"};
+        }
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            exit_code, output = container.exec_run(
+                f"cat /app/{path}", demux=True
+            );
+            if exit_code != 0 {
+                stderr = output[1].decode("utf-8") if output[1] else "File not found";
+                return {"success": False, "error": stderr};
+            }
+            file_content = output[0].decode("utf-8") if output[0] else "";
+            return {"success": True, "path": path, "content": file_content};
+        } except Exception as e {
+            return {"success": False, "error": str(e)};
+        }
+    }
+
+    def delete_file(
+        self: DockerSandbox, sandbox_id: str, path: str
+    ) -> dict {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return {"success": False, "error": "Sandbox not found"};
+        }
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            exit_code, output = container.exec_run(
+                f"rm -rf /app/{path}", demux=True
+            );
+            if exit_code != 0 {
+                stderr = output[1].decode("utf-8") if output[1] else "Delete failed";
+                return {"success": False, "error": stderr};
+            }
+            return {"success": True, "path": path};
+        } except Exception as e {
+            return {"success": False, "error": str(e)};
+        }
+    }
+
+    def list_files(
+        self: DockerSandbox, sandbox_id: str, path: str = "."
+    ) -> dict {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return {"success": False, "error": "Sandbox not found"};
+        }
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            exit_code, output = container.exec_run(
+                f"find /app/{path} -type f -not -path '*/node_modules/*' -not -path '*/.jac/*' -not -path '*/__pycache__/*' -not -path '*/dist/*' -not -path '*/.git/*'",
+                demux=True
+            );
+            if exit_code != 0 {
+                return {"success": False, "error": "Failed to list files"};
+            }
+            raw = output[0].decode("utf-8") if output[0] else "";
+            files = [
+                os.path.relpath(f.strip(), "/app")
+                for f in raw.strip().split("\n")
+                if f.strip()
+            ];
+            files.sort();
+            return {"success": True, "files": files};
+        } except Exception as e {
+            return {"success": False, "error": str(e)};
+        }
+    }
+
+    def exec_command(
+        self: DockerSandbox, sandbox_id: str, command: str, timeout: int = 30
+    ) -> dict {
+        entry = self._registry.get(sandbox_id);
+        if not entry {
+            return {"success": False, "error": "Sandbox not found"};
+        }
+        try {
+            container = self._get_client().containers.get(
+                entry["container_name"]
+            );
+            exit_code, output = container.exec_run(
+                f"bash -c '{command}'",
+                workdir="/app", demux=True
+            );
+            stdout = output[0].decode("utf-8") if output[0] else "";
+            stderr = output[1].decode("utf-8") if output[1] else "";
+            return {
+                "success": True, "exit_code": exit_code,
+                "stdout": stdout, "stderr": stderr
+            };
+        } except Exception as e {
+            return {"success": False, "error": str(e)};
+        }
+    }
+
+    # ---- Helpers ----
+
+    def _parse_memory(self: DockerSandbox, mem_str: str) -> int {
+        mem_str = mem_str.strip().upper();
+        if mem_str.endswith("GI") {
+            return int(float(mem_str[:-2]) * 1073741824);
+        } elif mem_str.endswith("MI") {
+            return int(float(mem_str[:-2]) * 1048576);
+        } elif mem_str.endswith("KI") {
+            return int(float(mem_str[:-2]) * 1024);
+        } elif mem_str.endswith("G") {
+            return int(float(mem_str[:-1]) * 1000000000);
+        } elif mem_str.endswith("M") {
+            return int(float(mem_str[:-1]) * 1000000);
+        } elif mem_str.endswith("K") {
+            return int(float(mem_str[:-1]) * 1000);
+        }
+        return int(mem_str);
+    }
+
+    def _parse_cpu(self: DockerSandbox, cpu_str: str) -> int {
+        cpu_str = cpu_str.strip().lower();
+        if cpu_str.endswith("m") {
+            millicores = int(cpu_str[:-1]);
+            return millicores * 1000000;
+        }
+        return int(float(cpu_str) * 1000000000);
+    }
+
+    # ---- Convenience methods for preview_manager compatibility ----
+
+    def get_sandbox_id(
+        self: DockerSandbox, user_id: str, project_id: str
+    ) -> (str | None) {
+        for (sid, entry) in self._registry.items() {
+            if entry.get("user_id") == user_id
+            and entry.get("project_id") == project_id {
+                return sid;
+            }
+        }
+        return None;
+    }
+}

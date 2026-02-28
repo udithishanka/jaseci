@@ -1,9 +1,12 @@
 """Public API for jac-scale library functions.
 
-This module provides user-facing APIs for direct database access and other utilities.
+This module provides user-facing APIs for direct database access, sandbox management,
+and other utilities.
 """
 import from jac_scale.db { Db, get_mongo_client, get_redis_client }
 import from jac_scale.factories.database_factory { DatabaseType }
+import from jac_scale.factories.sandbox_factory { SandboxFactory }
+import from jac_scale.factories.ingress_factory { IngressFactory }
 
 def kvstore(
     db_name: str = 'jac_db', db_type: str = 'mongodb', uri: (str | None) = None
