@@ -22,7 +22,8 @@ import from byllm.types {
     MockToolCall,
     ToolCall,
     Message,
-    MessageRole
+    MessageRole,
+    UsageInfo
 }
 import from byllm.config_loader { get_byllm_config }
 
@@ -53,7 +54,8 @@ obj BaseLLM {
     has model_name: str,
         config: dict = {},
         api_key: str = "",
-        call_params: dict[(str, object)] = {};
+        call_params: dict[(str, object)] = {},
+        _usage_history: list = [];
 
     def __call__(**kwargs: object) -> BaseLLM;
     def invoke(mt_run: MTRuntime) -> object;
@@ -65,6 +67,9 @@ obj BaseLLM {
     def model_call_no_stream(params: dict) -> dict;
     def model_call_with_stream(params: dict) -> Generator[str, None, None];
     def _stream_final_answer(mt_run: MTRuntime) -> Generator[str, None, None];
+    def get_last_usage -> UsageInfo | None;
+    def get_total_usage -> UsageInfo;
+    def reset_usage -> None;
 }
 
 """Mock LLM connector that simulates responses for testing.

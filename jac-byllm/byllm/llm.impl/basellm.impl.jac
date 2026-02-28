@@ -43,6 +43,9 @@ impl BaseLLM.invoke(mt_run: MTRuntime) -> object {
             mt_run.tools = [finish_tool_obj] if finish_tool_obj else [];
             try {
                 final_resp = self.dispatch_no_streaming(mt_run);
+                if final_resp.usage {
+                    self._usage_history.append(final_resp.usage);
+                }
                 if final_resp.tool_calls {
                     for tool_call in final_resp.tool_calls {
                         if tool_call.is_finish_call() {
@@ -57,6 +60,9 @@ impl BaseLLM.invoke(mt_run: MTRuntime) -> object {
             }
         }
         resp = self.dispatch_no_streaming(mt_run);
+        if resp.usage {
+            self._usage_history.append(resp.usage);
+        }
         if resp.tool_calls {
             for tool_call in resp.tool_calls {
                 if tool_call.is_finish_call() {
@@ -169,10 +175,22 @@ impl BaseLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
     self.api_base = params.pop("api_base", DEFAULT_BASE_URL);
     params.pop("api_key", None);
     response = self.model_call_no_stream(params);
+    # Extract usage metadata from litellm response
+    usage_data = getattr(response, "usage", None);
+    response_ms = getattr(response, "_response_ms", 0.0);
+    if usage_data {
+        usage_info = UsageInfo(
+            prompt_tokens=int(getattr(usage_data, "prompt_tokens", 0) or 0),
+            completion_tokens=int(getattr(usage_data, "completion_tokens", 0) or 0),
+            total_tokens=int(getattr(usage_data, "total_tokens", 0) or 0),
+            model=str(getattr(response, "model", self.model_name) or self.model_name),
+            response_ms=float(response_ms or 0.0),
+        );
+    } else {
+        usage_info = None;
+    }
     # Output format:
     # https://docs.litellm.ai/docs/#response-format-openai-format
-    #
-    # TODO: Handle stream output (type ignoring stream response)
     message: LiteLLMMessage = response.get("choices", [])[0].get(
         "message"
     );  # type: ignore
@@ -193,7 +211,7 @@ impl BaseLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
             ) ;
         }
     }
-    return CompletionResult(output=output_value, tool_calls=tool_calls,);
+    return CompletionResult(output=output_value, tool_calls=tool_calls, usage=usage_info);
 }
 
 """Dispatch the LLM call with streaming.
@@ -267,4 +285,32 @@ impl BaseLLM._stream_final_answer(mt_run: MTRuntime) -> Generator[str, None, Non
         # Restore tools (though we're done at this point)
         mt_run.tools = original_tools;
     }
+}
+
+"""Return the usage info from the most recent LLM call, or None."""
+impl BaseLLM.get_last_usage -> UsageInfo | None {
+    if self._usage_history {
+        return self._usage_history[-1];
+    }
+    return None;
+}
+
+"""Return accumulated usage across all LLM calls."""
+impl BaseLLM.get_total_usage -> UsageInfo {
+    total = UsageInfo();
+    for u in self._usage_history {
+        total.prompt_tokens += u.prompt_tokens;
+        total.completion_tokens += u.completion_tokens;
+        total.total_tokens += u.total_tokens;
+        total.response_ms += u.response_ms;
+    }
+    if self._usage_history {
+        total.model = self._usage_history[-1].model;
+    }
+    return total;
+}
+
+"""Clear all accumulated usage history."""
+impl BaseLLM.reset_usage -> None {
+    self._usage_history = [];
 }

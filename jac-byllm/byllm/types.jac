@@ -99,10 +99,20 @@ obj MockToolCall {
     def to_tool_call -> ToolCall;
 }
 
+"""Usage metadata from a single LLM call."""
+obj UsageInfo {
+    has prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        model: str = "",
+        response_ms: float = 0.0;
+}
+
 """Result of the completion from the LLM."""
 obj CompletionResult {
     has output: object,
-        tool_calls: list[ToolCall];
+        tool_calls: list[ToolCall],
+        usage: UsageInfo | None = None;
 }
 
 # -----------------------------------------------------------------------------

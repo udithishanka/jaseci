@@ -17,11 +17,19 @@ impl MockLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
     message = "{'role': 'assistant', 'content': {'text': 'Mock response'}}";
     mt_run.add_message(message);
     output = self.config["outputs"].pop(0);  # type: ignore
+    mock_usage_cfg = self.config.get("usage", {});
+    mock_usage = UsageInfo(
+        prompt_tokens=mock_usage_cfg.get("prompt_tokens", 10),
+        completion_tokens=mock_usage_cfg.get("completion_tokens", 5),
+        total_tokens=mock_usage_cfg.get("total_tokens", 15),
+        model="mockllm",
+        response_ms=mock_usage_cfg.get("response_ms", 1.0),
+    );
     if isinstance(output, MockToolCall) {
         self.log_info(
             f"Mock LLM call completed with tool call:\n{output.to_tool_call()}"
         );
-        return CompletionResult(output=None, tool_calls=[output.to_tool_call()],);
+        return CompletionResult(output=None, tool_calls=[output.to_tool_call()], usage=mock_usage);
     }
     log_params = self.format_prompt(params);
     params.pop("api_key", None);
@@ -32,7 +40,7 @@ impl MockLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
             f"Mock LLM call completed with response: {output} with params: {log_params}"
         );
     }
-    return CompletionResult(output=output, tool_calls=[],);
+    return CompletionResult(output=output, tool_calls=[], usage=mock_usage);
 }
 
 """Dispatch the mock LLM call with streaming.

@@ -30,7 +30,11 @@ impl Model.postinit -> None {
 """Invoke the LLM, delegating to MockLLM if applicable."""
 impl Model.invoke(mt_run: MTRuntime) -> object {
     if self._mock_delegate {
-        return self._mock_delegate.invoke(mt_run);
+        result = self._mock_delegate.invoke(mt_run);
+        # Sync usage history from delegate so callers can query it on the Model
+        self._usage_history.extend(self._mock_delegate._usage_history);
+        self._mock_delegate._usage_history = [];
+        return result;
     }
     return super.invoke(mt_run);
 }
