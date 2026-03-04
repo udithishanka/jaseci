@@ -592,7 +592,11 @@ obj KubernetesTarget(DeploymentTarget) {
 
                 # Check if deployment needs update (config hash changed)
                 annotations = existing_deploy.spec.template.metadata.annotations;
-                existing_hash = annotations.get('redis-config-hash', '') if annotations else '';
+                existing_hash = annotations.get(
+                    'redis-config-hash', ''
+                )
+                    if annotations
+                    else '';
                 new_hash = redis_result['config_hash'];
 
                 if existing_hash != new_hash or config_updated {
