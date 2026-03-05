@@ -62,11 +62,19 @@ class KubernetesIngressProvider(IngressProvider) {
         url = f"{protocol}://{hostname}";
         ingress_name = f"{sandbox_id}-ingress";
 
-        # Annotations
-        annotations: dict[str, str] = {
-            "kubernetes.io/ingress.class": ingress_class
-        };
-        if tls_enabled {
+        # Annotations — merge custom annotations from config
+        annotations: dict[str, str] = {};
+        custom_annotations = config.get(
+            "ingress_annotations",
+            self._config.get("ingress_annotations", {})
+        );
+        if isinstance(custom_annotations, dict) {
+            annotations.update(custom_annotations);
+        }
+        if "kubernetes.io/ingress.class" not in annotations {
+            annotations["kubernetes.io/ingress.class"] = ingress_class;
+        }
+        if tls_enabled and "cert-manager.io/cluster-issuer" not in annotations {
             annotations["cert-manager.io/cluster-issuer"] = tls_issuer;
         }
 

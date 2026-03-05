@@ -16,7 +16,8 @@ class SandboxConfig {
         network_isolation: bool = True,
         ingress_class: str = "nginx",
         tls_enabled: bool = False,
-        tls_issuer: str = "letsencrypt-prod";
+        tls_issuer: str = "letsencrypt-prod",
+        ingress_annotations: dict[str, str] = {};
 
     def init(
         self: SandboxConfig,
@@ -33,7 +34,8 @@ class SandboxConfig {
         network_isolation: bool = True,
         ingress_class: str = "nginx",
         tls_enabled: bool = False,
-        tls_issuer: str = "letsencrypt-prod"
+        tls_issuer: str = "letsencrypt-prod",
+        ingress_annotations: dict[str, str] = {}
     ) -> None {
         self.sandbox_type = sandbox_type;
         self.namespace = namespace;
@@ -49,6 +51,7 @@ class SandboxConfig {
         self.ingress_class = ingress_class;
         self.tls_enabled = tls_enabled;
         self.tls_issuer = tls_issuer;
+        self.ingress_annotations = ingress_annotations;
     }
 
     """Create SandboxConfig from a dictionary."""
@@ -67,7 +70,8 @@ class SandboxConfig {
             network_isolation=config.get("network_isolation", True),
             ingress_class=config.get("ingress_class", "nginx"),
             tls_enabled=config.get("tls_enabled", False),
-            tls_issuer=config.get("tls_issuer", "letsencrypt-prod")
+            tls_issuer=config.get("tls_issuer", "letsencrypt-prod"),
+            ingress_annotations=config.get("ingress_annotations", {})
         );
     }
 }
