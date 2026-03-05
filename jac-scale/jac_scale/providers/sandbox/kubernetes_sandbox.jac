@@ -303,6 +303,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             image=self.config.base_image,
             command=["bash", "-c",
                 f"pip install jaclang jac-client jac-scale 2>/dev/null; "
+                f"export PATH=\"$HOME/.local/bin:$PATH\"; "
                 f"cd /app && jac install 2>/dev/null; "
                 f"jac start main.jac -p {_INTERNAL_PORT}"
             ],
