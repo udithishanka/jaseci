@@ -17,7 +17,9 @@ class SandboxConfig {
         ingress_class: str = "nginx",
         tls_enabled: bool = False,
         tls_issuer: str = "letsencrypt-prod",
-        ingress_annotations: dict[str, str] = {};
+        ingress_annotations: dict[str, str] = {},
+        proxy_mode: bool = False,
+        warm_pool_size: int = 0;
 
     def init(
         self: SandboxConfig,
@@ -35,7 +37,9 @@ class SandboxConfig {
         ingress_class: str = "nginx",
         tls_enabled: bool = False,
         tls_issuer: str = "letsencrypt-prod",
-        ingress_annotations: dict[str, str] = {}
+        ingress_annotations: dict[str, str] = {},
+        proxy_mode: bool = False,
+        warm_pool_size: int = 0
     ) -> None {
         self.sandbox_type = sandbox_type;
         self.namespace = namespace;
@@ -52,6 +56,8 @@ class SandboxConfig {
         self.tls_enabled = tls_enabled;
         self.tls_issuer = tls_issuer;
         self.ingress_annotations = ingress_annotations;
+        self.proxy_mode = proxy_mode;
+        self.warm_pool_size = warm_pool_size;
     }
 
     """Create SandboxConfig from a dictionary."""
@@ -71,7 +77,9 @@ class SandboxConfig {
             ingress_class=config.get("ingress_class", "nginx"),
             tls_enabled=config.get("tls_enabled", False),
             tls_issuer=config.get("tls_issuer", "letsencrypt-prod"),
-            ingress_annotations=config.get("ingress_annotations", {})
+            ingress_annotations=config.get("ingress_annotations", {}),
+            proxy_mode=config.get("proxy_mode", False),
+            warm_pool_size=config.get("warm_pool_size", 0)
         );
     }
 }
