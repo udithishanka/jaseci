@@ -527,7 +527,8 @@ class KubernetesSandbox(SandboxEnvironment) {
                     "domain_template": self.config.domain_template,
                     "ingress_class": self.config.ingress_class,
                     "tls_enabled": self.config.tls_enabled,
-                    "tls_issuer": self.config.tls_issuer
+                    "tls_issuer": self.config.tls_issuer,
+                    "ingress_annotations": self.config.ingress_annotations
                 }
             );
 
