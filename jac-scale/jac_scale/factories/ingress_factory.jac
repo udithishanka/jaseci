@@ -25,6 +25,11 @@ class IngressFactory {
                 KubernetesIngressProvider
             }
             return KubernetesIngressProvider(config=config or {});
+        } elif ingress_type == "proxy" {
+            import from jac_scale.providers.ingress.proxy_ingress {
+                ProxyIngressProvider
+            }
+            return ProxyIngressProvider(config=config or {});
         } elif ingress_type == "local" {
             import from jac_scale.providers.ingress.local_ingress {
                 LocalIngressProvider
