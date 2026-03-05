@@ -11,12 +11,12 @@ Environment variables:
     PROXY_PORT: Port for this proxy to listen on (default: 8080)
 """
 
-import os
 import asyncio
 import logging
+import os
 
 import aiohttp
-from aiohttp import web, WSMsgType
+from aiohttp import WSMsgType, web
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("sandbox-proxy")
@@ -31,6 +31,7 @@ routes: dict[str, dict] = {}
 
 
 # ── K8s Pod Watcher ──────────────────────────────────────────────────────
+
 
 async def watch_pods():
     """Watch sandbox pods and maintain routing table."""
@@ -112,6 +113,7 @@ body { background: #0d0e11; color: #a1a1b0; font-family: system-ui;
 
 # ── Request Handlers ─────────────────────────────────────────────────────
 
+
 def _get_sandbox_id(request: web.Request) -> str:
     """Extract sandbox_id from Host header: jac-sbx-xxx.mars.ninja -> jac-sbx-xxx."""
     host = request.host.split(":")[0]  # strip port if present
@@ -127,7 +129,9 @@ async def handle_request(request: web.Request) -> web.Response:
     route = routes.get(sandbox_id)
 
     if not route:
-        return web.Response(status=502, text="Sandbox not found", content_type="text/plain")
+        return web.Response(
+            status=502, text="Sandbox not found", content_type="text/plain"
+        )
 
     if not route["ready"]:
         return web.Response(status=200, text=LOADING_HTML, content_type="text/html")
@@ -141,15 +145,24 @@ async def handle_request(request: web.Request) -> web.Response:
     try:
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            headers = {k: v for k, v in request.headers.items()
-                       if k.lower() not in ("host", "transfer-encoding")}
+            headers = {
+                k: v
+                for k, v in request.headers.items()
+                if k.lower() not in ("host", "transfer-encoding")
+            }
             body = await request.read()
             async with session.request(
-                request.method, target, headers=headers, data=body,
+                request.method,
+                target,
+                headers=headers,
+                data=body,
                 allow_redirects=False,
             ) as resp:
-                resp_headers = {k: v for k, v in resp.headers.items()
-                                if k.lower() not in ("transfer-encoding", "connection")}
+                resp_headers = {
+                    k: v
+                    for k, v in resp.headers.items()
+                    if k.lower() not in ("transfer-encoding", "connection")
+                }
                 return web.Response(
                     status=resp.status,
                     headers=resp_headers,
@@ -171,6 +184,7 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
     try:
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(target) as ws_backend:
+
                 async def client_to_backend():
                     async for msg in ws_client:
                         if msg.type == WSMsgType.TEXT:
@@ -201,6 +215,7 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
 
 
 # ── App Setup ────────────────────────────────────────────────────────────
+
 
 async def on_startup(app: web.Application):
     app["watcher"] = asyncio.create_task(watch_pods())
