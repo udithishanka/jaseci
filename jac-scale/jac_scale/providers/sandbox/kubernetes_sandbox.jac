@@ -302,10 +302,6 @@ class KubernetesSandbox(SandboxEnvironment) {
             name="sandbox",
             image=self.config.base_image,
             command=["bash", "-c",
-                f"apt-get update -qq && apt-get install -y -qq curl unzip > /dev/null 2>&1 && "
-                f"curl -fsSL https://bun.sh/install | bash > /dev/null 2>&1 && "
-                f"export PATH=\"$HOME/.bun/bin:$PATH\" && "
-                f"pip install jaclang jac-client jac-scale && "
                 f"cd /app && jac install 2>/dev/null; "
                 f"jac start main.jac -p {_INTERNAL_PORT}"
             ],
