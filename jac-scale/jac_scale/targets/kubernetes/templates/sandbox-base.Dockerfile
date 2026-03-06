@@ -9,9 +9,8 @@ RUN apt-get update -qq && \
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
-# Install Jac ecosystem (jac-client from fork for Vite host binding fix)
-RUN pip install --no-cache-dir jaclang jac-scale && \
-    pip install --no-cache-dir 'jac-client @ git+https://github.com/udithishanka/jaseci.git@feature/sandbox-system#subdirectory=jac-client'
+# Install Jac ecosystem
+RUN pip install --no-cache-dir jaclang jac-scale jac-client
 
 # Pre-warm: ensure jac CLI is available
 RUN jac --version

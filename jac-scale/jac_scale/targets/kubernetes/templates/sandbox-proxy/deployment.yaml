@@ -17,7 +17,7 @@ spec:
       serviceAccountName: sandbox-proxy
       containers:
         - name: proxy
-          image: REPLACE_WITH_ECR_IMAGE  # e.g., 123456789.dkr.ecr.region.amazonaws.com/jac-sandbox-proxy:v0.1.0
+          image: REPLACE_WITH_IMAGE  # e.g., your-registry/jac-sandbox-proxy:v0.1.0
           ports:
             - containerPort: 8080
           env:

@@ -10,7 +10,10 @@ import uuid;
 import json;
 import from threading { Lock, Thread }
 import from typing { Any }
-import from jac_scale.abstractions.sandbox_environment { SandboxEnvironment }
+import from jac_scale.abstractions.sandbox_environment {
+    SandboxEnvironment,
+    validate_sandbox_path
+}
 import from jac_scale.abstractions.models.sandbox_config { SandboxConfig }
 import from jac_scale.abstractions.models.sandbox_result { SandboxResult }
 import from jac_scale.abstractions.models.sandbox_status {
@@ -21,9 +24,9 @@ import from jac_scale.abstractions.models.sandbox_status {
 import from jac_scale.abstractions.logger { Logger }
 import from jac_scale.factories.ingress_factory { IngressFactory }
 
-glob _SANDBOX_LABEL: str = "jac-sandbox";
-glob _INTERNAL_PORT: int = 8000;
-glob _CONFIGMAP_SIZE_LIMIT: int = 1048576;  # 1MB
+glob _SANDBOX_LABEL: str = "jac-sandbox",
+     _INTERNAL_PORT: int = 8000,
+     _CONFIGMAP_SIZE_LIMIT: int = 1048576;
 
 """Kubernetes ephemeral pod sandbox — creates sibling pods in a dedicated namespace."""
 class KubernetesSandbox(SandboxEnvironment) {
@@ -36,9 +39,7 @@ class KubernetesSandbox(SandboxEnvironment) {
         _pool_initialized: bool = False;
 
     def init(
-        self: KubernetesSandbox,
-        config: SandboxConfig,
-        logger: (Logger | None) = None
+        self: KubernetesSandbox, config: SandboxConfig, logger: (Logger | None) = None
     ) -> None {
         self.config = config;
         self.logger = logger;
@@ -70,17 +71,20 @@ class KubernetesSandbox(SandboxEnvironment) {
             if self.config.proxy_mode {
                 ingress_type = "proxy";
             } elif self.config.tls_enabled
-                or self.config.domain_template != "{sandbox_id}.preview.example.com" {
+            or self.config.domain_template != "{sandbox_id}.preview.example.com" {
                 ingress_type = "kubernetes";
             } else {
                 ingress_type = "local";
             }
-            self._ingress_provider = IngressFactory.create(ingress_type, {
-                "ingress_class": self.config.ingress_class,
-                "tls_enabled": self.config.tls_enabled,
-                "tls_issuer": self.config.tls_issuer,
-                "domain_template": self.config.domain_template
-            });
+            self._ingress_provider = IngressFactory.create(
+                ingress_type,
+                {
+                    "ingress_class": self.config.ingress_class,
+                    "tls_enabled": self.config.tls_enabled,
+                    "tls_issuer": self.config.tls_issuer,
+                    "domain_template": self.config.domain_template
+                }
+            );
         }
         return self._ingress_provider;
     }
@@ -93,8 +97,7 @@ class KubernetesSandbox(SandboxEnvironment) {
         } except Exception {
             ns_body = client.V1Namespace(
                 metadata=client.V1ObjectMeta(
-                    name=self.config.namespace,
-                    labels={_SANDBOX_LABEL: "namespace"}
+                    name=self.config.namespace, labels={_SANDBOX_LABEL: "namespace"}
                 )
             );
             core_v1.create_namespace(ns_body);
@@ -122,10 +125,22 @@ class KubernetesSandbox(SandboxEnvironment) {
             "rules": [
                 {
                     "apiGroups": [""],
-                    "resources": ["pods", "pods/exec", "pods/log",
-                                  "services", "configmaps"],
-                    "verbs": ["create", "get", "list", "watch", "delete",
-                              "update", "patch"]
+                    "resources": [
+                        "pods",
+                        "pods/exec",
+                        "pods/log",
+                        "services",
+                        "configmaps"
+                    ],
+                    "verbs": [
+                        "create",
+                        "get",
+                        "list",
+                        "watch",
+                        "delete",
+                        "update",
+                        "patch"
+                    ]
                 },
                 {
                     "apiGroups": ["networking.k8s.io"],
@@ -154,11 +169,7 @@ class KubernetesSandbox(SandboxEnvironment) {
                 "name": role_name
             },
             "subjects": [
-                {
-                    "kind": "ServiceAccount",
-                    "name": app_sa,
-                    "namespace": app_namespace
-                }
+                {"kind": "ServiceAccount", "name": app_sa, "namespace": app_namespace}
             ]
         };
         try {
@@ -191,10 +202,7 @@ class KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _create_configmap(
-        self: KubernetesSandbox,
-        sandbox_id: str,
-        code_path: str,
-        namespace: str
+        self: KubernetesSandbox, sandbox_id: str, code_path: str, namespace: str
     ) -> str {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
@@ -211,7 +219,11 @@ class KubernetesSandbox(SandboxEnvironment) {
                 dirpath = walk_entry[0];
                 dirnames = walk_entry[1];
                 filenames = walk_entry[2];
-                kept = [d for d in dirnames if d not in skip_dirs];
+                kept = [
+                    d
+                    for d in dirnames
+                    if d not in skip_dirs
+                ];
                 dirnames.clear();
                 for d in kept {
                     dirnames.append(d);
@@ -247,10 +259,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             metadata=client.V1ObjectMeta(
                 name=cm_name,
                 namespace=namespace,
-                labels={
-                    _SANDBOX_LABEL: "true",
-                    "jac-sandbox-id": sandbox_id
-                }
+                labels={_SANDBOX_LABEL: "true", "jac-sandbox-id": sandbox_id}
             ),
             data=data
         );
@@ -280,21 +289,17 @@ class KubernetesSandbox(SandboxEnvironment) {
 
         # Resource limits
         resources = client.V1ResourceRequirements(
-            limits={
-                "cpu": self.config.cpu_limit,
-                "memory": self.config.memory_limit
-            },
-            requests={
-                "cpu": "100m",
-                "memory": "64Mi"
-            }
+            limits={"cpu": self.config.cpu_limit, "memory": self.config.memory_limit},
+            requests={"cpu": "100m", "memory": "64Mi"}
         );
 
         # Init container to unpack ConfigMap files into /app
         init_container = client.V1Container(
             name="code-setup",
             image=self.config.base_image,
-            command=["sh", "-c",
+            command=[
+                "sh",
+                "-c",
                 "cd /code-flat && for f in *; do "
                 "  target=$(echo \"$f\" | sed 's/--/\\//g'); "
                 "  mkdir -p \"/app/$(dirname \"$target\")\"; "
@@ -303,12 +308,9 @@ class KubernetesSandbox(SandboxEnvironment) {
             ],
             volume_mounts=[
                 client.V1VolumeMount(
-                    name="code-configmap", mount_path="/code-flat",
-                    read_only=True
+                    name="code-configmap", mount_path="/code-flat", read_only=True
                 ),
-                client.V1VolumeMount(
-                    name="app-data", mount_path="/app"
-                )
+                client.V1VolumeMount(name="app-data", mount_path="/app")
             ]
         );
 
@@ -316,7 +318,9 @@ class KubernetesSandbox(SandboxEnvironment) {
         main_container = client.V1Container(
             name="sandbox",
             image=self.config.base_image,
-            command=["bash", "-c",
+            command=[
+                "bash",
+                "-c",
                 f"cd /app && jac install 2>/dev/null; "
                 f"jac start main.jac -p {_INTERNAL_PORT} --dev"
             ],
@@ -324,12 +328,8 @@ class KubernetesSandbox(SandboxEnvironment) {
             resources=resources,
             security_context=security_context,
             volume_mounts=[
-                client.V1VolumeMount(
-                    name="app-data", mount_path="/app"
-                ),
-                client.V1VolumeMount(
-                    name="tmp-scratch", mount_path="/tmp"
-                )
+                client.V1VolumeMount(name="app-data", mount_path="/app"),
+                client.V1VolumeMount(name="tmp-scratch", mount_path="/tmp")
             ],
             env=[
                 client.V1EnvVar(name="JAC_SANDBOX_ID", value=sandbox_id),
@@ -346,10 +346,7 @@ class KubernetesSandbox(SandboxEnvironment) {
                 name="code-configmap",
                 config_map=client.V1ConfigMapVolumeSource(name=cm_name)
             ),
-            client.V1Volume(
-                name="app-data",
-                empty_dir=client.V1EmptyDirVolumeSource()
-            ),
+            client.V1Volume(name="app-data", empty_dir=client.V1EmptyDirVolumeSource()),
             client.V1Volume(
                 name="tmp-scratch",
                 empty_dir=client.V1EmptyDirVolumeSource(
@@ -392,18 +389,15 @@ class KubernetesSandbox(SandboxEnvironment) {
             metadata=client.V1ObjectMeta(
                 name=svc_name,
                 namespace=namespace,
-                labels={
-                    _SANDBOX_LABEL: "true",
-                    "jac-sandbox-id": sandbox_id
-                }
+                labels={_SANDBOX_LABEL: "true", "jac-sandbox-id": sandbox_id}
             ),
             spec=client.V1ServiceSpec(
                 selector={"jac-sandbox-id": sandbox_id},
-                ports=[client.V1ServicePort(
-                    port=_INTERNAL_PORT,
-                    target_port=_INTERNAL_PORT,
-                    protocol="TCP"
-                )],
+                ports=[
+                    client.V1ServicePort(
+                        port=_INTERNAL_PORT, target_port=_INTERNAL_PORT, protocol="TCP"
+                    )
+                ],
                 type="ClusterIP"
             )
         );
@@ -412,16 +406,13 @@ class KubernetesSandbox(SandboxEnvironment) {
     }
 
     # ---- Warm Pool Methods ----
-
     """Build a pod spec for warm pool pods.
 
     Warm pods start with a signal-file loop: they wait for /app/.jac-start
     to exist before running jac install + jac start. This allows code
     injection via kubectl exec before the app launches.
     """
-    def _build_warm_pod_spec(
-        self: KubernetesSandbox, pod_name: str
-    ) -> Any {
+    def _build_warm_pod_spec(self: KubernetesSandbox, pod_name: str) -> Any {
         import from kubernetes { client }
 
         security_context = None;
@@ -435,20 +426,16 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
 
         resources = client.V1ResourceRequirements(
-            limits={
-                "cpu": self.config.cpu_limit,
-                "memory": self.config.memory_limit
-            },
-            requests={
-                "cpu": "100m",
-                "memory": "64Mi"
-            }
+            limits={"cpu": self.config.cpu_limit, "memory": self.config.memory_limit},
+            requests={"cpu": "100m", "memory": "64Mi"}
         );
 
         main_container = client.V1Container(
             name="sandbox",
             image=self.config.base_image,
-            command=["bash", "-c",
+            command=[
+                "bash",
+                "-c",
                 "while [ ! -f /app/.jac-start ]; do sleep 0.5; done; "
                 f"cd /app && jac install 2>/dev/null; "
                 f"jac start main.jac -p {_INTERNAL_PORT} --dev"
@@ -468,10 +455,7 @@ class KubernetesSandbox(SandboxEnvironment) {
         );
 
         volumes = [
-            client.V1Volume(
-                name="app-data",
-                empty_dir=client.V1EmptyDirVolumeSource()
-            ),
+            client.V1Volume(name="app-data", empty_dir=client.V1EmptyDirVolumeSource()),
             client.V1Volume(
                 name="tmp-scratch",
                 empty_dir=client.V1EmptyDirVolumeSource(
@@ -484,10 +468,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             metadata=client.V1ObjectMeta(
                 name=pod_name,
                 namespace=self.config.namespace,
-                labels={
-                    _SANDBOX_LABEL: "true",
-                    "jac-sandbox-pool": "warm"
-                }
+                labels={_SANDBOX_LABEL: "true", "jac-sandbox-pool": "warm"}
             ),
             spec=client.V1PodSpec(
                 containers=[main_container],
@@ -566,10 +547,7 @@ class KubernetesSandbox(SandboxEnvironment) {
     Returns the pod name if claimed, None if pool is empty.
     """
     def _claim_warm_pod(
-        self: KubernetesSandbox,
-        sandbox_id: str,
-        user_id: str,
-        project_id: str
+        self: KubernetesSandbox, sandbox_id: str, user_id: str, project_id: str
     ) -> (str | None) {
         self._lock.acquire();
         try {
@@ -615,9 +593,7 @@ class KubernetesSandbox(SandboxEnvironment) {
     }
 
     """Inject project files into a running pod via kubectl exec tar."""
-    def _inject_code(
-        self: KubernetesSandbox, pod_name: str, code_path: str
-    ) -> bool {
+    def _inject_code(self: KubernetesSandbox, pod_name: str, code_path: str) -> bool {
         import from kubernetes { client }
         import from kubernetes.stream { stream }
         core_v1 = client.CoreV1Api();
@@ -631,7 +607,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             import tarfile;
             import io;
 
-            skip_dirs = {".jac", "node_modules", "__pycache__", "dist", ".git"};
+            skip_dirs = {".jac","node_modules","__pycache__","dist",".git"};
             tar_buffer = io.BytesIO();
 
             with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tar {
@@ -640,7 +616,11 @@ class KubernetesSandbox(SandboxEnvironment) {
                     dirnames = walk_entry[1];
                     filenames = walk_entry[2];
                     # Filter out skip dirs
-                    kept = [d for d in dirnames if d not in skip_dirs];
+                    kept = [
+                        d
+                        for d in dirnames
+                        if d not in skip_dirs
+                    ];
                     dirnames.clear();
                     for d in kept {
                         dirnames.append(d);
@@ -666,42 +646,53 @@ class KubernetesSandbox(SandboxEnvironment) {
             # Split into chunks to avoid command-line length limits
             chunk_size = 65536;
             chunks = [
-                encoded[i:i + chunk_size]
-                for i in range(0, len(encoded), chunk_size)
+                encoded[i:i + chunk_size] for i in range(0, len(encoded), chunk_size)
             ];
 
             # Write chunks to a temp file inside the pod, then extract
             stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
                 command=["sh", "-c", "rm -f /tmp/code.tar.gz"],
-                stderr=True, stdout=True, stdin=False, tty=False
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
 
             for chunk in chunks {
                 stream(
                     core_v1.connect_get_namespaced_pod_exec,
-                    pod_name, namespace,
+                    pod_name,
+                    namespace,
                     container="sandbox",
-                    command=["sh", "-c",
-                        f"echo -n '{chunk}' >> /tmp/code.b64"
-                    ],
-                    stderr=True, stdout=True, stdin=False, tty=False
+                    command=["sh", "-c", f"echo -n '{chunk}' >> /tmp/code.b64"],
+                    stderr=True,
+                    stdout=True,
+                    stdin=False,
+                    tty=False
                 );
             }
 
             # Decode and extract
             stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
-                command=["sh", "-c",
+                command=[
+                    "sh",
+                    "-c",
                     "base64 -d /tmp/code.b64 > /tmp/code.tar.gz && "
                     "tar xzf /tmp/code.tar.gz -C /app && "
                     "rm -f /tmp/code.b64 /tmp/code.tar.gz"
                 ],
-                stderr=True, stdout=True, stdin=False, tty=False
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
 
             if self.logger {
@@ -727,16 +718,18 @@ class KubernetesSandbox(SandboxEnvironment) {
         namespace = self.config.namespace;
         stream(
             core_v1.connect_get_namespaced_pod_exec,
-            pod_name, namespace,
+            pod_name,
+            namespace,
             container="sandbox",
             command=["touch", "/app/.jac-start"],
-            stderr=True, stdout=True, stdin=False, tty=False
+            stderr=True,
+            stdout=True,
+            stdin=False,
+            tty=False
         );
     }
 
-    def _poll_pod_readiness(
-        self: KubernetesSandbox, sandbox_id: str
-    ) -> None {
+    def _poll_pod_readiness(self: KubernetesSandbox, sandbox_id: str) -> None {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         namespace = self.config.namespace;
@@ -749,9 +742,7 @@ class KubernetesSandbox(SandboxEnvironment) {
 
         while time.time() - start_time < 120 {
             try {
-                pod = core_v1.read_namespaced_pod_status(
-                    pod_name, namespace
-                );
+                pod = core_v1.read_namespaced_pod_status(pod_name, namespace);
                 phase = pod.status.phase;
                 if phase == "Running" {
                     # Check container readiness
@@ -768,8 +759,7 @@ class KubernetesSandbox(SandboxEnvironment) {
                     # Even if not marked ready, if Running, check logs
                     try {
                         log_content = core_v1.read_namespaced_pod_log(
-                            pod_name, namespace,
-                            container="sandbox", tail_lines=50
+                            pod_name, namespace, container="sandbox", tail_lines=50
                         );
                         if "Server ready" in log_content {
                             ready = True;
@@ -803,10 +793,7 @@ class KubernetesSandbox(SandboxEnvironment) {
     }
 
     def create(
-        self: KubernetesSandbox,
-        user_id: str,
-        project_id: str,
-        code_path: str
+        self: KubernetesSandbox, user_id: str, project_id: str, code_path: str
     ) -> SandboxResult {
         try {
             self._init_k8s();
@@ -814,16 +801,13 @@ class KubernetesSandbox(SandboxEnvironment) {
             self._ensure_rbac();
         } except Exception as e {
             return SandboxResult(
-                success=False,
-                message=f"K8s initialization failed: {str(e)}"
+                success=False, message=f"K8s initialization failed: {str(e)}"
             );
         }
 
         # Bootstrap warm pool on first use
         if self.config.warm_pool_size > 0 and not self._pool_initialized {
-            replenish = Thread(
-                target=self._ensure_warm_pool, daemon=True
-            );
+            replenish = Thread(target=self._ensure_warm_pool, daemon=True);
             replenish.start();
         }
 
@@ -834,7 +818,8 @@ class KubernetesSandbox(SandboxEnvironment) {
             for (sid, entry) in self._registry.items() {
                 if entry.get("user_id") == user_id
                 and entry.get("status") not in [
-                    SandboxState.STOPPED, SandboxState.ERROR
+                    SandboxState.STOPPED,
+                    SandboxState.ERROR
                 ] {
                     user_count += 1;
                 }
@@ -856,9 +841,7 @@ class KubernetesSandbox(SandboxEnvironment) {
 
         # --- Warm start path ---
         if self.config.warm_pool_size > 0 {
-            claimed_pod = self._claim_warm_pod(
-                sandbox_id, user_id, project_id
-            );
+            claimed_pod = self._claim_warm_pod(sandbox_id, user_id, project_id);
             if claimed_pod {
                 try {
                     # Inject code into the warm pod
@@ -881,7 +864,10 @@ class KubernetesSandbox(SandboxEnvironment) {
                         svc_name = self._create_service(sandbox_id, namespace);
                     }
                     url = ingress.create_route(
-                        sandbox_id, svc_name, _INTERNAL_PORT, namespace,
+                        sandbox_id,
+                        svc_name,
+                        _INTERNAL_PORT,
+                        namespace,
                         {
                             "domain_template": self.config.domain_template,
                             "ingress_class": self.config.ingress_class,
@@ -913,15 +899,13 @@ class KubernetesSandbox(SandboxEnvironment) {
                     # Poll readiness in background
                     checker = Thread(
                         target=self._poll_pod_readiness,
-                        args=(sandbox_id,),
+                        args=(sandbox_id, ),
                         daemon=True
                     );
                     checker.start();
 
                     # Replenish pool in background
-                    replenish = Thread(
-                        target=self._ensure_warm_pool, daemon=True
-                    );
+                    replenish = Thread(target=self._ensure_warm_pool, daemon=True);
                     replenish.start();
 
                     if self.logger {
@@ -931,8 +915,10 @@ class KubernetesSandbox(SandboxEnvironment) {
                     }
 
                     return SandboxResult(
-                        success=True, sandbox_id=sandbox_id,
-                        url=url, port=_INTERNAL_PORT,
+                        success=True,
+                        sandbox_id=sandbox_id,
+                        url=url,
+                        port=_INTERNAL_PORT,
                         message="warm-starting"
                     );
                 } except Exception as e {
@@ -948,9 +934,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             cm_name = self._create_configmap(sandbox_id, code_path, namespace);
 
             # 2. Create Pod
-            pod_spec = self._build_pod_spec(
-                sandbox_id, cm_name, user_id, project_id
-            );
+            pod_spec = self._build_pod_spec(sandbox_id, cm_name, user_id, project_id);
             core_v1.create_namespaced_pod(namespace, pod_spec);
 
             # 3. Create Service (skip in proxy mode)
@@ -962,7 +946,10 @@ class KubernetesSandbox(SandboxEnvironment) {
             # 4. Create Ingress route
             ingress = self._get_ingress_provider();
             url = ingress.create_route(
-                sandbox_id, svc_name, _INTERNAL_PORT, namespace,
+                sandbox_id,
+                svc_name,
+                _INTERNAL_PORT,
+                namespace,
                 {
                     "domain_template": self.config.domain_template,
                     "ingress_class": self.config.ingress_class,
@@ -994,15 +981,15 @@ class KubernetesSandbox(SandboxEnvironment) {
 
             # 6. Poll readiness in background
             checker = Thread(
-                target=self._poll_pod_readiness,
-                args=(sandbox_id,),
-                daemon=True
+                target=self._poll_pod_readiness, args=(sandbox_id, ), daemon=True
             );
             checker.start();
 
             return SandboxResult(
-                success=True, sandbox_id=sandbox_id,
-                url=url, port=_INTERNAL_PORT,
+                success=True,
+                sandbox_id=sandbox_id,
+                url=url,
+                port=_INTERNAL_PORT,
                 message="cold-starting"
             );
         } except Exception as e {
@@ -1057,7 +1044,8 @@ class KubernetesSandbox(SandboxEnvironment) {
     def stop(self: KubernetesSandbox, sandbox_id: str) -> None {
         self._init_k8s();
         entry = self._registry.get(sandbox_id);
-        namespace = entry.get("namespace", self.config.namespace) if entry
+        namespace = entry.get("namespace", self.config.namespace)
+            if entry
             else self.config.namespace;
         self._cleanup_k8s_resources(sandbox_id, namespace);
         self._lock.acquire();
@@ -1073,9 +1061,7 @@ class KubernetesSandbox(SandboxEnvironment) {
     def status(self: KubernetesSandbox, sandbox_id: str) -> SandboxStatus {
         entry = self._registry.get(sandbox_id);
         if not entry {
-            return SandboxStatus(
-                state=SandboxState.STOPPED, sandbox_id=sandbox_id
-            );
+            return SandboxStatus(state=SandboxState.STOPPED, sandbox_id=sandbox_id);
         }
         # Check actual pod status
         try {
@@ -1100,9 +1086,11 @@ class KubernetesSandbox(SandboxEnvironment) {
             state = entry.get("status", SandboxState.STOPPED);
         }
         uptime = time.time() - entry.get("created_at", time.time())
-            if state == SandboxState.RUNNING else 0.0;
+            if state == SandboxState.RUNNING
+            else 0.0;
         return SandboxStatus(
-            state=state, sandbox_id=sandbox_id,
+            state=state,
+            sandbox_id=sandbox_id,
             uptime_seconds=uptime,
             url=entry.get("url", ""),
             port=entry.get("port", 0)
@@ -1123,14 +1111,16 @@ class KubernetesSandbox(SandboxEnvironment) {
         results: list[SandboxInfo] = [];
         for (sid, entry) in self._registry.items() {
             if entry.get("user_id") == user_id {
-                results.append(SandboxInfo(
-                    sandbox_id=sid,
-                    user_id=entry.get("user_id", ""),
-                    project_id=entry.get("project_id", ""),
-                    state=entry.get("status", SandboxState.STOPPED),
-                    url=entry.get("url", ""),
-                    created_at=entry.get("created_at", 0.0)
-                ));
+                results.append(
+                    SandboxInfo(
+                        sandbox_id=sid,
+                        user_id=entry.get("user_id", ""),
+                        project_id=entry.get("project_id", ""),
+                        state=entry.get("status", SandboxState.STOPPED),
+                        url=entry.get("url", ""),
+                        created_at=entry.get("created_at", 0.0)
+                    )
+                );
             }
         }
         return results;
@@ -1180,8 +1170,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             namespace = entry.get("namespace", self.config.namespace);
             pod_name = self._get_pod_name(sandbox_id);
             log_content = core_v1.read_namespaced_pod_log(
-                pod_name, namespace,
-                container="sandbox"
+                pod_name, namespace, container="sandbox"
             );
             if offset > 0 {
                 if offset >= len(log_content) {
@@ -1199,6 +1188,11 @@ class KubernetesSandbox(SandboxEnvironment) {
     def write_file(
         self: KubernetesSandbox, sandbox_id: str, path: str, content: str
     ) -> dict {
+        try {
+            path = validate_sandbox_path(path);
+        } except ValueError as e {
+            return {"success": False, "error": str(e)};
+        }
         entry = self._registry.get(sandbox_id);
         if not entry {
             return {"success": False, "error": "Sandbox not found"};
@@ -1216,10 +1210,14 @@ class KubernetesSandbox(SandboxEnvironment) {
             if parent_dir {
                 stream(
                     core_v1.connect_get_namespaced_pod_exec,
-                    pod_name, namespace,
+                    pod_name,
+                    namespace,
                     container="sandbox",
                     command=["mkdir", "-p", f"/app/{parent_dir}"],
-                    stderr=True, stdout=True, stdin=False, tty=False
+                    stderr=True,
+                    stdout=True,
+                    stdin=False,
+                    tty=False
                 );
             }
 
@@ -1229,10 +1227,14 @@ class KubernetesSandbox(SandboxEnvironment) {
             encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8");
             stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
                 command=["sh", "-c", f"echo '{encoded}' | base64 -d > /app/{path}"],
-                stderr=True, stdout=True, stdin=False, tty=False
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
             return {"success": True, "path": path};
         } except Exception as e {
@@ -1240,9 +1242,12 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def read_file(
-        self: KubernetesSandbox, sandbox_id: str, path: str
-    ) -> dict {
+    def read_file(self: KubernetesSandbox, sandbox_id: str, path: str) -> dict {
+        try {
+            path = validate_sandbox_path(path);
+        } except ValueError as e {
+            return {"success": False, "error": str(e)};
+        }
         entry = self._registry.get(sandbox_id);
         if not entry {
             return {"success": False, "error": "Sandbox not found"};
@@ -1256,10 +1261,14 @@ class KubernetesSandbox(SandboxEnvironment) {
             pod_name = self._get_pod_name(sandbox_id);
             result = stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
                 command=["cat", f"/app/{path}"],
-                stderr=True, stdout=True, stdin=False, tty=False
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
             return {"success": True, "path": path, "content": result};
         } except Exception as e {
@@ -1267,9 +1276,12 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def delete_file(
-        self: KubernetesSandbox, sandbox_id: str, path: str
-    ) -> dict {
+    def delete_file(self: KubernetesSandbox, sandbox_id: str, path: str) -> dict {
+        try {
+            path = validate_sandbox_path(path);
+        } except ValueError as e {
+            return {"success": False, "error": str(e)};
+        }
         entry = self._registry.get(sandbox_id);
         if not entry {
             return {"success": False, "error": "Sandbox not found"};
@@ -1283,10 +1295,14 @@ class KubernetesSandbox(SandboxEnvironment) {
             pod_name = self._get_pod_name(sandbox_id);
             stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
                 command=["rm", "-rf", f"/app/{path}"],
-                stderr=True, stdout=True, stdin=False, tty=False
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
             return {"success": True, "path": path};
         } except Exception as e {
@@ -1294,9 +1310,12 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def list_files(
-        self: KubernetesSandbox, sandbox_id: str, path: str = "."
-    ) -> dict {
+    def list_files(self: KubernetesSandbox, sandbox_id: str, path: str = ".") -> dict {
+        try {
+            path = validate_sandbox_path(path);
+        } except ValueError as e {
+            return {"success": False, "error": str(e)};
+        }
         entry = self._registry.get(sandbox_id);
         if not entry {
             return {"success": False, "error": "Sandbox not found"};
@@ -1310,14 +1329,31 @@ class KubernetesSandbox(SandboxEnvironment) {
             pod_name = self._get_pod_name(sandbox_id);
             result = stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
-                command=["find", f"/app/{path}", "-type", "f",
-                         "-not", "-path", "*/node_modules/*",
-                         "-not", "-path", "*/.jac/*",
-                         "-not", "-path", "*/__pycache__/*",
-                         "-not", "-path", "*/dist/*"],
-                stderr=True, stdout=True, stdin=False, tty=False
+                command=[
+                    "find",
+                    f"/app/{path}",
+                    "-type",
+                    "f",
+                    "-not",
+                    "-path",
+                    "*/node_modules/*",
+                    "-not",
+                    "-path",
+                    "*/.jac/*",
+                    "-not",
+                    "-path",
+                    "*/__pycache__/*",
+                    "-not",
+                    "-path",
+                    "*/dist/*"
+                ],
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
             files = [
                 os.path.relpath(f.strip(), "/app")
@@ -1347,22 +1383,22 @@ class KubernetesSandbox(SandboxEnvironment) {
             pod_name = self._get_pod_name(sandbox_id);
             result = stream(
                 core_v1.connect_get_namespaced_pod_exec,
-                pod_name, namespace,
+                pod_name,
+                namespace,
                 container="sandbox",
                 command=["bash", "-c", command],
-                stderr=True, stdout=True, stdin=False, tty=False
+                stderr=True,
+                stdout=True,
+                stdin=False,
+                tty=False
             );
-            return {
-                "success": True, "exit_code": 0,
-                "stdout": result, "stderr": ""
-            };
+            return {"success": True, "exit_code": 0, "stdout": result, "stderr": ""};
         } except Exception as e {
             return {"success": False, "error": str(e)};
         }
     }
 
     # ---- Convenience methods for preview_manager compatibility ----
-
     def get_sandbox_id(
         self: KubernetesSandbox, user_id: str, project_id: str
     ) -> (str | None) {
@@ -1375,3 +1411,4 @@ class KubernetesSandbox(SandboxEnvironment) {
         return None;
     }
 }
+# 1MB
