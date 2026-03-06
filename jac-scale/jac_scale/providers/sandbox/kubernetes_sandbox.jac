@@ -318,7 +318,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             image=self.config.base_image,
             command=["bash", "-c",
                 f"cd /app && jac install 2>/dev/null; "
-                f"jac start main.jac -p {_INTERNAL_PORT}"
+                f"jac start main.jac -p {_INTERNAL_PORT} --dev"
             ],
             ports=[client.V1ContainerPort(container_port=_INTERNAL_PORT)],
             resources=resources,
@@ -451,7 +451,7 @@ class KubernetesSandbox(SandboxEnvironment) {
             command=["bash", "-c",
                 "while [ ! -f /app/.jac-start ]; do sleep 0.5; done; "
                 f"cd /app && jac install 2>/dev/null; "
-                f"jac start main.jac -p {_INTERNAL_PORT}"
+                f"jac start main.jac -p {_INTERNAL_PORT} --dev"
             ],
             ports=[client.V1ContainerPort(container_port=_INTERNAL_PORT)],
             resources=resources,
@@ -1181,9 +1181,12 @@ class KubernetesSandbox(SandboxEnvironment) {
             pod_name = self._get_pod_name(sandbox_id);
             log_content = core_v1.read_namespaced_pod_log(
                 pod_name, namespace,
-                container="sandbox", tail_lines=500
+                container="sandbox"
             );
-            if offset > 0 and offset < len(log_content) {
+            if offset > 0 {
+                if offset >= len(log_content) {
+                    return {"success": True, "content": "", "offset": offset};
+                }
                 log_content = log_content[offset:];
             }
             new_offset = offset + len(log_content);
