@@ -49,9 +49,7 @@ class KubernetesIngressProvider(IngressProvider) {
         ingress_class = config.get(
             "ingress_class", self._config.get("ingress_class", "nginx")
         );
-        tls_enabled = config.get(
-            "tls_enabled", self._config.get("tls_enabled", False)
-        );
+        tls_enabled = config.get("tls_enabled", self._config.get("tls_enabled", False));
         tls_issuer = config.get(
             "tls_issuer", self._config.get("tls_issuer", "letsencrypt-prod")
         );
@@ -65,8 +63,7 @@ class KubernetesIngressProvider(IngressProvider) {
         # Annotations — merge custom annotations from config
         annotations: dict[str, str] = {};
         custom_annotations = config.get(
-            "ingress_annotations",
-            self._config.get("ingress_annotations", {})
+            "ingress_annotations", self._config.get("ingress_annotations", {})
         );
         if isinstance(custom_annotations, dict) {
             annotations.update(custom_annotations);
@@ -81,10 +78,9 @@ class KubernetesIngressProvider(IngressProvider) {
         # TLS configuration
         tls_config = None;
         if tls_enabled {
-            tls_config = [client.V1IngressTLS(
-                hosts=[hostname],
-                secret_name=f"{sandbox_id}-tls"
-            )];
+            tls_config = [
+                client.V1IngressTLS(hosts=[hostname], secret_name=f"{sandbox_id}-tls")
+            ];
         }
 
         # Ingress spec
@@ -93,31 +89,32 @@ class KubernetesIngressProvider(IngressProvider) {
                 name=ingress_name,
                 namespace=namespace,
                 annotations=annotations,
-                labels={
-                    "jac-sandbox": "true",
-                    "jac-sandbox-id": sandbox_id
-                }
+                labels={"jac-sandbox": "true", "jac-sandbox-id": sandbox_id}
             ),
             spec=client.V1IngressSpec(
                 ingress_class_name=ingress_class,
                 tls=tls_config,
-                rules=[client.V1IngressRule(
-                    host=hostname,
-                    http=client.V1HTTPIngressRuleValue(
-                        paths=[client.V1HTTPIngressPath(
-                            path="/",
-                            path_type="Prefix",
-                            backend=client.V1IngressBackend(
-                                service=client.V1IngressServiceBackend(
-                                    name=service_name,
-                                    port=client.V1ServiceBackendPort(
-                                        number=target_port
+                rules=[
+                    client.V1IngressRule(
+                        host=hostname,
+                        http=client.V1HTTPIngressRuleValue(
+                            paths=[
+                                client.V1HTTPIngressPath(
+                                    path="/",
+                                    path_type="Prefix",
+                                    backend=client.V1IngressBackend(
+                                        service=client.V1IngressServiceBackend(
+                                            name=service_name,
+                                            port=client.V1ServiceBackendPort(
+                                                number=target_port
+                                            )
+                                        )
                                     )
                                 )
-                            )
-                        )]
+                            ]
+                        )
                     )
-                )]
+                ]
             )
         );
 
@@ -126,9 +123,7 @@ class KubernetesIngressProvider(IngressProvider) {
     }
 
     def delete_route(
-        self: KubernetesIngressProvider,
-        sandbox_id: str,
-        namespace: str
+        self: KubernetesIngressProvider, sandbox_id: str, namespace: str
     ) -> None {
         self._init_k8s();
         import from kubernetes { client }

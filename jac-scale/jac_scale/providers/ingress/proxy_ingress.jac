@@ -27,18 +27,14 @@ class ProxyIngressProvider(IngressProvider) {
             "domain_template",
             self._config.get("domain_template", "{sandbox_id}.preview.example.com")
         );
-        tls_enabled = config.get(
-            "tls_enabled", self._config.get("tls_enabled", False)
-        );
+        tls_enabled = config.get("tls_enabled", self._config.get("tls_enabled", False));
         hostname = domain_template.replace("{sandbox_id}", sandbox_id);
         protocol = "https" if tls_enabled else "http";
         return f"{protocol}://{hostname}";
     }
 
     def delete_route(
-        self: ProxyIngressProvider,
-        sandbox_id: str,
-        namespace: str
+        self: ProxyIngressProvider, sandbox_id: str, namespace: str
     ) -> None {
         ;
     }

@@ -23,14 +23,19 @@ import from jac_scale.abstractions.models.sandbox_status {
 import from jac_scale.abstractions.logger { Logger }
 
 glob _IMAGE_MIME_TYPES: dict = {
-    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-    ".gif": "image/gif", ".webp": "image/webp", ".ico": "image/x-icon",
-    ".bmp": "image/bmp", ".tiff": "image/tiff", ".tif": "image/tiff",
-    ".svg": "image/svg+xml"
-};
-
-glob PROTECTED_FILES: list = ["jac.toml"];
-glob _WRITE_ALLOWED_PROTECTED: list = ["jac.toml"];
+         ".png": "image/png",
+         ".jpg": "image/jpeg",
+         ".jpeg": "image/jpeg",
+         ".gif": "image/gif",
+         ".webp": "image/webp",
+         ".ico": "image/x-icon",
+         ".bmp": "image/bmp",
+         ".tiff": "image/tiff",
+         ".tif": "image/tiff",
+         ".svg": "image/svg+xml"
+     },
+     PROTECTED_FILES: list = ["jac.toml"],
+     _WRITE_ALLOWED_PROTECTED: list = ["jac.toml"];
 
 """Local subprocess sandbox — runs jac start as a child process on the host."""
 class LocalSandbox(SandboxEnvironment) {
@@ -41,20 +46,16 @@ class LocalSandbox(SandboxEnvironment) {
         _port_count: int = 10;
 
     def init(
-        self: LocalSandbox,
-        config: SandboxConfig,
-        logger: (Logger | None) = None
+        self: LocalSandbox, config: SandboxConfig, logger: (Logger | None) = None
     ) -> None {
         self.config = config;
         self.logger = logger;
         self._registry = {};
         self._base_port = 5180;
         self._port_count = 10;
-        self._port_pool = list(range(
-            self._base_port,
-            self._base_port + self._port_count * 2,
-            2
-        ));
+        self._port_pool = list(
+            range(self._base_port, self._base_port + self._port_count * 2, 2)
+        );
         self._lock = Lock();
     }
 
@@ -107,11 +108,12 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def _resolve_path(self: LocalSandbox, preview_dir: str, path: str) -> str {
-        candidate = path if path else ".";
+        candidate = path or ".";
         real_preview = os.path.realpath(preview_dir);
         full = os.path.realpath(
-            candidate if os.path.isabs(candidate)
-            else os.path.join(real_preview, candidate)
+            candidate
+                if os.path.isabs(candidate)
+                else os.path.join(real_preview, candidate)
         );
         if os.path.commonpath([real_preview, full]) != real_preview {
             raise ValueError("Path is outside sandbox directory");
@@ -122,8 +124,11 @@ class LocalSandbox(SandboxEnvironment) {
     def _kill_port_listeners(self: LocalSandbox, port: int) -> None {
         try {
             result = subprocess.run(
-                f"lsof -i :{port} -t", shell=True,
-                capture_output=True, text=True, timeout=5
+                f"lsof -i :{port} -t",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=5
             );
             pids = result.stdout.strip();
             if pids {
@@ -177,11 +182,7 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def _poll_readiness(
-        self: LocalSandbox,
-        key: str,
-        port: int,
-        process: Any,
-        log_path: str
+        self: LocalSandbox, key: str, port: int, process: Any, log_path: str
     ) -> None {
         import requests;
         vite_url = f"http://localhost:{port}";
@@ -251,10 +252,7 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def create(
-        self: LocalSandbox,
-        user_id: str,
-        project_id: str,
-        code_path: str
+        self: LocalSandbox, user_id: str, project_id: str, code_path: str
     ) -> SandboxResult {
         self._lock.acquire();
         try {
@@ -292,7 +290,8 @@ class LocalSandbox(SandboxEnvironment) {
             }
 
             # Allocate port
-            if previous_port and previous_port in range(
+            if previous_port
+            and previous_port in range(
                 self._base_port, self._base_port + self._port_count * 2, 2
             ) {
                 port = previous_port;
@@ -301,9 +300,7 @@ class LocalSandbox(SandboxEnvironment) {
                 }
             } else {
                 if not self._port_pool {
-                    return SandboxResult(
-                        success=False, message="No available ports"
-                    );
+                    return SandboxResult(success=False, message="No available ports");
                 }
                 port = self._port_pool.pop(0);
             }
@@ -312,8 +309,7 @@ class LocalSandbox(SandboxEnvironment) {
             if not os.path.isfile(main_jac) {
                 self._port_pool.append(port);
                 return SandboxResult(
-                    success=False,
-                    message="main.jac not found in preview directory"
+                    success=False, message="main.jac not found in preview directory"
                 );
             }
 
@@ -345,7 +341,7 @@ class LocalSandbox(SandboxEnvironment) {
             }
 
             needs_install = not (key in self._registry)
-                or self._registry.get(key, {}).get("needs_install", True);
+            or self._registry.get(key, {}).get("needs_install", True);
 
             if activate_script {
                 if needs_install {
@@ -365,9 +361,13 @@ class LocalSandbox(SandboxEnvironment) {
             log_file = open(log_path, "w", encoding="utf-8");
 
             process = subprocess.Popen(
-                shell_cmd, shell=True, executable="/bin/bash",
-                cwd=preview_dir, stdout=log_file,
-                stderr=subprocess.STDOUT, preexec_fn=os.setsid
+                shell_cmd,
+                shell=True,
+                executable="/bin/bash",
+                cwd=preview_dir,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid
             );
 
             self._registry[key] = {
@@ -396,8 +396,11 @@ class LocalSandbox(SandboxEnvironment) {
 
             url = f"http://localhost:{port}";
             return SandboxResult(
-                success=True, sandbox_id=sid,
-                url=url, port=port, api_port=api_port,
+                success=True,
+                sandbox_id=sid,
+                url=url,
+                port=port,
+                api_port=api_port,
                 message="starting"
             );
         } except Exception as e {
@@ -414,9 +417,9 @@ class LocalSandbox(SandboxEnvironment) {
                 if entry.get("sandbox_id") == sandbox_id {
                     self._stop_process(entry);
                     port = entry.get("port", 0);
-                    if port and port in range(
-                        self._base_port,
-                        self._base_port + self._port_count * 2, 2
+                    if port
+                    and port in range(
+                        self._base_port, self._base_port + self._port_count * 2, 2
                     ) {
                         if port not in self._port_pool {
                             self._port_pool.append(port);
@@ -439,14 +442,21 @@ class LocalSandbox(SandboxEnvironment) {
                 process = entry.get("process");
                 state = entry.get("status", SandboxState.STOPPED);
                 alive = process is not None and process.poll() is None;
-                if not alive and state in [SandboxState.RUNNING, SandboxState.STARTING] {
+                if not alive
+                and state in [SandboxState.RUNNING, SandboxState.STARTING] {
                     state = SandboxState.STOPPED;
                 }
-                uptime = time.time() - entry.get("created_at", time.time()) if alive else 0.0;
+                uptime = time.time() - entry.get(
+                    "created_at", time.time()
+                )
+                    if alive
+                    else 0.0;
                 url = f"http://localhost:{entry.get('port', 0)}" if alive else "";
                 return SandboxStatus(
-                    state=state, sandbox_id=sandbox_id,
-                    uptime_seconds=uptime, url=url,
+                    state=state,
+                    sandbox_id=sandbox_id,
+                    uptime_seconds=uptime,
+                    url=url,
                     port=entry.get("port", 0)
                 );
             }
@@ -481,14 +491,16 @@ class LocalSandbox(SandboxEnvironment) {
         results: list[SandboxInfo] = [];
         for (key, entry) in self._registry.items() {
             if entry.get("user_id") == user_id {
-                results.append(SandboxInfo(
-                    sandbox_id=entry.get("sandbox_id", ""),
-                    user_id=entry.get("user_id", ""),
-                    project_id=entry.get("project_id", ""),
-                    state=entry.get("status", SandboxState.STOPPED),
-                    url=f"http://localhost:{entry.get('port', 0)}",
-                    created_at=entry.get("created_at", 0.0)
-                ));
+                results.append(
+                    SandboxInfo(
+                        sandbox_id=entry.get("sandbox_id", ""),
+                        user_id=entry.get("user_id", ""),
+                        project_id=entry.get("project_id", ""),
+                        state=entry.get("status", SandboxState.STOPPED),
+                        url=f"http://localhost:{entry.get('port', 0)}",
+                        created_at=entry.get("created_at", 0.0)
+                    )
+                );
             }
         }
         return results;
@@ -513,8 +525,7 @@ class LocalSandbox(SandboxEnvironment) {
         for (key, entry) in self._registry.items() {
             if entry.get("sandbox_id") == sandbox_id {
                 log_path = entry.get(
-                    "log_path",
-                    os.path.join(entry.get("dir", ""), ".jac-preview.log")
+                    "log_path", os.path.join(entry.get("dir", ""), ".jac-preview.log")
                 );
                 if not os.path.exists(log_path) {
                     return {"success": True, "content": "", "offset": 0};
@@ -543,7 +554,8 @@ class LocalSandbox(SandboxEnvironment) {
                 if basename in PROTECTED_FILES
                 and basename not in _WRITE_ALLOWED_PROTECTED {
                     return {
-                        "success": True, "skipped": True,
+                        "success": True,
+                        "skipped": True,
                         "reason": f"Protected file: {basename}"
                     };
                 }
@@ -565,9 +577,7 @@ class LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    def read_file(
-        self: LocalSandbox, sandbox_id: str, path: str
-    ) -> dict {
+    def read_file(self: LocalSandbox, sandbox_id: str, path: str) -> dict {
         for (key, entry) in self._registry.items() {
             if entry.get("sandbox_id") == sandbox_id {
                 try {
@@ -582,8 +592,10 @@ class LocalSandbox(SandboxEnvironment) {
                         }
                         b64 = base64.b64encode(raw).decode("utf-8");
                         return {
-                            "success": True, "path": path,
-                            "content": b64, "is_binary": True,
+                            "success": True,
+                            "path": path,
+                            "content": b64,
+                            "is_binary": True,
                             "mime_type": _IMAGE_MIME_TYPES[ext]
                         };
                     }
@@ -599,9 +611,7 @@ class LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    def delete_file(
-        self: LocalSandbox, sandbox_id: str, path: str
-    ) -> dict {
+    def delete_file(self: LocalSandbox, sandbox_id: str, path: str) -> dict {
         for (key, entry) in self._registry.items() {
             if entry.get("sandbox_id") == sandbox_id {
                 basename = os.path.basename(path);
@@ -629,9 +639,7 @@ class LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    def list_files(
-        self: LocalSandbox, sandbox_id: str, path: str = "."
-    ) -> dict {
+    def list_files(self: LocalSandbox, sandbox_id: str, path: str = ".") -> dict {
         for (key, entry) in self._registry.items() {
             if entry.get("sandbox_id") == sandbox_id {
                 try {
@@ -644,7 +652,11 @@ class LocalSandbox(SandboxEnvironment) {
                         dirpath = walk_entry[0];
                         dirnames = walk_entry[1];
                         filenames = walk_entry[2];
-                        kept = [d for d in dirnames if d not in skip_dirs];
+                        kept = [
+                            d
+                            for d in dirnames
+                            if d not in skip_dirs
+                        ];
                         dirnames.clear();
                         for d in kept {
                             dirnames.append(d);
@@ -672,12 +684,18 @@ class LocalSandbox(SandboxEnvironment) {
             if entry.get("sandbox_id") == sandbox_id {
                 try {
                     result = subprocess.run(
-                        command, shell=True, cwd=entry["dir"],
-                        capture_output=True, text=True, timeout=timeout
+                        command,
+                        shell=True,
+                        cwd=entry["dir"],
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout
                     );
                     return {
-                        "success": True, "exit_code": result.returncode,
-                        "stdout": result.stdout, "stderr": result.stderr
+                        "success": True,
+                        "exit_code": result.returncode,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr
                     };
                 } except Exception as e {
                     return {"success": False, "error": str(e)};
@@ -688,7 +706,6 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     # ---- Convenience methods for preview_manager compatibility ----
-
     """Get the sandbox entry by user_id and project_id (for preview_manager compat)."""
     def get_by_user_project(
         self: LocalSandbox, user_id: str, project_id: str

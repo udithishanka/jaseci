@@ -923,7 +923,16 @@ def _toml_config_to_js(config_name: str, config_data: dict) -> str {
 
 """Build the Vite dev server command."""
 def _build_vite_dev_command(config_rel: Path, port: int) -> list[str] {
-    return ['bun', 'x', 'vite', '--config', str(config_rel), '--port', str(port), '--host'];
+    return [
+        'bun',
+        'x',
+        'vite',
+        '--config',
+        str(config_rel),
+        '--port',
+        str(port),
+        '--host'
+    ];
 }
 
 """Check if a line indicates Vite server is ready."""

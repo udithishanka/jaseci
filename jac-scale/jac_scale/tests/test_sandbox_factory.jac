@@ -15,7 +15,6 @@ import from jac_scale.abstractions.models.sandbox_status {
 import from jac_scale.providers.sandbox.local_sandbox { LocalSandbox }
 
 # ---- SandboxConfig tests ----
-
 test "sandbox config has correct defaults" {
     config = SandboxConfig();
     assert config.sandbox_type == "docker";
@@ -29,14 +28,16 @@ test "sandbox config has correct defaults" {
 }
 
 test "sandbox config from_dict" {
-    cfg = SandboxConfig.from_dict({
-        "type": "kubernetes",
-        "namespace": "test-ns",
-        "max_per_user": 5,
-        "ttl_seconds": 7200,
-        "cpu_limit": "1",
-        "memory_limit": "1Gi"
-    });
+    cfg = SandboxConfig.from_dict(
+        {
+            "type": "kubernetes",
+            "namespace": "test-ns",
+            "max_per_user": 5,
+            "ttl_seconds": 7200,
+            "cpu_limit": "1",
+            "memory_limit": "1Gi"
+        }
+    );
     assert cfg.sandbox_type == "kubernetes";
     assert cfg.namespace == "test-ns";
     assert cfg.max_per_user == 5;
@@ -52,11 +53,9 @@ test "sandbox config from_dict with defaults" {
 }
 
 # ---- SandboxResult tests ----
-
 test "sandbox result successful" {
     result = SandboxResult(
-        success=True, sandbox_id="test-123",
-        url="http://localhost:5180", port=5180
+        success=True, sandbox_id="test-123", url="http://localhost:5180", port=5180
     );
     assert result.is_successful();
     assert result.sandbox_id == "test-123";
@@ -71,11 +70,13 @@ test "sandbox result failed" {
 }
 
 # ---- SandboxStatus tests ----
-
 test "sandbox status running" {
     status = SandboxStatus(
-        state=SandboxState.RUNNING, sandbox_id="test-123",
-        uptime_seconds=60.0, url="http://localhost:5180", port=5180
+        state=SandboxState.RUNNING,
+        sandbox_id="test-123",
+        uptime_seconds=60.0,
+        url="http://localhost:5180",
+        port=5180
     );
     assert status.is_running();
     assert status.sandbox_id == "test-123";
@@ -83,19 +84,19 @@ test "sandbox status running" {
 }
 
 test "sandbox status stopped" {
-    status = SandboxStatus(
-        state=SandboxState.STOPPED, sandbox_id="test-123"
-    );
+    status = SandboxStatus(state=SandboxState.STOPPED, sandbox_id="test-123");
     assert not status.is_running();
 }
 
 # ---- SandboxInfo tests ----
-
 test "sandbox info creation" {
     info = SandboxInfo(
-        sandbox_id="test-123", user_id="user1",
-        project_id="proj1", state=SandboxState.RUNNING,
-        url="http://localhost:5180", created_at=1000.0
+        sandbox_id="test-123",
+        user_id="user1",
+        project_id="proj1",
+        state=SandboxState.RUNNING,
+        url="http://localhost:5180",
+        created_at=1000.0
     );
     assert info.sandbox_id == "test-123";
     assert info.user_id == "user1";
@@ -104,7 +105,6 @@ test "sandbox info creation" {
 }
 
 # ---- SandboxFactory tests ----
-
 test "sandbox factory creates local sandbox" {
     sandbox = SandboxFactory.create("local", {});
     assert sandbox is not None;
@@ -143,7 +143,7 @@ test "sandbox factory raises for unsupported type" {
         raised = True;
         assert "Unsupported sandbox type" in str(e);
     }
-    assert raised, "Expected ValueError for unsupported sandbox type";
+    assert raised , "Expected ValueError for unsupported sandbox type";
 }
 
 test "sandbox factory get_default returns local when no config" {
@@ -176,7 +176,6 @@ test "sandbox factory respects env var override" {
 }
 
 # ---- IngressFactory tests ----
-
 test "ingress factory creates local ingress" {
     ingress = IngressFactory.create("local", {});
     assert ingress is not None;
@@ -200,11 +199,10 @@ test "ingress factory raises for unsupported type" {
         raised = True;
         assert "Unsupported ingress type" in str(e);
     }
-    assert raised, "Expected ValueError for unsupported ingress type";
+    assert raised , "Expected ValueError for unsupported ingress type";
 }
 
 # ---- LocalIngress behavior tests ----
-
 test "local ingress creates and retrieves routes" {
     ingress = IngressFactory.create("local", {});
     url = ingress.create_route("test-sandbox", "svc", 8000, "default", {});
@@ -216,7 +214,6 @@ test "local ingress creates and retrieves routes" {
 }
 
 # ---- LocalSandbox lifecycle tests ----
-
 test "local sandbox lifecycle create status stop destroy" {
     import shutil;
     import tempfile;
@@ -240,8 +237,10 @@ test "local sandbox lifecycle create status stop destroy" {
     status = sandbox.status(result.sandbox_id);
     assert status.sandbox_id == result.sandbox_id;
     assert status.state in [
-        SandboxState.STARTING, SandboxState.RUNNING,
-        SandboxState.ERROR, SandboxState.STOPPED
+        SandboxState.STARTING,
+        SandboxState.RUNNING,
+        SandboxState.ERROR,
+        SandboxState.STOPPED
     ];
 
     # List sandboxes
@@ -253,7 +252,7 @@ test "local sandbox lifecycle create status stop destroy" {
             found = True;
         }
     }
-    assert found, "Created sandbox should appear in list";
+    assert found , "Created sandbox should appear in list";
 
     # Stop
     sandbox.stop(result.sandbox_id);
@@ -264,7 +263,7 @@ test "local sandbox lifecycle create status stop destroy" {
     sandbox.destroy(result.sandbox_id);
     sandboxes_after = sandbox.list_sandboxes("test-user");
     for s in sandboxes_after {
-        assert s.sandbox_id != result.sandbox_id, "Destroyed sandbox should not appear in list";
+        assert s.sandbox_id != result.sandbox_id , "Destroyed sandbox should not appear in list";
     }
 
     # Cleanup
@@ -327,7 +326,9 @@ test "local sandbox enforces path sandboxing" {
 
     # Attempt path traversal — should fail
     read_result = sandbox.read_file(sid, "../../etc/passwd");
-    assert not read_result.get("success") or "outside" in read_result.get("error", "").lower() or read_result.get("error") == "File not found";
+    assert not read_result.get("success")
+    or "outside" in read_result.get("error", "").lower()
+    or read_result.get("error") == "File not found";
 
     sandbox.destroy(sid);
     shutil.rmtree(temp_dir, ignore_errors=True);

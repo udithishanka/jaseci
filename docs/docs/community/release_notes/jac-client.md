@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-client 0.3.5 (Unreleased)
 
+- **Vite dev server binds to all interfaces**: Added `host: true` to Vite config and `--host` CLI flag so the dev server is accessible from outside containers/pods.
+
 ## jac-client 0.3.4 (Latest Release)
 
 - **HMR Client Error Reporting**: Client-side runtime and module import errors now reported to terminal via Vite WebSocket.

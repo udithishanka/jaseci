@@ -4,7 +4,6 @@ import from jac_scale.abstractions.ingress_provider { IngressProvider }
 
 """Factory for creating ingress provider instances."""
 class IngressFactory {
-
     """Create an ingress provider based on type.
 
     Args:
