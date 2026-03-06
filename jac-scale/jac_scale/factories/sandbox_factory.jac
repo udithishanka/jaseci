@@ -22,7 +22,6 @@ Environment variables:
     JAC_SANDBOX_DOMAIN: Domain template for preview URLs
 """
 class SandboxFactory {
-
     """Create a sandbox environment based on type.
 
     Args:
@@ -50,14 +49,10 @@ class SandboxFactory {
             }
             return KubernetesSandbox(config=sandbox_config, logger=logger);
         } elif sandbox_type == "docker" {
-            import from jac_scale.providers.sandbox.docker_sandbox {
-                DockerSandbox
-            }
+            import from jac_scale.providers.sandbox.docker_sandbox { DockerSandbox }
             return DockerSandbox(config=sandbox_config, logger=logger);
         } elif sandbox_type == "local" {
-            import from jac_scale.providers.sandbox.local_sandbox {
-                LocalSandbox
-            }
+            import from jac_scale.providers.sandbox.local_sandbox { LocalSandbox }
             return LocalSandbox(config=sandbox_config, logger=logger);
         } else {
             raise ValueError(f"Unsupported sandbox type: {sandbox_type}");
@@ -74,8 +69,7 @@ class SandboxFactory {
         SandboxEnvironment instance
     """
     static def get_default(
-        config_override: (dict[str, Any] | None) = None,
-        logger: (Logger | None) = None
+        config_override: (dict[str, Any] | None) = None, logger: (Logger | None) = None
     ) -> SandboxEnvironment {
         sandbox_type = "local";
         cfg: dict[str, Any] = {};
@@ -84,7 +78,9 @@ class SandboxFactory {
         try {
             import from jac_scale.config_loader { get_scale_config }
             scale_config = get_scale_config();
-            sandbox_cfg = scale_config.get("sandbox", {}) if isinstance(scale_config, dict) else {};
+            sandbox_cfg = scale_config.get("sandbox", {})
+                if isinstance(scale_config, dict)
+                else {};
             if sandbox_cfg and sandbox_cfg.get("enabled", False) {
                 sandbox_type = sandbox_cfg.get("type", "local");
                 cfg = sandbox_cfg;

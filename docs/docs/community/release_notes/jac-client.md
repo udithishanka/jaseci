@@ -4,6 +4,8 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-client 0.3.6 (Unreleased)
 
+- **Vite dev server binds to all interfaces**: Added `host: true` to Vite config and `--host` CLI flag so the dev server is accessible from outside containers/pods.
+
 ## jac-client 0.3.5 (Latest Release)
 
 - **Fix: Parser Strictness Compliance**: Moved docstrings before signatures across all test files (`test_cli`, `test_it`, `test_e2e`, `test_helpers`, `test_desktop_api_url`) and backtick-escaped `entry`/`walker` keyword parameters in `client_runtime` to comply with the stricter RD parser.

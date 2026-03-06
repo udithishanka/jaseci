@@ -82,7 +82,7 @@ async def watch_pods -> None {
                 }
             }
         } except asyncio.CancelledError {
-            raise ;
+            raise;
         } except Exception as e {
             log.warning(f"Watch error: {e}, reconnecting in 3s...");
             await asyncio.sleep(3);

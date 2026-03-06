@@ -20,18 +20,18 @@ Returns the sanitized path or raises ValueError.
 """
 def validate_sandbox_path(path: str) -> str {
     if not path or not path.strip() {
-        raise ValueError("Path cannot be empty") ;
+        raise ValueError("Path cannot be empty");
     }
     path = path.strip();
     if os.path.isabs(path) {
-        raise ValueError("Absolute paths are not allowed") ;
+        raise ValueError("Absolute paths are not allowed");
     }
     normalized = os.path.normpath(path);
     if normalized.startswith("..") or "/../" in normalized or normalized == ".." {
-        raise ValueError("Path traversal is not allowed") ;
+        raise ValueError("Path traversal is not allowed");
     }
     if _UNSAFE_PATH_RE.search(path) {
-        raise ValueError("Path contains unsafe characters") ;
+        raise ValueError("Path contains unsafe characters");
     }
     return normalized;
 }

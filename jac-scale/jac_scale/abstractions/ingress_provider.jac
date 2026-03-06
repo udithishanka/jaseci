@@ -6,7 +6,6 @@ import from typing { Any }
 
 """Base class for all ingress provider implementations."""
 class IngressProvider {
-
     """Create a routing rule for a sandbox.
 
     Args:
@@ -34,11 +33,7 @@ class IngressProvider {
         sandbox_id: Unique identifier for the sandbox
         namespace: Namespace where the ingress lives
     """
-    def delete_route(
-        self: IngressProvider,
-        sandbox_id: str,
-        namespace: str
-    ) -> None;
+    def delete_route(self: IngressProvider, sandbox_id: str, namespace: str) -> None;
 
     """Get the URL for a sandbox.
 
