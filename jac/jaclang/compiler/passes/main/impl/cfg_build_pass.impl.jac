@@ -51,16 +51,16 @@ impl CoalesceBBPass.printgraph_cfg -> str {
                 cfg[key]['bb_stmts'][i] = 'obj ' + bbs.name.unparse();
             } elif isinstance(bbs, uni.Ability) {
                 cfg[key]['bb_stmts'][i] = 'can ' + bbs.name_ref.unparse() + bbs.signature.unparse()
-                if bbs.signature
-                else '';
+                    if bbs.signature
+                    else '';
             } elif isinstance(bbs, (uni.InForStmt, uni.IterForStmt)) {
                 cfg[key]['bb_stmts'][i] = (
                     'for ' + bbs.target.unparse() + ' in ' + bbs.collection.unparse()
                 )
-                if isinstance(bbs, uni.InForStmt)
-                else (
-                    'for ' + bbs.iter.unparse() + bbs.condition.unparse() + bbs.count_by.unparse()
-                );
+                    if isinstance(bbs, uni.InForStmt)
+                    else (
+                        'for ' + bbs.iter.unparse() + bbs.condition.unparse() + bbs.count_by.unparse()
+                    );
             } elif isinstance(bbs, uni.WhileStmt) {
                 cfg[key]['bb_stmts'][i] = 'while ' + bbs.condition.unparse();
             } else {
@@ -70,9 +70,7 @@ impl CoalesceBBPass.printgraph_cfg -> str {
     }
     for (key, value) in cfg.items() {
         if value.get('bb_stmts') {
-            stmts = '\\n'.join(
-                [stmt.replace('"', '\\"') for stmt in value['bb_stmts']]
-            );
+            stmts = '\\n'.join([stmt.replace('"', '\\"') for stmt in value['bb_stmts']]);
             dot += f'  {key} [label="BB{key}\\n{stmts}", shape=box];' + "\n";
         } else {
             dot += f'  {key} [label="BB{key}"];' + "\n";
@@ -92,13 +90,13 @@ impl CoalesceBBPass.printgraph_cfg -> str {
 """Enter BasicBlockStmt nodes."""
 impl CoalesceBBPass.enter_node(nd: uni.UniNode) -> None {
     if (isinstance(nd, uni.UniCFGNode) and not isinstance(nd, uni.Semi)) {
-        tail = nd.get_tail();
-        bb = self.get_bb(nd);
         for bbs in self.basic_blocks.values() {
-            if (bbs['bb_stmts'] == bb) {
+            if (nd in bbs['bb_stmts']) {
                 return;
             }
         }
+        tail = nd.get_tail();
+        bb = self.get_bb(nd);
         self.basic_blocks[self.bb_counter] = {'bb_stmts': bb, 'bb_out': tail.bb_out};
         self.bb_counter += 1;
     }
@@ -158,25 +156,40 @@ impl CFGBuildPass.after_pass -> None {
 impl CFGBuildPass.exit_node(nd: uni.UniNode) -> None {
     if (isinstance(nd, uni.UniCFGNode) and not isinstance(nd, uni.Semi)) {
         self.first_exit = True;
-        if (not nd.bb_out and not isinstance(nd, (uni.ReturnStmt, uni.ArchHas))) {
+        if (
+            not nd.bb_out
+            and not isinstance(nd, (uni.ReturnStmt, uni.ArchHas, uni.CtrlStmt))
+        ) {
             self.to_connect.append(nd);
         }
         if (isinstance(nd, (uni.InForStmt, uni.IterForStmt)) and self.for_loop_stack) {
             for from_node in self.for_loop_stack[-1][1:] {
-                self.link_bbs(from_node, nd);
-
                 if (from_node in self.to_connect) {
+                    self.link_bbs(from_node, nd);
                     self.to_connect.remove(from_node);
+                }
+            }
+            for from_node in self.for_loop_stack[-1][1:] {
+                if self._is_break_stmt(from_node) {
+                    self.to_connect.append(from_node);
+                } elif self._is_continue_stmt(from_node) {
+                    self.link_bbs(from_node, nd);
                 }
             }
             self.pop_loop_stack(nd);
             self.to_connect.append(nd);
         } elif (isinstance(nd, uni.WhileStmt) and self.while_loop_stack) {
             for from_node in self.while_loop_stack[-1][1:] {
-                self.link_bbs(from_node, nd);
-
                 if (from_node in self.to_connect) {
+                    self.link_bbs(from_node, nd);
                     self.to_connect.remove(from_node);
+                }
+            }
+            for from_node in self.while_loop_stack[-1][1:] {
+                if self._is_break_stmt(from_node) {
+                    self.to_connect.append(from_node);
+                } elif self._is_continue_stmt(from_node) {
+                    self.link_bbs(from_node, nd);
                 }
             }
             self.pop_loop_stack(nd);
@@ -192,11 +205,45 @@ impl CFGBuildPass.exit_node(nd: uni.UniNode) -> None {
             self.to_connect.append(nd);
         }
     }
+    # MatchCase: Clear to_connect of nodes from sibling cases.
+    # Match-case doesn't have fall-through, so case bodies shouldn't link to each other.
+    # MatchCase.parent is directly the MatchStmt.
+    if isinstance(nd, uni.MatchCase) and isinstance(nd.parent, uni.MatchStmt) {
+        parent_match = nd.parent;
+        nodes_to_remove = [
+            n
+            for n in self.to_connect
+            if n.find_parent_of_type(uni.MatchCase)?.parent is parent_match
+        ];
+        for n in nodes_to_remove {
+            self.to_connect.remove(n);
+        }
+    }
 }
 
 """Enter BasicBlockStmt nodes."""
 impl CFGBuildPass.enter_node(nd: uni.UniNode) -> None {
+    import from jaclang.compiler.symbol_utils {
+        collect_narrowing_symbols,
+        collect_assigned_symbols
+    }
     if (isinstance(nd, uni.UniCFGNode) and not isinstance(nd, uni.Semi)) {
+        # Collect symbols that THIS node directly affects (Pyright-style optimization).
+        # Narrowing patterns: isinstance(x, T) → {'x'}, y is None → {'y'}, if z → {'z'}
+        # Assignment patterns: a = 1 → {'a'}, for b in list → {'b'}
+        # These enable skipping irrelevant branches during backward CFG walks.
+        if isinstance(nd, (uni.IfStmt, uni.ElseIf)) {
+            nd.affected_symbols.update(collect_narrowing_symbols(nd.condition));
+        }
+        # Assert statement: collect affected symbols from isinstance checks
+        if isinstance(nd, uni.AssertStmt) {
+            nd.affected_symbols.update(collect_narrowing_symbols(nd.condition));
+        }
+        # Match statement: collect affected symbols from match subject
+        if isinstance(nd, uni.MatchStmt) and isinstance(nd.target, uni.Name) {
+            nd.affected_symbols.add(nd.target.value);
+        }
+        nd.affected_symbols.update(collect_assigned_symbols(nd));
         bb_stmts = self.get_code_block_sequence(nd.parent);
         if (
             isinstance(nd, uni.CodeBlockStmt)
@@ -250,10 +297,12 @@ impl CFGBuildPass.enter_node(nd: uni.UniNode) -> None {
         if isinstance(nd, (uni.InForStmt, uni.IterForStmt, uni.WhileStmt)) {
             self.push_loop_stack(nd);
         } else {
-            if self.for_loop_stack {
+            if self.for_loop_stack
+            and not self._is_in_loop_else(nd, self.for_loop_stack[-1][0]) {
                 self.for_loop_stack[-1].append(nd);
             }
-            if self.while_loop_stack {
+            if self.while_loop_stack
+            and not self._is_in_loop_else(nd, self.while_loop_stack[-1][0]) {
                 self.while_loop_stack[-1].append(nd);
             }
         }
@@ -289,6 +338,9 @@ impl CFGBuildPass.get_code_block_sequence(
 """Link basic blocks."""
 impl CFGBuildPass.link_bbs(source: uni.UniCFGNode, target: uni.UniCFGNode) -> None {
     if (source and target) {
+        if target in (source.bb_out or []) {
+            return;
+        }
         if source.bb_out {
             source.bb_out.append(target);
         } else {
@@ -299,6 +351,17 @@ impl CFGBuildPass.link_bbs(source: uni.UniCFGNode, target: uni.UniCFGNode) -> No
         } else {
             target.bb_in = [source];
         }
+        # Propagate affected_symbols from parent (source) to child (target) in CFG.
+        # Collection (enter_node) captures what each node DIRECTLY affects.
+        # Propagation accumulates symbols along CFG paths, so backward walks
+        # during type narrowing can skip branches where no relevant symbol appears.
+        # Example:
+        #   if y is not None {          ← collects: {'y'}
+        #       if isinstance(x, int) { ← collects: {'x'}, inherits: {'y'} → {'x', 'y'}
+        #           a = 1;              ← collects: {'a'}, inherits: {'x', 'y'} → {'a', 'x', 'y'}
+        #       }
+        #   }
+        target.affected_symbols.update(source.affected_symbols);
     }
 }
 
@@ -344,4 +407,26 @@ impl CFGBuildPass.before_pass -> None {
     self.ability_stack: list[list[uni.UniCFGNode]] = [];
     self.to_connect: list[uni.UniCFGNode] = [];
     self.first_exit: bool = False;
+}
+
+"""Check if a node is a break statement."""
+impl CFGBuildPass._is_break_stmt(nd: uni.UniNode) -> bool {
+    return isinstance(nd, uni.CtrlStmt) and nd.ctrl.value == "break";
+}
+
+"""Check if a node is a continue statement."""
+impl CFGBuildPass._is_continue_stmt(nd: uni.UniNode) -> bool {
+    return isinstance(nd, uni.CtrlStmt) and nd.ctrl.value == "continue";
+}
+
+"""Check if a node is inside the else block of a loop statement."""
+impl CFGBuildPass._is_in_loop_else(nd: uni.UniNode, loop_stmt: uni.UniCFGNode) -> bool {
+    cur = nd;
+    while (cur and cur != loop_stmt) {
+        if isinstance(cur, uni.ElseStmt) {
+            return True;
+        }
+        cur = cur.parent;
+    }
+    return False;
 }

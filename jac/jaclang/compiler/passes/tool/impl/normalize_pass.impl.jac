@@ -1,7 +1,9 @@
 """NormalizePass implementation - rebuilds kid lists from semantic fields."""
 
 """Initialize the NormalizePass."""
-impl NormalizePass.init(ir_in: uni.Module, prog: Any, cancel_token: Any = None) -> None {
+impl NormalizePass.init(
+    ir_in: uni.Module, prog: Any, cancel_token: Any = None
+) -> None {
     super.init(ir_in, prog, cancel_token);
 }
 
@@ -95,6 +97,16 @@ impl NormalizePass.enter_test(nd: uni.Test) -> None {
     if nd.code_context == CodeContext.CLIENT
     and (client_tok is not None or not nd.in_client_context()) {
         new_kid.append(client_tok or nd.gen_token(Tok.KW_CLIENT));
+    }
+    if nd.decorators {
+        new_kid.append(nd.gen_token(Tok.DECOR_OP));
+        for idx in range(len(nd.decorators)) {
+            new_kid.append(nd.decorators[idx]);
+            if idx < len(nd.decorators) - 1 {
+                new_kid.append(nd.gen_token(Tok.DECOR_OP));
+            }
+        }
+        new_kid.append(nd.gen_token(Tok.WS));
     }
     new_kid.append(nd.gen_token(Tok.KW_TEST));
     if nd.description {
@@ -731,11 +743,7 @@ impl NormalizePass.enter_else_if(nd: uni.ElseIf) -> None {
 
 """Normalize ElseStmt kid list."""
 impl NormalizePass.enter_else_stmt(nd: uni.ElseStmt) -> None {
-    new_kid: list[uni.UniNode] = [
-        nd.gen_token(Tok.KW_ELSE),
-        nd.gen_token(Tok.LBRACE),
-
-    ];
+    new_kid: list[uni.UniNode] = [nd.gen_token(Tok.KW_ELSE), nd.gen_token(Tok.LBRACE), ];
     for stmt in nd.body {
         new_kid.append(stmt);
     }

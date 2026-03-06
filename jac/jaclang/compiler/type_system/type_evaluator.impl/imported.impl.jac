@@ -15,15 +15,17 @@ impl TypeEvaluator.get_type_of_module_item(node_: uni.ModuleItem) -> types.TypeB
     }
     import_node = node_.parent_of_type(uni.Import);
     assert import_node.from_loc is not None;
-    if isinstance(self.get_type_of_module(import_node.from_loc), types.ModuleType) {
-        from_path = Path(import_node.from_loc.resolve_relative_path());
+    # Resolve the base directory for the from-clause (e.g. from . import utils → current dir).
+    from_path = self._resolve_from_path(import_node.from_loc);
+    from_mod_type = self.get_type_of_module(import_node.from_loc);
+    if isinstance(from_mod_type, types.ModuleType) or from_path.exists() {
         is_dir = from_path.is_dir() or (from_path.stem == "__init__");
         if is_dir {
             mod_dir = from_path.parent if not from_path.is_dir() else from_path;
             for ext in (".jac", ".py", ".pyi", ".js", ".ts", ".jsx", ".tsx") {
                 candidate_paths = [
-                    (mod_dir / f"__init__{ext}").resolve(),
                     (mod_dir / f"{node_.name.value}{ext}").resolve(),
+                    (mod_dir / f"__init__{ext}").resolve(),
 
                 ];
 
@@ -115,27 +117,81 @@ impl TypeEvaluator.get_type_of_module(node_: uni.ModulePath) -> types.TypeBase {
 
 """Import a module from the given path."""
 impl TypeEvaluator._import_module_from_path(path: str) -> uni.Module {
-    if path.endswith("typing.py") {
-        path = self._TYPING_STUB_FILE_PATH;
-    }
-    if path.endswith("abc.py") {
-        path = self._TYPING_STUB_FILE_PATH;
-    }
-    if path.endswith("enum.py") {
-        path = self._ENUM_STUB_FILE_PATH;
-    }
+    # "../os/path.pyi" and "/abs/os/path.pyi" are the same file but different strings.
+    # resolve() converts both to "/abs/os/path.pyi" so hub always returns the same cached module.
+    resolved_path = str(Path(path).resolve());
     mod: uni.Module;
-    if path in self.program.mod.hub {
-        mod = self.program.mod.hub[path];
+    if resolved_path in self.program.mod.hub {
+        mod = self.program.mod.hub[resolved_path];
     } else {
-        mod = self.program.compile(
-            path, no_cgen=True, type_check=False, symtab_ir_only=True
-        );
-        if mod.parent_scope is None and mod is not self.builtins_module {
-            mod.parent_scope = self.builtins_module;
+        # Try JIR cache first for .jac files
+        jir_mod: (uni.Module | None) = None;
+        if resolved_path.endswith('.jac') {
+            jir_mod = self._try_read_jir_cache(resolved_path);
+        }
+        if jir_mod is not None {
+            mod = jir_mod;
+            if mod.parent_scope is None and mod is not self.builtins_module {
+                mod.parent_scope = self.builtins_module;
+            }
+            self.program.mod.hub[resolved_path] = mod;
+        } else {
+            # Cache miss — full compile
+            mod = self.program.compile(
+                path, no_cgen=True, type_check=False, symtab_ir_only=True
+            );
+            if mod.parent_scope is None and mod is not self.builtins_module {
+                mod.parent_scope = self.builtins_module;
+            }
+            self.program.mod.hub[resolved_path] = mod;
+            # Write JIR module cache for .jac files (best-effort).
+            if resolved_path.endswith('.jac') {
+                try {
+                    import from jaclang.jac0core.jir {
+                        get_module_cache_path,
+                        SEC_BYTECODE
+                    }
+                    import from jaclang.jac0core.jir_passes { JirWriter }
+                    cache_path = get_module_cache_path(resolved_path);
+                    cache_path.parent.mkdir(parents=True, exist_ok=True);
+                    writer = JirWriter();
+                    sections: (dict[int, bytes] | None) = None;
+                    bc = getattr(mod.gen, 'py_bytecode', None);
+                    if bc is not None {
+                        sections = {SEC_BYTECODE: bc};
+                    }
+                    jir_bytes = writer.write_module(mod, sections=sections);
+                    tmp_path = cache_path.with_suffix('.tmp');
+                    tmp_path.write_bytes(jir_bytes);
+                    tmp_path.rename(cache_path);
+                } except Exception {
+                    ;
+                }
+            }
         }
     }
     return mod;
+}
+
+"""Try to read a compiled .jac module from the JIR cache. Returns None on any failure."""
+impl TypeEvaluator._try_read_jir_cache(resolved_path: str) -> (uni.Module | None) {
+    import from jaclang.jac0core.jir { get_module_cache_path, is_module_cache_valid }
+    import from jaclang.jac0core.jir_passes { JirReader }
+    import traceback;
+    try {
+        cache_path = get_module_cache_path(resolved_path);
+        if not is_module_cache_valid(resolved_path, cache_path) {
+            return None;
+        }
+        data = cache_path.read_bytes();
+        reader = JirReader(_source_path=resolved_path);
+        mod = reader.read_module(data);
+        return mod;
+    } except Exception {
+        # Log but don't crash — fall back to full compile
+        traceback.print_exc();
+        return None;
+    }
 }
 
 """Return the effective type of the symbol."""

@@ -27,17 +27,10 @@ Returning None signals that this backend has not yet implemented the
 operation, allowing the dispatch layer to fall back gracefully.
 """
 
-import from typing { TypeVar, Generic }
-
-glob V = TypeVar('V'),
-     C = TypeVar('C');
-
 # =============================================================================
 #  Numeric Types
 # =============================================================================
-class IntEmitter(Generic[
-    (V, C)
-]) {
+class IntEmitter[V, C] {
     # --- Named methods ---
     def emit_bit_length(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_bit_count(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -93,7 +86,7 @@ class IntEmitter(Generic[
 
 }
 
-class FloatEmitter(Generic[(V, C)]) {
+class FloatEmitter[V, C] {
     # --- Named methods ---
     def emit_is_integer(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_as_integer_ratio(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -135,7 +128,7 @@ class FloatEmitter(Generic[(V, C)]) {
 
 }
 
-class ComplexEmitter(Generic[(V, C)]) {
+class ComplexEmitter[V, C] {
     # --- Named methods ---
     def emit_conjugate(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     # --- Arithmetic operators ---
@@ -164,9 +157,7 @@ class ComplexEmitter(Generic[(V, C)]) {
 # =============================================================================
 #  String Types
 # =============================================================================
-class StrEmitter(Generic[
-    (V, C)
-]) {
+class StrEmitter[V, C] {
     # Case conversion
     def emit_capitalize(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_casefold(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -223,18 +214,30 @@ class StrEmitter(Generic[
     def emit_translate(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_maketrans(self, ctx: C, args: list[V]) -> (V | None) abs;
     # --- Arithmetic operators ---
-    def emit_op_add(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # +  (concatenation)
+    def emit_op_add(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # +  (concatenation)
 
-    def emit_op_mul(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # *  (repetition)
 
-    def emit_op_mod(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # %  (printf formatting)
+    def emit_op_mul(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # *  (repetition)
+
+
+    def emit_op_mod(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # %  (printf formatting)
+
 
     # --- Comparison operators ---
     def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # ==
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
-    def emit_op_lt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <  (lexicographic)
+    def emit_op_lt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <  (lexicographic)
+
 
     def emit_op_gt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >
 
@@ -243,11 +246,13 @@ class StrEmitter(Generic[
     def emit_op_ge(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >=
 
     # --- Membership operators ---
-    def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in (substring test)
+    def emit_op_contains(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # in (substring test)
 
 }
 
-class BytesEmitter(Generic[(V, C)]) {
+class BytesEmitter[V, C] {
     # Decoding
     def emit_decode(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_hex(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -299,18 +304,30 @@ class BytesEmitter(Generic[(V, C)]) {
     def emit_translate(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_maketrans(self, ctx: C, args: list[V]) -> (V | None) abs;
     # --- Arithmetic operators ---
-    def emit_op_add(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # +  (concatenation)
+    def emit_op_add(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # +  (concatenation)
 
-    def emit_op_mul(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # *  (repetition)
 
-    def emit_op_mod(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # %  (printf formatting)
+    def emit_op_mul(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # *  (repetition)
+
+
+    def emit_op_mod(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # %  (printf formatting)
+
 
     # --- Comparison operators ---
     def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # ==
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
-    def emit_op_lt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <  (lexicographic)
+    def emit_op_lt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <  (lexicographic)
+
 
     def emit_op_gt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >
 
@@ -319,16 +336,16 @@ class BytesEmitter(Generic[(V, C)]) {
     def emit_op_ge(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >=
 
     # --- Membership operators ---
-    def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in (byte membership)
+    def emit_op_contains(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # in (byte membership)
 
 }
 
 # =============================================================================
 #  Collection Types
 # =============================================================================
-class ListEmitter(Generic[
-    (V, C)
-]) {
+class ListEmitter[V, C] {
     # --- Named methods ---
     def emit_append(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_extend(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -342,16 +359,28 @@ class ListEmitter(Generic[
     def emit_reverse(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_copy(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     # --- Arithmetic operators ---
-    def emit_op_add(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # +  (concatenation)
+    def emit_op_add(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # +  (concatenation)
 
-    def emit_op_mul(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # *  (repetition)
+
+    def emit_op_mul(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # *  (repetition)
+
 
     # --- Comparison operators ---
-    def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # == (structural)
+    def emit_op_eq(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # == (structural)
+
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
-    def emit_op_lt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <  (lexicographic)
+    def emit_op_lt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <  (lexicographic)
+
 
     def emit_op_gt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >
 
@@ -363,13 +392,18 @@ class ListEmitter(Generic[
     def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in
 
     # --- In-place operators ---
-    def emit_op_iadd(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # += (extend in-place)
+    def emit_op_iadd(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # += (extend in-place)
 
-    def emit_op_imul(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # *= (repeat in-place)
+
+    def emit_op_imul(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # *= (repeat in-place)
 
 }
 
-class DictEmitter(Generic[(V, C)]) {
+class DictEmitter[V, C] {
     # --- Named methods ---
     def emit_get(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_keys(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -383,22 +417,33 @@ class DictEmitter(Generic[(V, C)]) {
     def emit_copy(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_fromkeys(self, ctx: C, args: list[V]) -> (V | None) abs;
     # --- Bitwise operators (dict merge, Python 3.9+) ---
-    def emit_op_or(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # |  (merge)
+    def emit_op_or(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # |  (merge)
+
 
     # --- Comparison operators ---
-    def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # == (structural)
+    def emit_op_eq(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # == (structural)
+
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
     # --- Membership operators ---
-    def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in (key membership)
+    def emit_op_contains(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # in (key membership)
+
 
     # --- In-place operators ---
-    def emit_op_ior(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # |= (update in-place)
+    def emit_op_ior(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # |= (update in-place)
 
 }
 
-class SetEmitter(Generic[(V, C)]) {
+class SetEmitter[V, C] {
     # --- Named methods (mutation) ---
     def emit_add(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_remove(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -409,11 +454,19 @@ class SetEmitter(Generic[(V, C)]) {
     def emit_union(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_intersection(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_difference(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
-    def emit_symmetric_difference(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    def emit_symmetric_difference(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;
     # --- Named methods (in-place set algebra) ---
     def emit_update(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
-    def emit_intersection_update(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
-    def emit_difference_update(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    def emit_intersection_update(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;
+
+    def emit_difference_update(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;
+
     def emit_symmetric_difference_update(
         self, ctx: C, target: V, args: list[V]
     ) -> (V | None) abs;
@@ -423,93 +476,175 @@ class SetEmitter(Generic[(V, C)]) {
     def emit_isdisjoint(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_copy(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     # --- Set algebra operators ---
-    def emit_op_or(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # |  (union)
+    def emit_op_or(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # |  (union)
 
-    def emit_op_and(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # &  (intersection)
 
-    def emit_op_sub(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # -  (difference)
+    def emit_op_and(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # &  (intersection)
 
-    def emit_op_xor(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # ^  (symmetric difference)
+
+    def emit_op_sub(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # -  (difference)
+
+
+    def emit_op_xor(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # ^  (symmetric difference)
+
 
     # --- Comparison operators (subset/superset) ---
-    def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # == (set equality)
+    def emit_op_eq(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # == (set equality)
+
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
-    def emit_op_le(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <= (subset)
+    def emit_op_le(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <= (subset)
 
-    def emit_op_lt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <  (proper subset)
 
-    def emit_op_ge(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >= (superset)
+    def emit_op_lt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <  (proper subset)
 
-    def emit_op_gt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >  (proper superset)
+
+    def emit_op_ge(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # >= (superset)
+
+
+    def emit_op_gt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # >  (proper superset)
+
 
     # --- Membership operators ---
     def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in
 
     # --- In-place operators ---
-    def emit_op_ior(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # |= (update)
+    def emit_op_ior(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # |= (update)
 
-    def emit_op_iand(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # &= (intersection_update)
 
-    def emit_op_isub(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # -= (difference_update)
+    def emit_op_iand(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # &= (intersection_update)
 
-    def emit_op_ixor(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # ^= (symmetric_difference_update)
+
+    def emit_op_isub(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # -= (difference_update)
+
+
+    def emit_op_ixor(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # ^= (symmetric_difference_update)
 
 }
 
-class FrozensetEmitter(Generic[(V, C)]) {
+class FrozensetEmitter[V, C] {
     # --- Named methods ---
     def emit_union(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_intersection(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_difference(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
-    def emit_symmetric_difference(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    def emit_symmetric_difference(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;
+
     def emit_issubset(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_issuperset(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_isdisjoint(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_copy(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     # --- Set algebra operators ---
-    def emit_op_or(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # |  (union)
+    def emit_op_or(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # |  (union)
 
-    def emit_op_and(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # &  (intersection)
 
-    def emit_op_sub(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # -  (difference)
+    def emit_op_and(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # &  (intersection)
 
-    def emit_op_xor(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # ^  (symmetric difference)
+
+    def emit_op_sub(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # -  (difference)
+
+
+    def emit_op_xor(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # ^  (symmetric difference)
+
 
     # --- Comparison operators (subset/superset) ---
-    def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # == (set equality)
+    def emit_op_eq(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # == (set equality)
+
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
-    def emit_op_le(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <= (subset)
+    def emit_op_le(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <= (subset)
 
-    def emit_op_lt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <  (proper subset)
 
-    def emit_op_ge(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >= (superset)
+    def emit_op_lt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <  (proper subset)
 
-    def emit_op_gt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >  (proper superset)
+
+    def emit_op_ge(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # >= (superset)
+
+
+    def emit_op_gt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # >  (proper superset)
+
 
     # --- Membership operators ---
-    def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in
+    def emit_op_contains(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # in
 
 }
 
-class TupleEmitter(Generic[(V, C)]) {
+class TupleEmitter[V, C] {
     # --- Named methods ---
     def emit_count(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_index(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     # --- Arithmetic operators ---
-    def emit_op_add(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # +  (concatenation)
+    def emit_op_add(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # +  (concatenation)
 
-    def emit_op_mul(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # *  (repetition)
+
+    def emit_op_mul(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # *  (repetition)
+
 
     # --- Comparison operators ---
-    def emit_op_eq(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # == (structural)
+    def emit_op_eq(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # == (structural)
+
 
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
-    def emit_op_lt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # <  (lexicographic)
+    def emit_op_lt(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # <  (lexicographic)
+
 
     def emit_op_gt(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >
 
@@ -518,11 +653,13 @@ class TupleEmitter(Generic[(V, C)]) {
     def emit_op_ge(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # >=
 
     # --- Membership operators ---
-    def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in
+    def emit_op_contains(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # in
 
 }
 
-class RangeEmitter(Generic[(V, C)]) {
+class RangeEmitter[V, C] {
     # --- Named methods ---
     def emit_count(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
     def emit_index(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
@@ -532,16 +669,16 @@ class RangeEmitter(Generic[(V, C)]) {
     def emit_op_ne(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # !=
 
     # --- Membership operators ---
-    def emit_op_contains(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;  # in
+    def emit_op_contains(
+        self, ctx: C, target: V, args: list[V]
+    ) -> (V | None) abs;  # in
 
 }
 
 # =============================================================================
 #  Builtin Functions
 # =============================================================================
-class BuiltinEmitter(Generic[
-    (V, C)
-]) {
+class BuiltinEmitter[V, C] {
     def emit_print(self, ctx: C, args: list[V]) -> (V | None) abs;
     def emit_input(self, ctx: C, args: list[V]) -> (V | None) abs;
     def emit_len(self, ctx: C, args: list[V]) -> (V | None) abs;
@@ -598,4 +735,113 @@ class BuiltinEmitter(Generic[
     def emit_range(self, ctx: C, args: list[V]) -> (V | None) abs;
     def emit_slice(self, ctx: C, args: list[V]) -> (V | None) abs;
     def emit_bytearray(self, ctx: C, args: list[V]) -> (V | None) abs;
+}
+
+# =============================================================================
+#  Exception Types
+# =============================================================================
+#
+# Canonical exception hierarchy. All backends must implement hierarchy-aware
+# type matching so that `except ArithmeticError` catches ZeroDivisionError,
+# OverflowError, and FloatingPointError.
+#
+#   BaseException
+#   ├── Exception
+#   │   ├── ArithmeticError
+#   │   │   ├── ZeroDivisionError
+#   │   │   ├── OverflowError
+#   │   │   └── FloatingPointError
+#   │   ├── LookupError
+#   │   │   ├── IndexError
+#   │   │   └── KeyError
+#   │   ├── ValueError
+#   │   │   └── UnicodeError
+#   │   │       ├── UnicodeDecodeError
+#   │   │       ├── UnicodeEncodeError
+#   │   │       └── UnicodeTranslateError
+#   │   ├── TypeError
+#   │   ├── AttributeError
+#   │   ├── RuntimeError
+#   │   │   ├── NotImplementedError
+#   │   │   └── RecursionError
+#   │   ├── OSError
+#   │   │   ├── FileNotFoundError
+#   │   │   ├── FileExistsError
+#   │   │   ├── PermissionError
+#   │   │   ├── TimeoutError
+#   │   │   ├── IsADirectoryError
+#   │   │   └── NotADirectoryError
+#   │   ├── AssertionError
+#   │   ├── ImportError
+#   │   │   └── ModuleNotFoundError
+#   │   ├── NameError
+#   │   │   └── UnboundLocalError
+#   │   ├── StopIteration
+#   │   ├── StopAsyncIteration
+#   │   ├── EOFError
+#   │   ├── MemoryError
+#   │   └── ReferenceError
+#   ├── KeyboardInterrupt
+#   ├── SystemExit
+#   └── GeneratorExit
+#
+# Each exception instance carries:
+#   - args: tuple          — constructor arguments
+#   - __cause__: Exc|None  — explicit chain (raise X from Y)
+#   - __context__: Exc|None — implicit chain (exception during handling)
+#   - __traceback__: object|None — backend-specific traceback
+#
+# Backend implementation notes:
+#   - NA (Native/LLVM): Extend the flat type-ID registry with a parent-ID
+#     table. emit_match walks up the parent chain instead of a single ==.
+#   - CL (Client/ES): Generate JS class hierarchy (class ValueError extends
+#     Error {}). Multi-handler dispatch becomes instanceof chains inside a
+#     single catch block.
+#   - SV (Server/Python): Maps directly to Python's built-in exception
+#     hierarchy. No additional work needed.
+#
+# =============================================================================
+class ExceptionEmitter[V, C] {
+    # --- Instance creation ---
+    # Create an exception instance of the given type. type_name identifies
+    # the exception class (e.g. "ValueError"). args holds constructor
+    # arguments (typically a single message string). Backends must map
+    # type_name to their internal representation (Python class, LLVM type
+    # ID, JS Error subclass).
+    def emit_create(self, ctx: C, type_name: str, args: list[V]) -> (V | None) abs;
+    # --- Hierarchy-aware type matching ---
+    # Test whether exc_obj is an instance of the exception type identified
+    # by type_name, respecting the hierarchy above. For example, matching
+    # against "LookupError" must return true for KeyError and IndexError
+    # instances. Returns a boolean-typed V.
+    def emit_match(self, ctx: C, exc_obj: V, type_name: str) -> (V | None) abs;
+    # --- Raise / reraise ---
+    # Raise exc_obj as the current exception. Control transfers to the
+    # nearest enclosing handler.
+    def emit_raise(self, ctx: C, exc_obj: V) -> (V | None) abs;
+    # Reraise the currently active exception (bare `raise` with no
+    # argument). Must be called only inside an except block.
+    def emit_reraise(self, ctx: C) -> (V | None) abs;
+    # Raise with explicit chaining: `raise X from Y`. Sets
+    # exc_obj.__cause__ to cause_obj before raising.
+    def emit_raise_from(self, ctx: C, exc_obj: V, cause_obj: V) -> (V | None) abs;
+    # --- Field access ---
+    # Get the exception message string (first element of args, or str(exc)).
+    def emit_get_message(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # Get the args tuple passed to the exception constructor.
+    def emit_get_args(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # Get __cause__ (explicit chaining via `raise ... from ...`).
+    def emit_get_cause(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # Get __context__ (implicit chaining — exception raised while handling
+    # another exception).
+    def emit_get_context(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # Get __traceback__ object (backend-specific representation).
+    def emit_get_traceback(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # --- Named methods ---
+    # Attach a traceback object: exc.with_traceback(tb).
+    def emit_with_traceback(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # String representation of the exception.
+    def emit_str(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
+    # Repr representation (includes type name, e.g. "ValueError('msg')").
+    def emit_repr(self, ctx: C, target: V, args: list[V]) -> (V | None) abs;
 }

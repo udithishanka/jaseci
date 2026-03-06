@@ -88,8 +88,10 @@ impl __getattr__(name: str) -> object {
         return _get_commit();
     } elif (name == 'store') {
         return _get_store();
+    } elif (name == 'llm') {
+        return _get_llm();
     }
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}") ;
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}");
 }
 
 """Get commit lazily."""
@@ -100,6 +102,11 @@ impl _get_commit -> Callable[..., Any] {
 """Get storage backend lazily."""
 impl _get_store -> Callable[..., Any] {
     return _get_jac().store;
+}
+
+"""Get default LLM model instance lazily."""
+impl _get_llm -> object {
+    return _get_jac().default_llm();
 }
 
 """Get save lazily."""
@@ -151,6 +158,25 @@ impl restspec(**specs: Any) -> Callable {
     def decorator(cls: type) -> type {
         cls.restspec = SpecsCls(**specs);
         return cls;
+    }
+    return decorator;
+}
+
+"""Schedule decorator factory — attaches ScheduleSpec to a walker or function."""
+impl schedule(**kwargs: Any) -> Callable {
+    import from jaclang.runtimelib.scheduler { ScheduleSpec }
+    import from jaclang.runtimelib.builtin { ScheduleTrigger }
+    trigger = kwargs.pop("trigger", ScheduleTrigger.STATIC);
+    if isinstance(trigger, str) {
+        trigger = ScheduleTrigger(trigger);
+    }
+    if trigger == ScheduleTrigger.DYNAMIC {
+        raise NotImplementedError("Dynamic scheduling requires jac-scale.");
+    }
+    spec = ScheduleSpec(trigger=trigger, **kwargs);
+    def decorator(target: type) -> type {
+        target.schedule_spec = spec;
+        return target;
     }
     return decorator;
 }

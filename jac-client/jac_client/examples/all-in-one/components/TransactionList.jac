@@ -1,12 +1,10 @@
 # Transaction list component
 # Demonstrates: rendering lists with map, passing props to child components
-cl import from .TransactionItem {
-    TransactionItem
-}
+cl import from .TransactionItem { TransactionItem }
 
 cl {
     # Props: transactions list and delete handler
-    def:pub TransactionList(transactions: list, onDelete: any) -> JsxElement {
+    def:pub TransactionList(transactions: list, onDelete: Any) -> JsxElement {
         if len(transactions) == 0 {
             return
                 <div className="empty-state">
@@ -24,21 +22,20 @@ cl {
                 <h3 className="list-title">
                     Transactions ({len(transactions)})
                 </h3>
-                {transactions.map(
-                    lambda tx: dict  -> JsxElement { return
-                        <TransactionItem
-                            key={tx["id"]}
-                            id={tx["id"]}
-                            description={tx["description"]}
-                            amount={tx["amount"]}
-                            category={tx["category"]}
-                            txType={tx["type"]}
-                            date={tx["date"]}
-                            isBusiness={tx["isBusinessTransaction"] || false}
-                            clientName={tx["clientName"] || None}
-                            onDelete={onDelete}
-                        />; }
-                )}
+                {[
+                    <TransactionItem
+                        key={tx["id"]}
+                        id={tx["id"]}
+                        description={tx["description"]}
+                        amount={tx["amount"]}
+                        category={tx["category"]}
+                        txType={tx["type"]}
+                        date={tx["date"]}
+                        isBusiness={tx["isBusinessTransaction"] || false}
+                        clientName={tx["clientName"] || None}
+                        onDelete={onDelete}
+                    /> for tx in transactions
+                ]}
             </div>;
     }
 }

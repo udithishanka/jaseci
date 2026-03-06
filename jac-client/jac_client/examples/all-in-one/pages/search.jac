@@ -22,13 +22,17 @@ cl {
         ];
 
         # Filter results based on query
-        results = allResults.filter(
-            lambda item: any  -> bool { if not query {
-                return True;
-            }return item["title"].toLowerCase().includes(query.toLowerCase()); }
-        );
+        results = [
+            item
+            for item in allResults
+            if (
+                True
+                    if not query
+                    else item["title"].toLowerCase().includes(query.toLowerCase())
+            )
+        ];
 
-        def handleSearch(e: any) -> None {
+        def handleSearch(e: Any) -> None {
             e.preventDefault();
             if inputValue.trim() {
                 navigate(f"/search?q={encodeURIComponent(inputValue.trim())}&page=1");
@@ -58,7 +62,7 @@ cl {
                         <input
                             type="text"
                             value={inputValue}
-                            onChange={lambda e: any  -> None { inputValue = e.target.value;}}
+                            onChange={lambda e: Any  -> None { inputValue = e.target.value;}}
                             placeholder="Search users and posts..."
                             style={{
                                 "flex": "1",
@@ -109,45 +113,42 @@ cl {
                     </p>
                 )}
                 <ul style={{"listStyle": "none", "padding": "0"}}>
-                    {results.map(
-                        lambda item: any  -> any { return
-                            <li
-                                key={item["title"]}
+                    {[
+                        <li
+                            key={item["title"]}
+                            style={{
+                                "padding": "1rem",
+                                "borderBottom": "1px solid #e5e7eb",
+                                "display": "flex",
+                                "justifyContent": "space-between"
+                            }}
+                        >
+                            <span>
+                                {item["title"]}
+                            </span>
+                            <span
                                 style={{
-                                    "padding": "1rem",
-                                    "borderBottom": "1px solid #e5e7eb",
-                                    "display": "flex",
-                                    "justifyContent": "space-between"
+                                    "background": (
+                                        item["type"] == "user"
+                                        and "#dbeafe"
+                                        or "#dcfce7"
+                                    ),
+                                    "color": (
+                                        item["type"] == "user"
+                                        and "#1e40af"
+                                        or "#166534"
+                                    ),
+                                    "padding": "0.25rem 0.5rem",
+                                    "borderRadius": "4px",
+                                    "fontSize": "0.75rem"
                                 }}
                             >
-                                <span>
-                                    {item["title"]}
-                                </span>
-                                <span
-                                    style={{
-                                        "background": (
-                                            item["type"] == "user"
-                                            and "#dbeafe"
-                                            or "#dcfce7"
-                                        ),
-                                        "color": (
-                                            item["type"] == "user"
-                                            and "#1e40af"
-                                            or "#166534"
-                                        ),
-                                        "padding": "0.25rem 0.5rem",
-                                        "borderRadius": "4px",
-                                        "fontSize": "0.75rem"
-                                    }}
-                                >
-                                    {item["type"]}
-                                </span>
-                            </li>; }
-                    )}
+                                {item["type"]}
+                            </span>
+                        </li> for item in results
+                    ]}
                 </ul>
-                <div
-                    style={{"marginTop": "1.5rem", "display": "flex", "gap": "0.5rem"}}
-                >
+                <div style={{"marginTop": "1.5rem", "display": "flex", "gap": "0.5rem"}}>
                     <button
                         onClick={lambda -> None { goToPage(page - 1);}}
                         disabled={page <= 1}

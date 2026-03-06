@@ -252,10 +252,7 @@ cl {
     client_block = bd[2];
     assert isinstance(client_block, uni.ClientBlock);
     assert len(client_block.body) == 2;
-    assert [type(stmt).__name__ for stmt in client_block.body] == [
-        "GlobalVars",
-        "Test"
-    ];
+    assert [type(stmt).__name__ for stmt in client_block.body] == ["GlobalVars", "Test"];
     assert all(
         stmt.code_context == CodeContext.CLIENT
         for stmt in client_block.body
@@ -496,6 +493,31 @@ def parser_file_test(rel_path: str) -> None {
             f"{filename}: parse_errors={len(parse_errors)}, lex_errors={len(lex_errors)}"
         );
     }
+}
+
+test "decorated test blocks" {
+    # Single decorator on test
+    source = '@my_dec\ntest "decorated" { assert True; }';
+    mod = JacProgram().parse_str(source, "test.jac");
+    t = mod.body[0];
+    assert isinstance(t, uni.Test);
+    assert t.decorators is not None;
+    assert len(t.decorators) == 1;
+    assert t.description is not None;
+
+    # Multiple decorators on test
+    source = '@dec1\n@dec2(42)\ntest "multi" { assert True; }';
+    mod = JacProgram().parse_str(source, "test.jac");
+    t = mod.body[0];
+    assert isinstance(t, uni.Test);
+    assert len(t.decorators) == 2;
+
+    # No decorator still works
+    source = 'test "plain" { assert True; }';
+    mod = JacProgram().parse_str(source, "test.jac");
+    t = mod.body[0];
+    assert isinstance(t, uni.Test);
+    assert not t.decorators;
 }
 
 with entry {

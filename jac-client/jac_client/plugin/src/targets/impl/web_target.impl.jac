@@ -8,7 +8,7 @@ glob VITE_DEV_SERVER_PORT = 5173,
      DEFAULT_FUNCTION_NAME = "app";
 
 """Setup web target (no-op - web works out of the box)."""
-impl WebTarget.setup(self: WebTarget, project_dir: Path) -> None { }
+impl WebTarget.setup(project_dir: Path) -> None { }
 
 """Start web dev server with HMR.
 
@@ -16,9 +16,7 @@ For web target, this delegates to the core jac start --dev behavior.
 The actual HMR implementation is in jaclang/cli/commands/impl/execution.impl.jac.
 This method is called when using non-default targets that inherit from WebTarget.
 """
-impl WebTarget.dev(
-    self: WebTarget, entry_file: Path, project_dir: Path, api_port: int = 8000
-) -> None {
+impl WebTarget.dev(entry_file: Path, project_dir: Path, api_port: int = 8000) -> None {
     import from jaclang.cli.console { console }
     # Web dev mode is handled by core jac start --dev
     # When called directly (e.g., from PWATarget.dev() -> super().dev()),
@@ -56,7 +54,7 @@ For web target, this builds the bundle and serves it.
 This method is called when using non-default targets that inherit from WebTarget.
 """
 impl WebTarget.start(
-    self: WebTarget, entry_file: Path, project_dir: Path, api_port: int = 8000
+    entry_file: Path, project_dir: Path, api_port: int = 8000
 ) -> None {
     import from jaclang.cli.console { console }
     import http.server;
@@ -67,7 +65,7 @@ impl WebTarget.start(
     # Serve the dist directory (use bundler.output_dir to avoid path duplication)
     dist_dir = bundler.output_dir;
     if not dist_dir.exists() {
-        raise RuntimeError(f"Build output not found: {dist_dir}") ;
+        raise RuntimeError(f"Build output not found: {dist_dir}");
     }
     import os;
     os.chdir(dist_dir);
@@ -85,10 +83,7 @@ impl WebTarget.start(
 
 """Build web bundle using existing Vite pipeline."""
 impl WebTarget.build(
-    self: WebTarget,
-    entry_file: Path,
-    project_dir: Path,
-    platform: Optional[str] = None
+    entry_file: Path, project_dir: Path, platform: Optional[str] = None
 ) -> Path {
     import os;
     import shutil;
@@ -109,20 +104,20 @@ impl WebTarget.build(
     Jac.jac_import(target=mod, base_path=base, lng='jac');
     if Jac.program.errors_had {
         errors = '\n'.join(str(e) for e in Jac.program.errors_had);
-        raise RuntimeError(f"Failed to compile {entry_file}:\n{errors}") ;
+        raise RuntimeError(f"Failed to compile {entry_file}:\n{errors}");
     }
     loaded_mod = Jac.loaded_modules.get(mod);
     if not loaded_mod {
-        raise RuntimeError(f"Module '{mod}' not found after import") ;
+        raise RuntimeError(f"Module '{mod}' not found after import");
     }
     if not isinstance(loaded_mod, types.ModuleType) {
-        raise RuntimeError(f"Module '{mod}' is not a valid module type") ;
+        raise RuntimeError(f"Module '{mod}' is not a valid module type");
     }
     builder = JacClient.get_client_bundle_builder();
     builder.build(loaded_mod, force=True);
     bundle_path = bundler.find_bundle();
     if not bundle_path {
-        raise RuntimeError("Web build failed: bundle not found") ;
+        raise RuntimeError("Web build failed: bundle not found");
     }
     _generate_index_html(
         bundle_path=bundle_path,
@@ -228,7 +223,9 @@ def _generate_index_html(
   </head>
   <body>
     <div id="root"></div>
-    <script id="__jac_init__" type="application/json">{html.escape(init_json)}</script>
+    <script id="__jac_init__" type="application/json">{html.escape(
+        init_json
+    )}</script>
     <script type="module" src="{bundle_filename}"></script>
   </body>
 </html>''';

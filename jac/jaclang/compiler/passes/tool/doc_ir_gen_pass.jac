@@ -68,6 +68,8 @@ obj DocIRGenPass(UniPass) {
     def exit_module_item(nd: uni.ModuleItem) -> None;
     def exit_module_path(nd: uni.ModulePath) -> None;
     def exit_archetype(nd: uni.Archetype) -> None;
+    def exit_type_param(nd: uni.TypeParam) -> None;
+    def exit_type_alias(nd: uni.TypeAlias) -> None;
     def exit_ability(nd: uni.Ability) -> None;
     def exit_func_signature(nd: uni.FuncSignature) -> None;
     def exit_param_var(nd: uni.ParamVar) -> None;
@@ -122,6 +124,7 @@ obj DocIRGenPass(UniPass) {
     def exit_global_vars(nd: uni.GlobalVars) -> None;
     def exit_client_block(nd: uni.ClientBlock) -> None;
     def exit_server_block(nd: uni.ServerBlock) -> None;
+    def exit_native_block(nd: uni.NativeBlock) -> None;
     def exit_module_code(nd: uni.ModuleCode) -> None;
     def exit_global_stmt(nd: uni.GlobalStmt) -> None;
     def exit_non_local_stmt(nd: uni.NonLocalStmt) -> None;

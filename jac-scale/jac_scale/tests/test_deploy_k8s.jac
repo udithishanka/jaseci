@@ -152,7 +152,7 @@ def _get_git_config -> tuple[str, str, str] {
         return (repo_url, branch, commit);
     } except subprocess.CalledProcessError as e {
         print(f"Error getting git config: {e}");
-        raise ;
+        raise;
     }
 }
 
@@ -191,18 +191,15 @@ test "deploy all in one" {
     config.load_kube_config();
     apps_v1 = client.AppsV1Api();
     core_v1 = client.CoreV1Api();
+    rbac_v1 = client.RbacAuthorizationV1Api();
 
     namespace = "all-in-one";
     app_name = namespace;
+    ksm_name = f"{app_name}-kube-state-metrics";
+    ne_name = f"{app_name}-node-exporter";
+    cluster_role_name = f"{namespace}-{ksm_name}";
 
     test_secret_value = "test-secret-value-12345";
-    os.environ.update(
-        {
-            "APP_NAME": app_name,
-            "K8s_NAMESPACE": namespace,
-            "TEST_SECRET_KEY": test_secret_value
-        }
-    );
 
     test_dir = os.path.dirname(os.path.abspath(__file__));
     todo_app_path = os.path.join(
@@ -214,6 +211,10 @@ test "deploy all in one" {
     target_config["app_name"] = app_name;
     target_config["namespace"] = namespace;
     target_config["node_port"] = 30001;
+    target_config["redis_dashboard"] = True;
+    target_config["mongodb_dashboard"] = True;
+    target_config["redis_insight_node_port"] = 30032;
+    target_config["mongo_express_node_port"] = 30033;
 
     (repo_url, branch, commit) = _get_git_config();
     assert repo_url , "repo_url must be a non-empty string";
@@ -230,18 +231,42 @@ test "deploy all in one" {
         "kubernetes", target_config, logger
     );
 
-    deployment_target.secrets = app_scale_config.get_secrets_config();
+    deployment_target.secrets = {"TEST_SECRET_KEY": test_secret_value};
 
     app_config = AppConfig(
         code_folder=todo_app_path, file_name="main.jac", build=False, experimental=True
     );
 
     result = deployment_target.deploy(app_config);
-    result = deployment_target.deploy(app_config);
     details = result.details;
     assert len(details) == 10;
     assert result.success is True;
     print(f"Deployment successful: {result.message}");
+
+    full_status = deployment_target.get_full_status(app_name);
+    assert full_status is not None;
+    assert full_status["app_name"] == app_name;
+    assert full_status["namespace"] == namespace;
+    assert "components" in full_status;
+    assert len(full_status["components"]) > 0;
+    component_names = [c["name"] for c in full_status["components"]];
+    assert "Jaseci App" in component_names;
+    assert "Redis" in component_names;
+    assert "MongoDB" in component_names;
+    for component in full_status["components"] {
+        assert "name" in component;
+        assert "status" in component;
+        assert "ready" in component;
+        assert "total" in component;
+        assert component["status"] == "running";
+        assert component["ready"] == component["total"];
+    }
+    assert "urls" in full_status;
+    assert "app" in full_status["urls"];
+    assert "grafana" in full_status["urls"];
+    assert full_status["urls"]["app"].startswith("http://");
+    assert full_status["urls"]["grafana"].startswith("http://");
+    print(f"Full status: {full_status}");
 
     time.sleep(5);
 
@@ -281,6 +306,82 @@ test "deploy all in one" {
     );
     assert redis_service.spec.ports[0].port == 6379;
 
+    # Validate RedisInsight dashboard Deployment and Service
+    insight_name = f"{app_name}-redis-insight";
+    insight_deploy = apps_v1.read_namespaced_deployment(
+        name=insight_name, namespace=namespace
+    );
+    assert insight_deploy.metadata.name == insight_name;
+    assert insight_deploy.spec.replicas == 1;
+    insight_container = insight_deploy.spec.template.spec.containers[0];
+    assert insight_container.image == "redis/redisinsight:3.2.0";
+    ri_host_env = next(
+        (
+            e.value
+            for e in insight_container.env
+            if e.name == "RI_REDIS_HOST"
+        ),
+        None
+    );
+    ri_port_env = next(
+        (
+            e.value
+            for e in insight_container.env
+            if e.name == "RI_REDIS_PORT"
+        ),
+        None
+    );
+    assert ri_host_env == f"{app_name}-redis-service";
+    assert ri_port_env == "6379";
+    print(
+        f"RedisInsight Deployment '{insight_name}' exists with RI_REDIS_HOST/PORT pre-configured"
+    );
+
+    insight_service = core_v1.read_namespaced_service(
+        name=f"{insight_name}-service", namespace=namespace
+    );
+    assert insight_service.spec.type == "NodePort";
+    assert insight_service.spec.ports[0].node_port == 30032;
+    print(f"RedisInsight Service '{insight_name}-service' (NodePort:30032) exists");
+
+    # Validate mongo-express dashboard Deployment and Service
+    express_name = f"{app_name}-mongo-express";
+    express_deploy = apps_v1.read_namespaced_deployment(
+        name=express_name, namespace=namespace
+    );
+    assert express_deploy.metadata.name == express_name;
+    assert express_deploy.spec.replicas == 1;
+    express_container = express_deploy.spec.template.spec.containers[0];
+    assert express_container.image == 'mongo-express:1.0.2-20';
+    mongo_server_env = next(
+        (
+            e.value
+            for e in express_container.env
+            if e.name == "ME_CONFIG_MONGODB_SERVER"
+        ),
+        None
+    );
+    assert mongo_server_env == f"{app_name}-mongodb-service";
+    mongo_user_env = next(
+        (
+            e.value
+            for e in express_container.env
+            if e.name == "ME_CONFIG_MONGODB_ADMINUSERNAME"
+        ),
+        None
+    );
+    assert mongo_user_env == "admin";
+    print(
+        f"mongo-express Deployment '{express_name}' exists with MongoDB credentials pre-configured"
+    );
+
+    express_service = core_v1.read_namespaced_service(
+        name=f"{express_name}-service", namespace=namespace
+    );
+    assert express_service.spec.type == "NodePort";
+    assert express_service.spec.ports[0].node_port == 30033;
+    print(f"mongo-express Service '{express_name}-service' (NodePort:30033) exists");
+
     # Validate Prometheus Deployment, Service, and ConfigMap
     prometheus_name = f"{app_name}-prometheus";
     prometheus_deploy = apps_v1.read_namespaced_deployment(
@@ -303,8 +404,13 @@ test "deploy all in one" {
         name=f"{prometheus_name}-config", namespace=namespace
     );
     assert "prometheus.yml" in prometheus_config.data;
-    assert f"{app_name}-service" in prometheus_config.data["prometheus.yml"];
-    print(f"Prometheus ConfigMap '{prometheus_name}-config' exists with scrape target");
+    scrape_cfg = prometheus_config.data["prometheus.yml"];
+    assert f"{app_name}-service" in scrape_cfg;
+    assert f"{ksm_name}-service:8080" in scrape_cfg;
+    assert f"{ne_name}-service:9100" in scrape_cfg;
+    print(
+        f"Prometheus ConfigMap '{prometheus_name}-config' exists with all three scrape targets"
+    );
 
     # Validate Grafana Deployment, Service, Secret, and ConfigMaps
     grafana_name = f"{app_name}-grafana";
@@ -343,13 +449,57 @@ test "deploy all in one" {
     );
     assert "jac-scale.json" in grafana_dashboard.data;
     assert "Jac Scale - App Metrics" in grafana_dashboard.data["jac-scale.json"];
-    print("Grafana dashboard ConfigMap exists with Jac Scale dashboard");
+    assert "k8s-metrics.json" in grafana_dashboard.data;
+    assert "Kubernetes Cluster Metrics" in grafana_dashboard.data["k8s-metrics.json"];
+    print(
+        "Grafana dashboard ConfigMap exists with Jac Scale + Kubernetes Cluster Metrics dashboards"
+    );
 
     grafana_provider = core_v1.read_namespaced_config_map(
         name=f"{grafana_name}-dashboard-provider", namespace=namespace
     );
     assert "provider.yaml" in grafana_provider.data;
     print("Grafana dashboard provider ConfigMap exists");
+
+    # Validate kube-state-metrics Deployment, Service, ServiceAccount, ClusterRole, ClusterRoleBinding
+    ksm_deploy = apps_v1.read_namespaced_deployment(name=ksm_name, namespace=namespace);
+    assert ksm_deploy.metadata.name == ksm_name;
+    assert ksm_deploy.spec.replicas == 1;
+    assert "kube-state-metrics" in ksm_deploy.spec.template.spec.containers[0].image;
+    print(f"kube-state-metrics Deployment '{ksm_name}' exists");
+
+    ksm_service = core_v1.read_namespaced_service(
+        name=f"{ksm_name}-service", namespace=namespace
+    );
+    assert ksm_service.spec.type == "ClusterIP";
+    assert ksm_service.spec.ports[0].port == 8080;
+    print(f"kube-state-metrics Service '{ksm_name}-service' (ClusterIP:8080) exists");
+
+    ksm_sa = core_v1.read_namespaced_service_account(
+        name=f"{ksm_name}-sa", namespace=namespace
+    );
+    assert ksm_sa.metadata.name == f"{ksm_name}-sa";
+    print(f"kube-state-metrics ServiceAccount '{ksm_name}-sa' exists");
+
+    ksm_cluster_role = rbac_v1.read_cluster_role(name=cluster_role_name);
+    assert ksm_cluster_role.metadata.name == cluster_role_name;
+    print(f"kube-state-metrics ClusterRole '{cluster_role_name}' exists");
+
+    ksm_crb = rbac_v1.read_cluster_role_binding(name=cluster_role_name);
+    assert ksm_crb.metadata.name == cluster_role_name;
+    print(f"kube-state-metrics ClusterRoleBinding '{cluster_role_name}' exists");
+
+    # Validate node-exporter DaemonSet and Service
+    ne_daemonset = apps_v1.read_namespaced_daemon_set(name=ne_name, namespace=namespace);
+    assert ne_daemonset.metadata.name == ne_name;
+    print(f"node-exporter DaemonSet '{ne_name}' exists");
+
+    ne_service = core_v1.read_namespaced_service(
+        name=f"{ne_name}-service", namespace=namespace
+    );
+    assert ne_service.spec.type == "ClusterIP";
+    assert ne_service.spec.ports[0].port == 9100;
+    print(f"node-exporter Service '{ne_name}-service' (ClusterIP:9100) exists");
 
     # Validate code-server Deployment and Service
     code_server_deploy = apps_v1.read_namespaced_deployment(
@@ -422,20 +572,53 @@ test "deploy all in one" {
     assert response.status_code == 200;
     print(f"Successfully reached app page at {url}");
 
+    # --- Port conflict test ---
+    # Deploy the same app into a different namespace using the same node_port.
+    # check_node_ports_available must detect the conflict and the deploy must fail.
+    duplicate_namespace = "all-in-one-duplicate";
+    duplicate_app_name = duplicate_namespace;
+
+    duplicate_target_config = app_scale_config.get_kubernetes_config();
+    duplicate_target_config["app_name"] = duplicate_app_name;
+    duplicate_target_config["namespace"] = duplicate_namespace;
+    duplicate_target_config["node_port"] = target_config[
+        "node_port"
+    ];  # same port — must conflict
+    duplicate_target_config["redis_dashboard"] = True;
+    duplicate_target_config["mongodb_dashboard"] = True;
+    duplicate_target_config["redis_insight_node_port"] = 30032;  # same — must conflict
+    duplicate_target_config["mongo_express_node_port"] = 30033;  # same — must conflict
+    duplicate_target_config["jaseci_repo_url"] = repo_url;
+    duplicate_target_config["jaseci_branch"] = branch;
+    duplicate_target_config["jaseci_commit"] = commit;
+
+    duplicate_target = DeploymentTargetFactory.create(
+        "kubernetes", duplicate_target_config, logger
+    );
+
+    conflict_result = duplicate_target.deploy(app_config);
+    assert conflict_result.success is False , (
+        "Deploying with a conflicting NodePort should fail"
+    );
+    assert "NodePort conflict detected" in conflict_result.message , (
+        f"Expected NodePort conflict error, got: {conflict_result.message}"
+    );
+    print(f"Port conflict correctly detected: {conflict_result.message}");
+
     # Cleanup using new architecture
     deployment_target.destroy(app_name);
 
     # Verify cleanup - resources should no longer exist
     try {
         apps_v1.read_namespaced_deployment(app_name, namespace=namespace);
-        raise AssertionError("Deployment should have been deleted") ;
+        raise AssertionError("Deployment should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     try {
         core_v1.read_namespaced_service(f"{app_name}-service", namespace=namespace);
-        raise AssertionError("Service should have been deleted") ;
+        raise AssertionError("Service should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -445,16 +628,14 @@ test "deploy all in one" {
         autoscaling_v2.read_namespaced_horizontal_pod_autoscaler(
             name=f"{app_name}-hpa", namespace=namespace
         );
-        raise AssertionError("HPA should have been deleted") ;
+        raise AssertionError("HPA should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     try {
-        apps_v1.read_namespaced_stateful_set(
-            f"{app_name}-mongodb", namespace=namespace
-        );
-        raise AssertionError("MongoDB StatefulSet should have been deleted") ;
+        apps_v1.read_namespaced_stateful_set(f"{app_name}-mongodb", namespace=namespace);
+        raise AssertionError("MongoDB StatefulSet should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -463,14 +644,14 @@ test "deploy all in one" {
         core_v1.read_namespaced_service(
             f"{app_name}-mongodb-service", namespace=namespace
         );
-        raise AssertionError("MongoDB Service should have been deleted") ;
+        raise AssertionError("MongoDB Service should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     try {
         apps_v1.read_namespaced_deployment(f"{app_name}-redis", namespace=namespace);
-        raise AssertionError("Redis Deployment should have been deleted") ;
+        raise AssertionError("Redis Deployment should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -479,24 +660,58 @@ test "deploy all in one" {
         core_v1.read_namespaced_service(
             f"{app_name}-redis-service", namespace=namespace
         );
-        raise AssertionError("Redis Service should have been deleted") ;
+        raise AssertionError("Redis Service should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
+
+    # Verify RedisInsight dashboard cleanup
+    insight_name = f"{app_name}-redis-insight";
+    try {
+        apps_v1.read_namespaced_deployment(insight_name, namespace=namespace);
+        raise AssertionError("RedisInsight Deployment should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        core_v1.read_namespaced_service(f"{insight_name}-service", namespace=namespace);
+        raise AssertionError("RedisInsight Service should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    # Verify mongo-express dashboard cleanup
+    express_name = f"{app_name}-mongo-express";
+    try {
+        apps_v1.read_namespaced_deployment(express_name, namespace=namespace);
+        raise AssertionError("mongo-express Deployment should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        core_v1.read_namespaced_service(f"{express_name}-service", namespace=namespace);
+        raise AssertionError("mongo-express Service should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    print("Dashboard (RedisInsight + mongo-express) cleanup verified");
 
     # Verify code-server cleanup
     try {
         apps_v1.read_namespaced_deployment(
             f"{app_name}-code-server", namespace=namespace
         );
-        raise AssertionError("Code-server Deployment should have been deleted") ;
+        raise AssertionError("Code-server Deployment should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     try {
         core_v1.read_namespaced_service(f"{app_name}-code-server", namespace=namespace);
-        raise AssertionError("Code-server Service should have been deleted") ;
+        raise AssertionError("Code-server Service should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -505,7 +720,7 @@ test "deploy all in one" {
     prometheus_name = f"{app_name}-prometheus";
     try {
         apps_v1.read_namespaced_deployment(prometheus_name, namespace=namespace);
-        raise AssertionError("Prometheus Deployment should have been deleted") ;
+        raise AssertionError("Prometheus Deployment should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -514,7 +729,7 @@ test "deploy all in one" {
         core_v1.read_namespaced_service(
             f"{prometheus_name}-service", namespace=namespace
         );
-        raise AssertionError("Prometheus Service should have been deleted") ;
+        raise AssertionError("Prometheus Service should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -523,30 +738,89 @@ test "deploy all in one" {
         core_v1.read_namespaced_config_map(
             name=f"{prometheus_name}-config", namespace=namespace
         );
-        raise AssertionError("Prometheus ConfigMap should have been deleted") ;
+        raise AssertionError("Prometheus ConfigMap should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
+
+    # Verify kube-state-metrics cleanup
+    try {
+        apps_v1.read_namespaced_deployment(ksm_name, namespace=namespace);
+        raise AssertionError("kube-state-metrics Deployment should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        core_v1.read_namespaced_service(f"{ksm_name}-service", namespace=namespace);
+        raise AssertionError("kube-state-metrics Service should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        core_v1.read_namespaced_service_account(
+            name=f"{ksm_name}-sa", namespace=namespace
+        );
+        raise AssertionError(
+            "kube-state-metrics ServiceAccount should have been deleted"
+        );
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        rbac_v1.read_cluster_role(name=cluster_role_name);
+        raise AssertionError("kube-state-metrics ClusterRole should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        rbac_v1.read_cluster_role_binding(name=cluster_role_name);
+        raise AssertionError(
+            "kube-state-metrics ClusterRoleBinding should have been deleted"
+        );
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    # Verify node-exporter cleanup
+    try {
+        apps_v1.read_namespaced_daemon_set(ne_name, namespace=namespace);
+        raise AssertionError("node-exporter DaemonSet should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    try {
+        core_v1.read_namespaced_service(f"{ne_name}-service", namespace=namespace);
+        raise AssertionError("node-exporter Service should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404, got {e.status}";
+    }
+
+    print("K8s metrics stack (kube-state-metrics + node-exporter) cleanup verified");
 
     # Verify Grafana cleanup
     grafana_name = f"{app_name}-grafana";
     try {
         apps_v1.read_namespaced_deployment(grafana_name, namespace=namespace);
-        raise AssertionError("Grafana Deployment should have been deleted") ;
+        raise AssertionError("Grafana Deployment should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     try {
         core_v1.read_namespaced_service(f"{grafana_name}-service", namespace=namespace);
-        raise AssertionError("Grafana Service should have been deleted") ;
+        raise AssertionError("Grafana Service should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     try {
         core_v1.read_namespaced_secret(f"{grafana_name}-secret", namespace=namespace);
-        raise AssertionError("Grafana Secret should have been deleted") ;
+        raise AssertionError("Grafana Secret should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
@@ -560,7 +834,7 @@ test "deploy all in one" {
             core_v1.read_namespaced_config_map(name=cm_name, namespace=namespace);
             raise AssertionError(
                 f"Grafana ConfigMap '{cm_name}' should have been deleted"
-            ) ;
+            );
         } except ApiException as e {
             assert e.status == 404 , f"Expected 404 for '{cm_name}', got {e.status}";
         }
@@ -571,20 +845,35 @@ test "deploy all in one" {
     # Verify K8s Secret cleanup
     try {
         core_v1.read_namespaced_secret(f"{app_name}-secrets", namespace=namespace);
-        raise AssertionError("K8s Secret should have been deleted") ;
+        raise AssertionError("K8s Secret should have been deleted");
     } except ApiException as e {
         assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
     # Verify PVC cleanup
-    pvcs = core_v1.list_namespaced_persistent_volume_claim(namespace=namespace);
-    for pvc in pvcs.items {
-        assert not pvc.metadata.name.startswith(app_name) , (
-            f"PVC '{pvc.metadata.name}' should have been deleted"
-        );
+    try {
+        pvcs = core_v1.list_namespaced_persistent_volume_claim(namespace=namespace);
+        for pvc in pvcs.items {
+            assert not pvc.metadata.name.startswith(app_name) , (
+                f"PVC '{pvc.metadata.name}' should have been deleted"
+            );
+        }
+    } except ApiException as e {
+        # Namespace already deleted - PVCs are gone too
+        assert e.status == 404 , f"Expected 404, got {e.status}";
     }
 
-    print("Cleanup verification complete - all resources properly deleted");
+    # Verify namespace was deleted (since it is not 'default')
+    try {
+        core_v1.read_namespace(name=namespace);
+        raise AssertionError("Namespace should have been deleted");
+    } except ApiException as e {
+        assert e.status == 404 , f"Expected 404 for namespace, got {e.status}";
+    }
+
+    print(
+        "Cleanup verification complete - all resources and namespace properly deleted"
+    );
 }
 
 """Test deployment early exit on failure."""
@@ -593,8 +882,6 @@ test "early exit" {
 
     namespace = "early-exit";
     app_name = namespace;
-
-    os.environ.update({"APP_NAME": app_name, "K8s_NAMESPACE": namespace});
 
     test_dir = os.path.dirname(os.path.abspath(__file__));
     todo_app_path = os.path.join(test_dir, "../../examples/early-exit");
@@ -632,8 +919,6 @@ test "deployment target methods" {
 
     namespace = "test-methods";
     app_name = "test-methods-app";
-
-    os.environ.update({"APP_NAME": app_name, "K8s_NAMESPACE": namespace});
 
     scale_config = get_scale_config();
     target_config = scale_config.get_kubernetes_config();

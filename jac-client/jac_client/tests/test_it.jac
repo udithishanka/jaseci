@@ -52,9 +52,9 @@ def _wait_for_endpoint(
                 time.sleep(poll_interval);
             } elif exc.code == 500 {
                 exc.close();
-                raise ;
+                raise;
             } else {
-                raise ;
+                raise;
             }
         } except URLError as exc {
             last_err = exc;
@@ -69,7 +69,7 @@ def _wait_for_endpoint(
 
     raise TimeoutError(
         f"Timed out waiting for {url} to become available. Last error: {last_err}"
-    ) ;
+    );
 }
 
 test "all in one app endpoints" {
@@ -203,8 +203,8 @@ test "all in one app endpoints" {
                         if raw {
                             captured_output = (
                                 raw.decode("utf-8", errors="ignore")
-                                if isinstance(raw, bytes)
-                                else raw
+                                    if isinstance(raw, bytes)
+                                    else raw
                             );
                         }
                     } except (OSError, BlockingIOError) {
@@ -245,9 +245,7 @@ test "all in one app endpoints" {
 
                 # "/" - server up
                 try {
-                    print(
-                        "[DEBUG] Sending GET request to root endpoint / (with retry)"
-                    );
+                    print("[DEBUG] Sending GET request to root endpoint / (with retry)");
                     root_bytes = _wait_for_endpoint(
                         f"http://127.0.0.1:{server_port}",
                         timeout=120.0,
@@ -284,7 +282,12 @@ test "all in one app endpoints" {
                         f"Body (truncated to 500 chars):\n{page_body[:500]}"
                     );
                     assert "<html" in page_body.lower();
-                } except (URLError, HTTPError, TimeoutError, RemoteDisconnected) as exc {
+                } except (
+                    URLError,
+                    HTTPError,
+                    TimeoutError,
+                    RemoteDisconnected
+                ) as exc {
                     print(f"[DEBUG] Error while requesting /cl/app endpoint: {exc}");
                     pytest.fail(f"Failed to GET /cl/app endpoint: {exc}");
                 }
@@ -363,7 +366,12 @@ test "all in one app endpoints" {
                         "postMessage" in worker_js_body
                         or "onmessage" in worker_js_body
                     ) , "Worker JS should contain a message handler";
-                } except (URLError, HTTPError, TimeoutError, RemoteDisconnected) as exc {
+                } except (
+                    URLError,
+                    HTTPError,
+                    TimeoutError,
+                    RemoteDisconnected
+                ) as exc {
                     print(f"[DEBUG] Error while requesting /workers/worker.js: {exc}");
                     pytest.fail(
                         f"Failed to GET /workers/worker.js after retries: {exc}"
@@ -456,9 +464,7 @@ test "all in one app endpoints" {
                         );
                         assert resp_register.status == 201;
                         register_response = json.loads(register_body);
-                        register_data = register_response.get(
-                            "data", register_response
-                        );
+                        register_data = register_response.get("data", register_response);
                         assert "username" in register_data;
                         assert "token" in register_data;
                         assert "root_id" in register_data;
@@ -557,6 +563,131 @@ test "all in one app endpoints" {
                         f"[DEBUG] Unexpected error while testing invalid login: {exc}"
                     );
                     pytest.fail("Unexpected error testing invalid login");
+                }
+
+                # ================================================================
+                # AUTO-CACHE PIPELINE VALIDATION
+                # Verifies: compiler analysis → metadata propagation → HTML
+                # injection, reader determinism (cache-safe), and writer
+                # classification. Actual cache hit/miss prevention runs in
+                # client-side JS and would need browser-level testing
+                # (Playwright) for direct verification.
+                # ================================================================
+                try {
+                    print("[DEBUG] Verifying endpointEffects in served page HTML");
+                    init_match = re.search(
+                        r'<script\s+id="__jac_init__"\s+type="application/json">\s*(.*?)\s*</script>',
+                        page_body,
+                        re.DOTALL,
+                    );
+                    assert init_match , (
+                        "__jac_init__ script tag should be present in served HTML"
+                    );
+                    init_data = json.loads(init_match.group(1));
+                    print(f"[DEBUG] Parsed __jac_init__ keys: {list(init_data.keys())}");
+
+                    # 1. Verify endpointEffects is present
+                    assert "endpointEffects" in init_data , (
+                        "endpointEffects should be in __jac_init__"
+                    );
+                    effects = init_data["endpointEffects"];
+                    effect_keys = list(effects.keys());
+                    print(f"[DEBUG] endpointEffects entries: {effect_keys}");
+
+                    # 2. Verify reader walkers classified as non-writers
+                    for reader_name in [
+                        "walker:get_server_message",
+                        "walker:ping_server"
+                    ] {
+                        assert reader_name in effects , (
+                            f"{reader_name} should be in endpointEffects, "
+                            f"got: {effect_keys}"
+                        );
+                        assert not effects[reader_name]["is_writer"] , (
+                            f"{reader_name} should be classified as reader (is_writer=false)"
+                        );
+                        assert "touches" in effects[reader_name];
+                        print(
+                            f"[DEBUG] {reader_name}: reader, "
+                            f"touches={effects[reader_name]['touches']}"
+                        );
+                    }
+
+                    # 3. Verify writer walker classified as writer
+                    assert "walker:create_todo" in effects , (
+                        f"walker:create_todo should be in endpointEffects, "
+                        f"got: {effect_keys}"
+                    );
+                    assert effects["walker:create_todo"]["is_writer"] , (
+                        "create_todo should be classified as writer (is_writer=true)"
+                    );
+                    print(
+                        f"[DEBUG] walker:create_todo: writer, "
+                        f"touches={effects['walker:create_todo']['touches']}"
+                    );
+
+                    # 4. Verify reader returns deterministic responses
+                    #    (proves the cache can safely serve repeated reads)
+                    print("[DEBUG] Testing reader determinism (3 identical calls)");
+                    reader_reports: list = [];
+                    for _i in range(3) {
+                        req_r = Request(
+                            f"http://127.0.0.1:{server_port}/walker/get_server_message",
+                            data=json.dumps({}).encode("utf-8"),
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        );
+                        with urlopen(req_r, timeout=20) as resp_r {
+                            body = json.loads(
+                                resp_r.read().decode("utf-8", errors="ignore")
+                            );
+                            # Compare only reports (deterministic data);
+                            # result contains per-invocation walker ids.
+                            reader_reports.append(body.get("reports"));
+                        }
+                    }
+                    assert (
+                        reader_reports[0] == reader_reports[1] == reader_reports[2]
+                    ) , (
+                        "Reader endpoint must return identical reports "
+                        "(proves client cache can safely serve repeated reads)"
+                    );
+                    print(
+                        "[DEBUG] Confirmed: 3 identical reader responses (cache-safe)"
+                    );
+
+                    # 5. Verify writer creates distinct data each call
+                    #    (proves the cache MUST invalidate after writes)
+                    print("[DEBUG] Testing writer creates new state each call");
+                    writer_responses: list[str] = [];
+                    for idx in range(2) {
+                        req_w = Request(
+                            f"http://127.0.0.1:{server_port}/walker/create_todo",
+                            data=json.dumps({"text": f"cache_test_{idx}"}).encode(
+                                "utf-8"
+                            ),
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        );
+                        with urlopen(req_w, timeout=20) as resp_w {
+                            writer_responses.append(
+                                resp_w.read().decode("utf-8", errors="ignore")
+                            );
+                            assert resp_w.status == 200;
+                        }
+                    }
+                    assert writer_responses[0] != writer_responses[1] , (
+                        "Writer endpoint must return different data each call "
+                        "(proves stale cache must be invalidated after writes)"
+                    );
+                    print(
+                        "[DEBUG] Confirmed: writer produces distinct results "
+                        "(cache invalidation is required)"
+                    );
+                    print("[DEBUG] Auto-cache pipeline validation PASSED");
+                } except (URLError, HTTPError, RemoteDisconnected) as exc {
+                    print(f"[DEBUG] Error during auto-cache validation: {exc}");
+                    pytest.fail(f"Auto-cache pipeline validation failed: {exc}");
                 }
 
                 # Verify TypeScript component
@@ -1745,8 +1876,8 @@ test "diagnostics syntax error in console" {
                         if raw {
                             captured_output = (
                                 raw.decode("utf-8", errors="ignore")
-                                if isinstance(raw, bytes)
-                                else raw
+                                    if isinstance(raw, bytes)
+                                    else raw
                             );
                         }
                     } except (OSError, BlockingIOError) {
@@ -1796,8 +1927,8 @@ test "diagnostics syntax error in console" {
                         if raw {
                             additional = (
                                 raw.decode("utf-8", errors="ignore")
-                                if isinstance(raw, bytes)
-                                else raw
+                                    if isinstance(raw, bytes)
+                                    else raw
                             );
                             captured_output += additional;
                             print(f"[DEBUG] Additional output:\n{additional}");

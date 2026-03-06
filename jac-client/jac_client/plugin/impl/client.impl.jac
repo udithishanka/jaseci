@@ -62,7 +62,7 @@ impl JacClient.get_client_bundle_builder -> ViteClientBundleBuilder {
         if not generated_path.exists() {
             raise ClientBundleError(
                 f'Failed to generate package.json at {generated_path}'
-            ) ;
+            );
         }
         package_json_path = generated_path.resolve();
     } else {
@@ -72,7 +72,7 @@ impl JacClient.get_client_bundle_builder -> ViteClientBundleBuilder {
     if not package_json_path.exists() {
         raise ClientBundleError(
             f'package.json not found at {package_json_path}. Expected at {generated_package_json}'
-        ) ;
+        );
     }
     output_dir = client_dir / 'dist';
     runtime_path = Path(__file__).with_name('client_runtime.cl.jac');
@@ -97,7 +97,7 @@ impl JacClient.render_page(
         or set(introspector.get_client_functions().keys())
     );
     if (function_name not in available_exports) {
-        raise ValueError(f"Client function '{function_name}' not found") ;
+        raise ValueError(f"Client function '{function_name}' not found");
     }
     import from jaclang.project.config { find_project_root, get_config }
     base_path_dir = Path(Jac.base_path_dir);
@@ -152,7 +152,17 @@ impl JacClient.render_page(
       }
     </script>''';
     }
-    page = f'<!DOCTYPE html><html lang="en"><head>{head_content}{pwa_head}</head><body><div id="root"></div>{pwa_body}<script type="module" src="/static/client.js?hash={bundle_hash}"></script></body></html>';
+    # Build __jac_init__ JSON with endpoint effects for client-side auto-caching
+    init_data = {
+        'module': introspector._module.__name__
+            if introspector._module
+            else introspector.module_name,
+        'function': function_name,
+        'endpointEffects': introspector._client_manifest.get('endpoint_effects', {})
+    };
+    init_json = json.dumps(init_data).replace('</', '<\\/');
+    init_script = f'<script id="__jac_init__" type="application/json">{init_json}</script>';
+    page = f'<!DOCTYPE html><html lang="en"><head>{head_content}{pwa_head}</head><body><div id="root"></div>{init_script}{pwa_body}<script type="module" src="/static/client.js?hash={bundle_hash}"></script></body></html>';
     return {
         'html': page,
         'bundle_hash': bundle_hash,

@@ -22,7 +22,7 @@ import jaclang.jac0core.unitree as uni;
 import from jaclang.jac0core.passes.transform { Transform }
 import from jaclang.jac0core.unitree { Symbol, UniScopeNode }
 """Decls and Def matching pass."""
-class DeclImplMatchPass(Transform[(uni.Module, uni.Module)]) {
+class DeclImplMatchPass(Transform[uni.Module, uni.Module]) {
     """Connect Decls and Defs."""
     def transform(self: DeclImplMatchPass, ir_in: uni.Module) -> uni.Module;
 
@@ -59,5 +59,15 @@ links
         """
     def _resolve_impl_body_symbols(
         self: DeclImplMatchPass, impl_def: uni.ImplDef
+    ) -> None;
+
+    """Populate self-member symbols from impl body to archetype's symbol table.
+
+    When an impl file contains `self.x = value` assignments in a method, these
+    define instance attributes on the archetype. Since SymTabBuildPass runs on
+    impl files before they're connected to their declarations, it can't populate
+    these symbols into the archetype. This method does that after connection."""
+    def _populate_self_member_symbols(
+        self: DeclImplMatchPass, impl_def: uni.ImplDef, archetype: uni.Archetype
     ) -> None;
 }

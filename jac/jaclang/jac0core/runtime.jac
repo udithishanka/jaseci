@@ -10,6 +10,7 @@ import from collections { OrderedDict }
 import from collections.abc { Callable, Coroutine, Iterator, Mapping, Sequence }
 import from concurrent.futures { Future, ThreadPoolExecutor }
 import from contextlib { contextmanager, suppress }
+import dataclasses;
 import from dataclasses { dataclass, field }
 import from functools { wraps }
 import from http.server { HTTPServer }
@@ -49,7 +50,7 @@ import from jaclang.jac0core.constructs {
 }
 import from jaclang.jac0core.modresolver { infer_language }
 import from jaclang.jac0core.mtp { MTIR, Info, MTRuntime }
-import from jaclang.vendor { pluggy }
+import from jaclang.jac0core { plugin }
 
 with entry {
     if TYPE_CHECKING {
@@ -67,9 +68,9 @@ with entry {
     }
 }
 
-glob plugin_manager = pluggy.PluginManager('jac'),
-     hookspec = pluggy.HookspecMarker('jac'),
-     hookimpl = pluggy.HookimplMarker('jac'),
+glob plugin_manager = plugin.PluginManager('jac'),
+     hookspec = plugin.HookspecMarker('jac'),
+     hookimpl = plugin.HookimplMarker('jac'),
      logger = getLogger(__name__),
      T = TypeVar('T'),
      P = ParamSpec('P'),
@@ -80,6 +81,32 @@ glob plugin_manager = pluggy.PluginManager('jac'),
 
 """Jac Access Validation Specs."""
 class JacAccessValidation {
+    """Resolve the live anchor for an archetype from runtime memory."""
+    static def _resolve_anchor(archetype: Archetype) -> tuple {
+        anchor = archetype.__jac__;
+        jctx = JacRuntimeInterface.get_context();
+        mem_anchor = jctx.mem.get(anchor.id);
+        if (mem_anchor and (mem_anchor is not anchor)) {
+            anchor = mem_anchor;
+        }
+        return (anchor, jctx);
+    }
+
+    """Check if current root has at least min_level access to target anchor."""
+    static def _check_access(
+        `to: Anchor, min_level: AccessLevel, operation: str
+    ) -> bool {
+        access_level = JacRuntimeInterface.check_access_level(`to) > min_level;
+        if not access_level {
+            logger.info(
+                "Current root doesn't have " + operation + " access to " + `to.__class__.__name__ + " " + `to.archetype.__class__.__name__ + "[" + str(
+                    `to.id
+                ) + "]"
+            );
+        }
+        return access_level;
+    }
+
     """Allow all access from target root graph to current Archetype."""
     static def allow_root(
         archetype: Archetype,
@@ -90,12 +117,7 @@ class JacAccessValidation {
             level = AccessLevel.READ;
         }
         level = AccessLevel.cast(level);
-        anchor = archetype.__jac__;
-        jctx = JacRuntimeInterface.get_context();
-        mem_anchor = jctx.mem.get(anchor.id);
-        if (mem_anchor and (mem_anchor is not anchor)) {
-            anchor = mem_anchor;
-        }
+        (anchor, jctx) = JacAccessValidation._resolve_anchor(archetype);
         access = anchor.access.roots;
         _root_id = str(root_id);
         if (level != access.anchors.get(_root_id, AccessLevel.NO_ACCESS)) {
@@ -114,12 +136,7 @@ class JacAccessValidation {
             level = AccessLevel.READ;
         }
         level = AccessLevel.cast(level);
-        anchor = archetype.__jac__;
-        jctx = JacRuntimeInterface.get_context();
-        mem_anchor = jctx.mem.get(anchor.id);
-        if (mem_anchor and (mem_anchor is not anchor)) {
-            anchor = mem_anchor;
-        }
+        (anchor, jctx) = JacAccessValidation._resolve_anchor(archetype);
         access = anchor.access.roots;
         access.anchors.pop(str(root_id), None);
         jctx.mem.put(anchor);
@@ -133,12 +150,7 @@ class JacAccessValidation {
             level = AccessLevel.READ;
         }
         level = AccessLevel.cast(level);
-        anchor = archetype.__jac__;
-        jctx = JacRuntimeInterface.get_context();
-        mem_anchor = jctx.mem.get(anchor.id);
-        if (mem_anchor and (mem_anchor is not anchor)) {
-            anchor = mem_anchor;
-        }
+        (anchor, jctx) = JacAccessValidation._resolve_anchor(archetype);
         if (level != anchor.access.all) {
             anchor.access.all = level;
             jctx.mem.put(anchor);
@@ -147,12 +159,7 @@ class JacAccessValidation {
 
     """Disallow others to access current Archetype."""
     static def perm_revoke(archetype: Archetype) -> None {
-        anchor = archetype.__jac__;
-        jctx = JacRuntimeInterface.get_context();
-        mem_anchor = jctx.mem.get(anchor.id);
-        if (mem_anchor and (mem_anchor is not anchor)) {
-            anchor = mem_anchor;
-        }
+        (anchor, jctx) = JacAccessValidation._resolve_anchor(archetype);
         if (anchor.access.all > AccessLevel.NO_ACCESS) {
             anchor.access.all = AccessLevel.NO_ACCESS;
             jctx.mem.put(anchor);
@@ -161,48 +168,17 @@ class JacAccessValidation {
 
     """Read Access Validation."""
     static def check_read_access(`to: Anchor) -> bool {
-        raw_level = JacRuntimeInterface.check_access_level(`to);
-        access_level = raw_level > AccessLevel.NO_ACCESS;
-        if not access_level {
-            logger.info(
-                "Current root doesn't have read access to " + `to.__class__.__name__ + " " + `to.archetype.__class__.__name__ + "[" + str(
-                    `to.id
-                ) + "]"
-            );
-        }
-        return access_level;
+        return JacAccessValidation._check_access(`to, AccessLevel.NO_ACCESS, "read");
     }
 
-    """Write Access Validation."""
+    """Connect Access Validation."""
     static def check_connect_access(`to: Anchor) -> bool {
-        if not (
-            access_level := (
-                JacRuntimeInterface.check_access_level(`to) > AccessLevel.READ
-            )
-        ) {
-            logger.info(
-                "Current root doesn't have connect access to " + `to.__class__.__name__ + " " + `to.archetype.__class__.__name__ + "[" + str(
-                    `to.id
-                ) + "]"
-            );
-        }
-        return access_level;
+        return JacAccessValidation._check_access(`to, AccessLevel.READ, "connect");
     }
 
     """Write Access Validation."""
     static def check_write_access(`to: Anchor) -> bool {
-        if not (
-            access_level := (
-                JacRuntimeInterface.check_access_level(`to) > AccessLevel.CONNECT
-            )
-        ) {
-            logger.info(
-                "Current root doesn't have write access to " + `to.__class__.__name__ + " " + `to.archetype.__class__.__name__ + "[" + str(
-                    `to.id
-                ) + "]"
-            );
-        }
-        return access_level;
+        return JacAccessValidation._check_access(`to, AccessLevel.CONNECT, "write");
     }
 
     """Access validation."""
@@ -384,9 +360,9 @@ class JacWalker {
         `walker: WalkerArchetype,
         expr:
             (
-                list[(NodeArchetype | EdgeArchetype)] | list[NodeArchetype] | list[
-                    EdgeArchetype
-                ] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
+                list[
+                    (NodeArchetype | EdgeArchetype)
+                ] | list[NodeArchetype] | list[EdgeArchetype] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
             ),
         insert_loc: int = -1
     ) -> bool {
@@ -400,13 +376,13 @@ class JacWalker {
             before_len = len(wanch.next);
             next = [];
             for anchor in (i.__jac__ for i in expr)
-            if isinstance(expr, `list)
-            else [expr.__jac__] {
+                if isinstance(expr, `list)
+                else [expr.__jac__] {
                 if (anchor not in wanch.ignores) {
                     if isinstance(anchor, (NodeAnchor, EdgeAnchor)) {
                         next.append(anchor);
                     } else {
-                        raise ValueError('Anchor should be NodeAnchor or EdgeAnchor.') ;
+                        raise ValueError('Anchor should be NodeAnchor or EdgeAnchor.');
                     }
                 }
             }
@@ -418,7 +394,7 @@ class JacWalker {
             wanch.next = wanch.next[:insert_loc] + next + wanch.next[insert_loc:];
             return (len(wanch.next) > before_len);
         } else {
-            raise TypeError('Invalid walker object') ;
+            raise TypeError('Invalid walker object');
         }
     }
 
@@ -559,48 +535,65 @@ class JacWalker {
     static def spawn_call(
         `walker: WalkerAnchor, nd: (NodeAnchor | EdgeAnchor)
     ) -> WalkerArchetype {
+        import from jaclang.runtimelib.context { CallState }
         warch = `walker.archetype;
         `walker.path = [];
         current_loc = nd.archetype;
         ctx = JacRuntimeInterface.get_context();
         call_state = ctx.call_state.get(None);
-        for i in warch._jac_entry_funcs_ {
-            if not i.trigger {
-                i.func(warch, current_loc);
-            }
-            if `walker.disengaged {
-                `walker.ignores = [];
-                if call_state {
-                    warch.reports = call_state.reports;
+        owns_call_state = False;
+        if not call_state {
+            call_token = ctx.call_state.set(CallState());
+            call_state = ctx.call_state.get();
+            owns_call_state = True;
+        }
+        try {
+            for i in warch._jac_entry_funcs_ {
+                if not i.trigger {
+                    i.func(warch, current_loc);
                 }
-                return warch;
+                if `walker.disengaged {
+                    `walker.ignores = [];
+                    return warch;
+                }
+            }
+            while `walker.next {
+                next_anchor = `walker.next.pop(0);
+                if (
+                    (next_anchor not in `walker.ignores)
+                    and not JacWalker._visit_node_recursive(
+                        warch, `walker, next_anchor
+                    )
+                ) {
+                    break;
+                }
+            }
+            if `walker.path {
+                current_loc = `walker.path[-1].archetype;
+            }
+            for i in warch._jac_exit_funcs_ {
+                if not i.trigger {
+                    i.func(warch, current_loc);
+                }
+                if `walker.disengaged {
+                    break;
+                }
+            }
+            `walker.ignores = [];
+            return warch;
+        } finally {
+            if owns_call_state {
+                reports = [];
+                while not call_state.reports.empty() {
+                    item = call_state.reports.get_nowait();
+                    if item is not call_state._sentinel {
+                        reports.append(item);
+                    }
+                }
+                warch.reports = reports;
+                ctx.call_state.reset(call_token);
             }
         }
-        while `walker.next {
-            next_anchor = `walker.next.pop(0);
-            if (
-                (next_anchor not in `walker.ignores)
-                and not JacWalker._visit_node_recursive(warch, `walker, next_anchor)
-            ) {
-                break;
-            }
-        }
-        if `walker.path {
-            current_loc = `walker.path[-1].archetype;
-        }
-        for i in warch._jac_exit_funcs_ {
-            if not i.trigger {
-                i.func(warch, current_loc);
-            }
-            if `walker.disengaged {
-                break;
-            }
-        }
-        `walker.ignores = [];
-        if call_state {
-            warch.reports = call_state.reports;
-        }
-        return warch;
     }
 
     """Async version: Execute all entry abilities for current location.
@@ -760,56 +753,71 @@ class JacWalker {
     static async def async_spawn_call(
         `walker: WalkerAnchor, nd: (NodeAnchor | EdgeAnchor)
     ) -> WalkerArchetype {
+        import from jaclang.runtimelib.context { CallState }
         warch = `walker.archetype;
         `walker.path = [];
         current_loc = nd.archetype;
         ctx = JacRuntimeInterface.get_context();
         call_state = ctx.call_state.get(None);
-        for i in warch._jac_entry_funcs_ {
-            if not i.trigger {
-                result = i.func(warch, current_loc);
-                if isinstance(result, Coroutine) {
-                    await result;
+        owns_call_state = False;
+        if not call_state {
+            call_token = ctx.call_state.set(CallState());
+            call_state = ctx.call_state.get();
+            owns_call_state = True;
+        }
+        try {
+            for i in warch._jac_entry_funcs_ {
+                if not i.trigger {
+                    result = i.func(warch, current_loc);
+                    if isinstance(result, Coroutine) {
+                        await result;
+                    }
+                }
+                if `walker.disengaged {
+                    `walker.ignores = [];
+                    return warch;
                 }
             }
-            if `walker.disengaged {
-                `walker.ignores = [];
-                if call_state {
-                    warch.reports = call_state.reports;
-                }
-                return warch;
-            }
-        }
-        while `walker.next {
-            next_anchor = `walker.next.pop(0);
-            if (
-                (next_anchor not in `walker.ignores)
-                and not await JacWalker._async_visit_node_recursive(
-                    warch, `walker, next_anchor
-                )
-            ) {
-                break;
-            }
-        }
-        if `walker.path {
-            current_loc = `walker.path[-1].archetype;
-        }
-        for i in warch._jac_exit_funcs_ {
-            if not i.trigger {
-                result = i.func(warch, current_loc);
-                if isinstance(result, Coroutine) {
-                    await result;
+            while `walker.next {
+                next_anchor = `walker.next.pop(0);
+                if (
+                    (next_anchor not in `walker.ignores)
+                    and not await JacWalker._async_visit_node_recursive(
+                        warch, `walker, next_anchor
+                    )
+                ) {
+                    break;
                 }
             }
-            if `walker.disengaged {
-                break;
+            if `walker.path {
+                current_loc = `walker.path[-1].archetype;
+            }
+            for i in warch._jac_exit_funcs_ {
+                if not i.trigger {
+                    result = i.func(warch, current_loc);
+                    if isinstance(result, Coroutine) {
+                        await result;
+                    }
+                }
+                if `walker.disengaged {
+                    break;
+                }
+            }
+            `walker.ignores = [];
+            return warch;
+        } finally {
+            if owns_call_state {
+                reports = [];
+                while not call_state.reports.empty() {
+                    item = call_state.reports.get_nowait();
+                    if item is not call_state._sentinel {
+                        reports.append(item);
+                    }
+                }
+                warch.reports = reports;
+                ctx.call_state.reset(call_token);
             }
         }
-        `walker.ignores = [];
-        if call_state {
-            warch.reports = call_state.reports;
-        }
-        return warch;
     }
 
     """Jac's spawn operator feature."""
@@ -822,8 +830,8 @@ class JacWalker {
             for i in items {
                 a = i.__jac__;
                 `walker.next.append(a)
-                if isinstance(a, (NodeAnchor, EdgeAnchor))
-                else None;
+                    if isinstance(a, (NodeAnchor, EdgeAnchor))
+                    else None;
                 if (isinstance(a, EdgeAnchor) and a.target) {
                     `walker.next.append(a.target);
                 }
@@ -847,7 +855,7 @@ class JacWalker {
             ) {
                 return collect_targets(`walker, t);
             } else {
-                raise TypeError('Invalid target object') ;
+                raise TypeError('Invalid target object');
             }
         }
         if isinstance(op1, WalkerArchetype) {
@@ -855,7 +863,7 @@ class JacWalker {
         } elif isinstance(op2, WalkerArchetype) {
             (warch, targ) = (op2, op1);
         } else {
-            raise TypeError('Invalid walker object') ;
+            raise TypeError('Invalid walker object');
         }
         `walker: WalkerAnchor = warch.__jac__;
         loc: (NodeAnchor | EdgeAnchor) = assign(`walker, targ);
@@ -961,8 +969,8 @@ class JacBuiltin {
             edge_label = html.escape(str(`edge.__jac__.archetype));
             dot_content += (
                 f"{visited_nodes.index(source)} -> {visited_nodes.index(target)} " + f' [label="{edge_label
-                if "GenericEdge" not in edge_label
-                else ""}"];\n'
+                    if "GenericEdge" not in edge_label
+                    else ""}"];\n'
             );
             if (('GenericEdge' in edge_label) or not edge_label.strip()) {
                 mermaid_content += (
@@ -978,8 +986,8 @@ class JacBuiltin {
         }
         for node_ in visited_nodes {
             color = colors[node_depths[node_]]
-            if (node_depths[node_] < 25)
-            else colors[24];
+                if (node_depths[node_] < 25)
+                else colors[24];
             label = html.escape(str(node_.__jac__.archetype));
             dot_content += (
                 f'{visited_nodes.index(node_)} [label="{label}"fillcolor="{color}"];\n'
@@ -1097,6 +1105,16 @@ class JacBasics {
         }
         cls._jac_entry_funcs_ = [*entries.values()];
         cls._jac_exit_funcs_ = [*exits.values()];
+        if issubclass(cls, WalkerArchetype)
+        and 'reports' not in cls.__dict__.get('__annotations__', {}) {
+            if not hasattr(cls, '__annotations__') {
+                cls.__annotations__ = {};
+            }
+            cls.__annotations__['reports'] = list;
+            cls.reports = dataclasses.field(
+                default_factory=`list, init=False, repr=False, compare=False
+            );
+        }
         dataclass(eq=False)(cls);
         return cls;
     }
@@ -1184,8 +1202,8 @@ system,
         _ = JacRuntime.get_program();
         if target.startswith('.') {
             caller_dir = base_path
-            if os.path.isdir(base_path)
-            else os.path.dirname(base_path);
+                if os.path.isdir(base_path)
+                else os.path.dirname(base_path);
             chomp_target = target;
             while chomp_target.startswith('.') {
                 if ((len(chomp_target) > 1) and (chomp_target[1] == '.')) {
@@ -1201,8 +1219,8 @@ system,
             module_name = target;
         }
         caller_dir = base_path
-        if os.path.isdir(base_path)
-        else os.path.dirname(base_path);
+            if os.path.isdir(base_path)
+            else os.path.dirname(base_path);
         original_path = None;
         if (caller_dir and (caller_dir not in sys.path)) {
             original_path = sys.path.copy();
@@ -1225,15 +1243,15 @@ system,
                     file_path = os.path.join(caller_dir, f"{module_name}.py");
                     if os.path.isfile(file_path) {
                         spec_name = '__main__'
-                        if (override_name == '__main__')
-                        else module_name;
+                            if (override_name == '__main__')
+                            else module_name;
                         spec = importlib.util.spec_from_file_location(
                             spec_name, file_path
                         );
                     }
                 }
                 if (not spec or not spec.origin) {
-                    raise ImportError(f"Cannot find module {module_name}") ;
+                    raise ImportError(f"Cannot find module {module_name}");
                 }
                 if (('__main__' in sys.modules) and not reload_module) {
                     module = sys.modules['__main__'];
@@ -1275,7 +1293,7 @@ system,
                     } else {
                         raise ImportError(
                             f"Cannot import name '{item_name}' from '{module_name}'"
-                        ) ;
+                        );
                     }
                 }
                 return `tuple(imported_items) if not absorb else (module, );
@@ -1367,8 +1385,8 @@ system,
                     for file in files
                     if fnmatch.fnmatch(file, filter)
                 ]
-                if filter
-                else files;
+                    if filter
+                    else files;
                 files = [
                     file
                     for file in files
@@ -1535,8 +1553,8 @@ system,
                         and JacRuntimeInterface.check_connect_access(target)
                     ) {
                         JacRuntimeInterface.destroy([anchor])
-                        if anchor.persistent
-                        else JacRuntimeInterface.detach(anchor);
+                            if anchor.persistent
+                            else JacRuntimeInterface.detach(anchor);
                         disconnect_occurred = True;
                     }
                     if (
@@ -1546,8 +1564,8 @@ system,
                         and JacRuntimeInterface.check_connect_access(source)
                     ) {
                         JacRuntimeInterface.destroy([anchor])
-                        if anchor.persistent
-                        else JacRuntimeInterface.detach(anchor);
+                            if anchor.persistent
+                            else JacRuntimeInterface.detach(anchor);
                         disconnect_occurred = True;
                     }
                 }
@@ -1611,7 +1629,7 @@ system,
                     if hasattr(`edge, fld) {
                         setattr(`edge, fld, val);
                     } else {
-                        raise ValueError(f"Invalid attribute: {fld}") ;
+                        raise ValueError(f"Invalid attribute: {fld}");
                     }
                 }
             }
@@ -1757,10 +1775,40 @@ class JacAPIServer {
         return JacAPIServer;
     }
 
-    """Create the API server instance."""
-    static def create_server(jac_server: JacServer, host: str, port: int) -> HTTPServer {
+    """Create the API server instance.
+
+    If the specified port is in use, tries subsequent ports up to max_retries times.
+    Updates jac_server.port with the actual bound port if different from requested.
+    """
+    static def create_server(
+        jac_server: JacServer, host: str, port: int, max_retries: int = 10
+    ) -> HTTPServer {
         handler_class = jac_server.create_handler();
-        return HTTPServer((host, port), handler_class);
+        current_port = port;
+        for _ in range(max_retries) {
+            try {
+                server = HTTPServer((host, current_port), handler_class);
+                if current_port != port {
+                    import from jaclang.cli.console { console }
+                    console.print(
+                        f"  Port {port} is in use, using port {current_port} instead",
+                        style="warning"
+                    );
+                    jac_server.port = current_port;  # Update the server's port
+                }
+                return server;
+            } except OSError as e {
+                # errno 98 = EADDRINUSE (Linux), errno 10048 = WSAEADDRINUSE (Windows)
+                if e.errno in (98, 10048) or "Address already in use" in str(e) {
+                    current_port += 1;
+                } else {
+                    raise;
+                }
+            }
+        }
+        raise OSError(
+            f"Could not find an available port after trying {port}-{current_port}"
+        );
     }
 
     """Render HTML page for client function."""
@@ -1770,33 +1818,37 @@ class JacAPIServer {
         args: dict[(str, Any)],
         username: str
     ) -> dict[(str, Any)] {
-        import from jaclang.runtimelib.server { JacSerializer }
+        import from jaclang.runtimelib.serializer { Serializer }
         introspector.load();
         available_exports = (
             `set(introspector._client_manifest.get('exports', []))
             or `set(introspector.get_client_functions().keys())
         );
         if (function_name not in available_exports) {
-            raise ValueError(f"Client function '{function_name}' not found") ;
+            raise ValueError(f"Client function '{function_name}' not found");
         }
         bundle_hash = introspector.ensure_bundle();
         arg_order = `list(
             introspector._client_manifest.get('params', {}).get(function_name, [])
         );
         globals_payload = {
-            name: JacSerializer.serialize(value)
+            name: Serializer.serialize(value, api_mode=True)
             for (name, value) in introspector._collect_client_globals().items()
         };
         initial_state = {
             'module': introspector._module.__name__
-            if introspector._module
-            else introspector.module_name,
+                if introspector._module
+                else introspector.module_name,
             'function': function_name,
             'args': {
-                key: JacSerializer.serialize(value) for (key, value) in args.items()
+                key: Serializer.serialize(value, api_mode=True)
+                for (key, value) in args.items()
             },
             'globals': globals_payload,
-            'argOrder': arg_order
+            'argOrder': arg_order,
+            'endpointEffects': introspector._client_manifest.get(
+                'endpoint_effects', {}
+            )
         };
         safe_initial_json = json.dumps(initial_state).replace('</', '<\\/');
         page = f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>{html.escape(
@@ -1859,7 +1911,7 @@ class JacResponseBuilder {
         file_path: Path,
         content_type: (str | None) = None
     ) -> None {
-        raise NotImplementedError('send_static_file method is not implemented') ;
+        raise NotImplementedError('send_static_file method is not implemented');
     }
 }
 
@@ -1971,13 +2023,37 @@ allowed
     static def by_operator(lhs: Any, rhs: Any) -> Any {
         raise NotImplementedError(
             "The 'by' operator is not yet implemented. This feature is reserved for future use."
-        ) ;
+        );
+    }
+
+    """Return the default LLM model for use with 'by llm()' syntax.
+
+        The builtin 'llm' name resolves to this method via the plugin hook
+        system. Base implementation returns a minimal stub with call_params={}
+        and __call__ returning self, which works with the random-value fallback
+        in call_llm. Plugins (e.g. byllm) override this to return a configured
+        Model instance based on jac.toml settings.
+        """
+    static def default_llm -> object {
+        _cache = getattr(JacByLLM, '_default_llm_instance', None);
+        if (_cache is not None) {
+            return _cache;
+        }
+        def _stub_call(_self: object, **kwargs: object) -> object {
+            return _self;
+        }
+        _StubCls = `type(
+            '_DefaultLLM', (object, ), {'call_params': {}, '__call__': _stub_call}
+        );
+        instance = _StubCls();
+        JacByLLM._default_llm_instance = instance;
+        return instance;
     }
 
     """Add MTIR to the node's MTIR map."""
     static def add_mtir_to_map(scope: str, mtir: Info) -> None {
         if (JacRuntime.program is None) {
-            raise AttributeError('JacRuntime.program is not initialized') ;
+            raise AttributeError('JacRuntime.program is not initialized');
         }
         JacRuntime.program.mtir_map[scope] = mtir;
     }
@@ -1985,10 +2061,10 @@ allowed
     """Get MTIR from the node's MTIR map."""
     static def get_mtir_from_map(scope: str) -> (Info | None) {
         if (JacRuntime.program is None) {
-            raise AttributeError('JacRuntime.program is not initialized') ;
+            raise AttributeError('JacRuntime.program is not initialized');
         }
         if (scope not in JacRuntime.program.mtir_map) {
-            raise KeyError(f"MTIR not found for scope {scope}") ;
+            raise KeyError(f"MTIR not found for scope {scope}");
         }
         return JacRuntime.program.mtir_map[scope];
     }
@@ -2202,7 +2278,7 @@ code.
             node_instance = node_class(**attributes);
             return node_instance;
         } else {
-            raise ValueError(f"Node {node_name} not found.") ;
+            raise ValueError(f"Node {node_name} not found.");
         }
     }
 
@@ -2223,7 +2299,7 @@ code.
             walker_instance = walker_class(**attributes);
             return walker_instance;
         } else {
-            raise ValueError(f"Walker {walker_name} not found.") ;
+            raise ValueError(f"Walker {walker_name} not found.");
         }
     }
 
@@ -2490,6 +2566,7 @@ with entry {
 class JacRuntime(JacRuntimeInterface) {
     with entry {
         base_path_dir: (str | None) = os.getcwd();
+        full_target_path: (str | None) = None;
         compiler: (JacCompiler | None) = None;
         program: (JacProgram | None) = None;
         pool: ThreadPoolExecutor = ThreadPoolExecutor();
@@ -2530,8 +2607,8 @@ class JacRuntime(JacRuntimeInterface) {
             JacRuntime.base_path_dir = None;
         } else {
             JacRuntime.base_path_dir = base_path
-            if os.path.isdir(base_path)
-            else os.path.dirname(base_path);
+                if os.path.isdir(base_path)
+                else os.path.dirname(base_path);
         }
     }
 

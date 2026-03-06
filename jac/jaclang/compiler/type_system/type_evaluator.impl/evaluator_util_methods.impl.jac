@@ -1,23 +1,19 @@
-impl TypeEvaluator._create_dataclass_init_method(
-    class_type: types.ClassType
-) -> types.FunctionType {
+"""Build field parameters from class MRO for synthesized constructors."""
+impl TypeEvaluator._build_field_params(
+    class_type: types.ClassType, skip_deferred: bool = True
+) -> dict[str, types.Parameter] {
     param_map: dict[str, types.Parameter] = {};
     for cls in class_type.shared.mro[::-1] {
-        # Iterate over the has vars and create parameters.
         for has_var in cls.shared.symbol_table.get_has_vars() {
-            # Skip fields marked with 'by postinit' - they are initialized in postinit method
-            if has_var.defer {
+            if skip_deferred and has_var.defer {
                 continue;
             }
-            # Get parameter type.
             param_type: TypeBase | None = None;
             if has_var.type_tag {
                 var_type_expr = has_var.type_tag.tag;
                 type_cls = self.get_type_of_expression(var_type_expr);
                 param_type = self._convert_to_instance(type_cls);
             }
-
-            # Use dict to deduplicate by name so child class fields override parent fields.
             param_map[has_var.name.value] = types.Parameter(
                 name=has_var.name.value,
                 category=types.ParameterCategory.Positional,
@@ -28,10 +24,47 @@ impl TypeEvaluator._create_dataclass_init_method(
             );
         }
     }
+    return param_map;
+}
+
+impl TypeEvaluator._create_dataclass_init_method(
+    class_type: types.ClassType
+) -> types.FunctionType {
+    param_map = self._build_field_params(class_type, skip_deferred=True);
     parameters = list(param_map.values());
-    # Create and return the __init__ method type.
     return types.FunctionType(
         func_name="__init__", return_type=types.UnknownType(), parameters=parameters,
+    );
+}
+
+"""Create a synthesized __new__ method for NamedTuple classes.
+
+NamedTuple uses __new__ (not __init__) for construction. The synthesized
+__new__ method has parameters matching the declared fields.
+
+Based on Pyright's synthesizeDataClassMethods in dataClasses.ts.
+"""
+impl TypeEvaluator._create_namedtuple_new_method(
+    class_type: types.ClassType
+) -> types.FunctionType {
+    parameters: list[types.Parameter] = [];
+    # Add cls parameter first (NamedTuple __new__ is a classmethod)
+    parameters.append(
+        types.Parameter(
+            name="cls",
+            category=types.ParameterCategory.Positional,
+            param_type=class_type,
+            is_cls=True,
+            param_kind=types.ParamKind.NORMAL,
+        )
+    );
+    param_map = self._build_field_params(class_type, skip_deferred=False);
+    parameters.extend(list(param_map.values()));
+    return types.FunctionType(
+        func_name="__new__",
+        return_type=class_type.clone_as_instance(),
+        parameters=parameters,
+        function_flags=types.FunctionTypeFlags.SynthesizedMethod,
     );
 }
 
@@ -65,6 +98,24 @@ impl TypeEvaluator._lookup_class_member(
     return None;
 }
 
+"""Get the return type of __getattr__ if defined on the class.
+
+When a class defines __getattr__, any attribute access that doesn't match
+an explicit member should return the __getattr__ return type. This follows
+Pyright's applyAttributeAccessOverride pattern.
+"""
+impl TypeEvaluator._get_getattr_return_type(
+    base_type: types.ClassType
+) -> TypeBase | None {
+    if member := self._lookup_class_member(base_type, "__getattr__") {
+        getattr_type = self.get_type_of_symbol(member.symbol);
+        if isinstance(getattr_type, types.FunctionType) {
+            return getattr_type.return_type or types.UnknownType();
+        }
+    }
+    return None;
+}
+
 """Convert a class type to an instance type."""
 impl TypeEvaluator._convert_to_instance(jtype: TypeBase) -> TypeBase {
     # TODO: Grep pyright "Handle type[x] as a special case." They handle `type[x]` as a special case:
@@ -82,6 +133,33 @@ impl TypeEvaluator._convert_to_instance(jtype: TypeBase) -> TypeBase {
         return types.UnionType(types=converted);
     }
     return jtype;
+}
+
+"""Check if a type is already represented in a list (using shared identity for ClassType)."""
+impl TypeEvaluator._type_in_list(ty: TypeBase, type_list: list[TypeBase]) -> bool {
+    for existing in type_list {
+        if isinstance(ty, types.ClassType) and isinstance(existing, types.ClassType) {
+            if ty.shared == existing.shared {
+                return True;
+            }
+        } elif ty is existing {
+            return True;
+        }
+    }
+    return False;
+}
+
+"""Flatten union types and collect unique types into result list."""
+impl TypeEvaluator._collect_unique_types(ty: TypeBase, result: list[TypeBase]) -> None {
+    if isinstance(ty, types.UnionType) {
+        for member in ty.types {
+            self._collect_unique_types(member, result);
+        }
+    } else {
+        if not self._type_in_list(ty, result) {
+            result.append(ty);
+        }
+    }
 }
 
 impl TypeEvaluator._get_enclosing_class(nd: uni.UniNode) -> uni.Archetype | None {
@@ -168,7 +246,8 @@ impl TypeEvaluator._is_unbound_method_call(expr: uni.FuncCall) -> bool {
     # Check if target is Class.method pattern (method on instantiable class)
     if isinstance(expr.target, uni.AtomTrailer) and expr.target.is_attr {
         base_type = self.get_type_of_expression(expr.target.target);
-        if isinstance(base_type, types.ClassType) and base_type.is_instantiable_class() {
+        if isinstance(base_type, types.ClassType)
+        and base_type.is_instantiable_class() {
             # Accessing a method on a class (not instance)
             # Check if accessed member is a method
             if isinstance(expr.target.right, uni.Name) {
@@ -197,9 +276,7 @@ impl TypeEvaluator._set_symbol_to_expr(expr: uni.Expr, sym: uni.Symbol) -> TypeB
 
 """Resolve the imported symbols to the actual symbol."""
 impl TypeEvaluator.resolve_imported_symbols(sym: uni.Symbol) -> uni.Symbol {
-    if (
-        isinstance(sym.decl, uni.Name) and sym.decl.find_parent_of_type(uni.ModuleItem)
-    ) {
+    if (isinstance(sym.decl, uni.Name) and sym.decl.find_parent_of_type(uni.ModuleItem)) {
         mod_item = sym.decl.find_parent_of_type(uni.ModuleItem);
         assert (mod_item is not None);
         self.get_type_of_module(mod_item.from_mod_path);
@@ -340,7 +417,9 @@ impl TypeEvaluator._create_callable_type(
                 error_node,
                 "Callable requires at least one type argument for return type"
             );
-            return types.create_callable_type([], types.UnknownType(), is_gradual=True);
+            return types.create_callable_type(
+                [], types.UnknownType(), is_gradual=True
+            );
         }
         # First argument: parameter types list or ellipsis
         first_arg = type_arg_values[0];
@@ -412,20 +491,36 @@ impl TypeEvaluator._get_special_form_type(
     if not self.prefetch {
         return None;
     }
-    # TODO: handle _SpecialForm types semantically.
-    # Verify symbol_type is _SpecialForm (same shared as our prefetched callable_class)
-    if not (
+
+    # Check if symbol_type is _SpecialForm (same shared as our prefetched callable_class)
+    # This handles types from typing.pyi and typing_extensions.pyi (now properly resolved)
+    is_special_form = (
         isinstance(symbol_type, types.ClassType)
         and self.prefetch.callable_class
         and isinstance(self.prefetch.callable_class, types.ClassType)
         and symbol_type.shared == self.prefetch.callable_class.shared
-    ) {
+    );
+
+    if not is_special_form {
         return None;
     }
+
     # Map special form names to their prefetched types
     match name {
         case "Callable":
             return self.prefetch.callable_class;
+
+        case "Protocol":
+            return self.prefetch.protocol_class;
+
+        case "Final":
+            return self.prefetch.final_class;
+
+        case "LiteralString":
+            return self.prefetch.literal_string_class;
+
+        # TODO: Add Literal[...] annotation parsing support (e.g., x: Literal["a", "b"] = "a")
+        # Requires _create_literal_type() method to parse type args into literal ClassTypes.
 
         # Future special forms:
         # case "Union": return self.prefetch.union_class;
@@ -433,4 +528,83 @@ impl TypeEvaluator._get_special_form_type(
 
     }
     return None;
+}
+
+"""Resolve the filesystem path for the from-clause of an import.
+
+Bare-dot imports (from . import x) have no named module component, so
+resolve_relative_path() is unreliable. Walk up from the current file directly.
+"""
+impl TypeEvaluator._resolve_from_path(from_mod: uni.ModulePath) -> Path {
+    if from_mod.level > 0 and not from_mod.path {
+        # Start from the directory containing the current module file.
+        base = Path(from_mod.loc.mod_path).parent;
+        for _ in range(max(from_mod.level - 1, 0)) {
+            base = base.parent;
+        }
+        return base;
+    }
+    # Named import — use the standard resolver (e.g. from .utils import x).
+    return Path(from_mod.resolve_relative_path());
+}
+
+"""Check if an f-string contains only literal parts (no non-literal interpolations).
+
+An f-string is considered all-literal if:
+1. All parts are String nodes, OR
+2. FormattedValue parts have expressions that evaluate to literal types
+
+This is used to determine if an f-string result should be LiteralString or str.
+Similar to Pyright's isLiteralString check in getTypeOfString().
+"""
+impl TypeEvaluator._is_fstring_all_literal(fstring: uni.FString) -> bool {
+    for part in fstring.parts {
+        if isinstance(part, uni.String) {
+            # String parts are always literal
+            continue;
+        }
+        if isinstance(part, uni.FormattedValue) {
+            # Check if the formatted expression evaluates to a literal type
+            part_type = self.get_type_of_expression(part.format_part);
+            if isinstance(part_type, types.ClassType) {
+                # Accept if it's a literal type or LiteralString
+                if part_type.is_literal_type() {
+                    continue;
+                }
+                if self.prefetch and self.prefetch.literal_string_class {
+                    if isinstance(
+                        self.prefetch.literal_string_class, types.ClassType
+                    ) {
+                        if part_type.shared == self.prefetch.literal_string_class.shared {
+                            continue;
+                        }
+                    }
+                }
+            }
+            # Not a literal type - f-string result is plain str
+            return False;
+        }
+    }
+    return True;
+}
+
+"""Create a synthetic special builtin type with a base class.
+
+Similar to Pyright's createSpecialBuiltInClass which creates types like
+LiteralString as a ClassType with str as base class.
+"""
+impl TypeEvaluator._create_special_builtin_type(
+    name: str, base_class: types.ClassType
+) -> types.ClassType {
+    shared = types.ClassType.ClassDetailsShared(
+        class_name=name,
+        symbol_table=base_class.shared.symbol_table,
+        base_classes=[base_class],
+        mro=[],
+        is_builtin_class=True
+    );
+    special_type = types.ClassType(shared=shared);
+    # Compute MRO: [SpecialType, BaseClass, ...]
+    special_type.shared.mro = [special_type] + base_class.shared.mro;
+    return special_type;
 }

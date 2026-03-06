@@ -68,7 +68,7 @@ test "walker code reloads after file change" {
 test "global variable reloads" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "glob_var.jac";
         # Version 1
         app_file.write_text(
             "glob VERSION = 1;\n"
@@ -116,7 +116,7 @@ test "global variable reloads" {
 test "new walker available after reload" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "walker.jac";
         # Version 1: only one walker
         app_file.write_text(
             "walker walker_one {\n"
@@ -171,7 +171,7 @@ test "new walker available after reload" {
 test "multiple rapid reloads" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "multi_ops.jac";
         app_file.write_text(
             "glob COUNTER = 0;\n"
             "\n"
@@ -214,7 +214,7 @@ test "multiple rapid reloads" {
 test "function code reloads" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "function.jac";
         # Version 1
         app_file.write_text(
             "def get_message() -> str {\n" '    return "Hello Version 1";\n' "}\n"
@@ -250,7 +250,7 @@ test "function code reloads" {
 test "auth token preserved after reload" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "auth.jac";
         app_file.write_text(
             "walker get_status {\n"
             "    can check with Root entry {\n"
@@ -290,7 +290,7 @@ test "auth token preserved after reload" {
 test "user isolation without reload" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "user.jac";
         app_file.write_text(
             "node Secret {\n"
             "    has data: str;\n"
@@ -350,7 +350,7 @@ test "user isolation without reload" {
 test "recovery from syntax error" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "syn_error.jac";
         app_file.write_text(
             "walker get_value {\n"
             "    can check with Root entry {\n"
@@ -381,6 +381,14 @@ test "recovery from syntax error" {
                 client.reload();
             }
 
+            # --- error-overlay check ---
+            entry_file = temp_project / ".jac" / "client" / "compiled" / "_entry.js";
+            if entry_file.exists() {
+                entry_content = entry_file.read_text();
+                assert "errorOverlay" in entry_content , "_entry.js should contain errorOverlay call after a failed reload";
+                assert client._hot_reloader and client._hot_reloader._overlay_entry , "_overlay_entry should be True while an error overlay is active";
+            }
+
             # Fix the syntax error with new value
             app_file.write_text(
                 "walker get_value {\n"
@@ -397,6 +405,15 @@ test "recovery from syntax error" {
             resp2 = client.post("/walker/get_value", json={});
             assert resp2.ok;
             assert resp2.data.get("reports", [{}])[0].get("value") == 3 , "Code not updated after recovery from syntax error";
+
+            # --- error-overlay cleared check ---
+            if entry_file.exists() {
+                restored_content = entry_file.read_text();
+                assert "errorOverlay" not in restored_content , "_entry.js should NOT contain errorOverlay after a successful reload";
+                assert "App" in restored_content or "app" in restored_content , "_entry.js should reference the app component after error is fixed";
+                assert client._hot_reloader
+                and not client._hot_reloader._overlay_entry , "_overlay_entry should be False after the error is resolved";
+            }
         } finally {
             client.close();
         }
@@ -406,7 +423,7 @@ test "recovery from syntax error" {
 test "reload with code change preserves functionality" {
     with TemporaryDirectory() as tmpdir {
         temp_project = Path(tmpdir);
-        app_file = temp_project / "app.jac";
+        app_file = temp_project / "rel_function.jac";
         # Version 1: multiply by 2
         app_file.write_text(
             "def compute(x: int) -> int {\n" "    return x * 2;\n" "}\n"
@@ -431,7 +448,9 @@ test "reload with code change preserves functionality" {
             resp2 = client.post("/function/compute", json={"x": 5});
             assert resp2.ok;
             assert resp2.data.get("result") == 15 ,  # 5 * 3
-             f"Expected 15 (5*3), got {resp2.data.get('result')} - code change not applied";
+             f"Expected 15 (5*3), got {resp2.data.get(
+                'result'
+            )} - code change not applied";
         } finally {
             client.close();
         }
@@ -472,6 +491,35 @@ test "jacjsx import added in real compilation" {
         # JSX code should compile to use __jacJsx
         assert "__jacJsx" in content , "Compiled JS should contain __jacJsx for JSX elements";
         assert "import {__jacJsx" in content or "import{__jacJsx" in content , "__jacJsx is used but import statement is missing";
+        # --- error-overlay: introduce a client compile error ---
+        entry_file = unique_dir / ".jac" / "client" / "compiled" / "_entry.js";
+        bad_file = unique_dir / "app.jac";
+        bad_file.write_text(
+            "cl {\n"
+            "    def app() {\n"
+            "        return <div UNCLOSED;\n"  # malformed JSX / syntax error
+            "    }\n"
+            "}\n"
+        );
+        reloader._recompile_client_code(str(bad_file));
+        # The reloader must write an _entry.js that shows the error overlay
+        overlay_content = entry_file.read_text();
+        assert "errorOverlay" in overlay_content , "_entry.js should contain errorOverlay call when client compilation fails";
+        assert reloader._overlay_entry , "_overlay_entry should be True while client error overlay is active";
+        # --- error-overlay: fix the error and recompile ---
+        bad_file.write_text(
+            "cl {\n"
+            "    def app() {\n"
+            "        return <div>Fixed</div>;\n"
+            "    }\n"
+            "}\n"
+        );
+        reloader._recompile_client_code(str(bad_file));
+        # _entry.js should now point back to the real app (no errorOverlay)
+        restored_content = entry_file.read_text();
+        assert "errorOverlay" not in restored_content , "_entry.js should NOT contain errorOverlay after client compile is fixed";
+        assert "App" in restored_content or "app" in restored_content , "_entry.js should reference the app component once the error is resolved";
+        assert not reloader._overlay_entry , "_overlay_entry should be False after client error is resolved";
     }
 }
 
@@ -625,5 +673,127 @@ test "tsx component copied and updated on change" {
         reloader._copy_frontend_files(str(tsx_file));
         assert output_file.exists() , "TSX component file should still exist after update";
         assert output_file.read_text() == updated_content , "TSX component content was not updated in compiled directory";
+    }
+}
+
+# --- TestHMRImplFileReload ---
+test "server impl file reloads base jac file" {
+    """Test that changing a .impl.jac file triggers reload of its base .jac file."""
+    with TemporaryDirectory() as tmpdir {
+        temp_project = Path(tmpdir);
+        # Create base server-side .jac file with abstract method
+        base_file = temp_project / "calculator.jac";
+        base_file.write_text(
+            "obj Calculator {\n"
+            "    def add(a: int, b: int) -> int;\n"
+            "}\n"
+            "\n"
+            "walker calculate {\n"
+            "    has x: int = 5, y: int = 3;\n"
+            "    can compute with Root entry {\n"
+            "        calc = Calculator();\n"
+            "        result = calc.add(self.x, self.y);\n"
+            '        report {"result": result};\n'
+            "    }\n"
+            "}\n"
+        );
+        # Create .impl.jac file - Version 1
+        impl_file = temp_project / "calculator.impl.jac";
+        impl_file.write_text(
+            "impl Calculator.add(a: int, b: int) -> int {\n"
+            "    return a + b;  # Simple addition\n"
+            "}\n"
+        );
+        client = JacTestClient.from_file(str(base_file), base_path=str(temp_project));
+        try {
+            client.register_user("testuser", "password123");
+
+            # Call walker - should return 8 (5 + 3)
+            response1 = client.post("/walker/calculate", json={});
+            assert response1.ok;
+            reports1 = response1.data.get("reports", []);
+            assert len(reports1) > 0;
+            assert reports1[0].get("result") == 8;
+
+            # Version 2: Update impl file to multiply
+            impl_file.write_text(
+                "impl Calculator.add(a: int, b: int) -> int {\n"
+                "    return a * b;  # Now multiply instead\n"
+                "}\n"
+            );
+
+            # Trigger reload
+            client.reload();
+
+            # Call walker again - should now return 15 (5 * 3)
+            response2 = client.post("/walker/calculate", json={});
+            assert response2.ok;
+            reports2 = response2.data.get("reports", []);
+            assert len(reports2) > 0;
+            assert reports2[0].get("result") == 15;
+
+            # Verify the value actually changed
+            assert reports1[0].get("result") != reports2[0].get("result");
+        } finally {
+            client.close();
+        }
+    }
+}
+
+test "client impl file reloads base cl.jac file" {
+    """Test that changing a .impl.jac file triggers recompilation of its base .cl.jac file."""
+    with TemporaryDirectory() as tmpdir {
+        unique_dir = Path(tmpdir) / f"project_{uuid.uuid4().hex[:8]}";
+        unique_dir.mkdir(parents=True, exist_ok=True);
+        compiled_dir = unique_dir / ".jac" / "client" / "compiled";
+        compiled_dir.mkdir(parents=True, exist_ok=True);
+        # Create base client-side .cl.jac file
+        base_file = unique_dir / "Button.cl.jac";
+        base_file.write_text(
+            "cl {\n"
+            "    obj ButtonProps {\n"
+            "        def get_label() -> str;\n"
+            "    }\n"
+            "\n"
+            "    def Button(props: ButtonProps) {\n"
+            "        label = props.get_label();\n"
+            "        return <button>{label}</button>;\n"
+            "    }\n"
+            "}\n"
+        );
+        # Create .impl.jac file - Version 1
+        impl_file = unique_dir / "Button.impl.jac";
+        impl_file.write_text(
+            "cl {\n"
+            "    impl ButtonProps.get_label() -> str {\n"
+            '        return "Click Me";\n'
+            "    }\n"
+            "}\n"
+        );
+        watcher = JacFileWatcher(watch_paths=[str(unique_dir)], _debounce_ms=50);
+        reloader = HotReloader(
+            base_path=str(unique_dir), module_name="Button", watcher=watcher
+        );
+        # Initial compilation
+        reloader._recompile_client_code(str(base_file));
+        output_file = unique_dir / ".jac" / "client" / "compiled" / "Button.js";
+        assert output_file.exists() , "Initial JS file was not created";
+        content1 = output_file.read_text();
+        assert "Click Me" in content1;
+        # Version 2: Update impl file to change label
+        impl_file.write_text(
+            "cl {\n"
+            "    impl ButtonProps.get_label() -> str {\n"
+            '        return "Submit Now";\n'
+            "    }\n"
+            "}\n"
+        );
+        # Simulate impl file change - should trigger base file recompilation
+        reloader._process_change(str(impl_file));
+        # Check that JS was updated
+        assert output_file.exists() , "JS file should exist after impl change";
+        content2 = output_file.read_text();
+        assert "Submit Now" in content2 , "JS content should reflect impl file change";
+        assert "Click Me" not in content2 , "Old label should not be in updated JS";
     }
 }

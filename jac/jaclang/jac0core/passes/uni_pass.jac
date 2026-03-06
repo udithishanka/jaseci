@@ -12,7 +12,7 @@ with entry {
 
 glob T = TypeVar('T', bound=uni.UniNode);
 """Abstract class for IR passes."""
-class UniPass(Transform[(uni.Module, uni.Module)]) {
+class UniPass(Transform[uni.Module, uni.Module]) {
     """Initialize parser."""
     def init(
         self: UniPass,
@@ -53,7 +53,7 @@ class UniPass(Transform[(uni.Module, uni.Module)]) {
             }
         } elif len(nd.kid) {
             if not brute_force {
-                raise ValueError("Node has no sub_node_tab. " + str(nd)) ;
+                raise ValueError("Node has no sub_node_tab. " + str(nd));
             } else {
                 for i in nd.kid {
                     if isinstance(i, typ) {

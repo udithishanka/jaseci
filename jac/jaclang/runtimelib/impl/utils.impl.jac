@@ -60,44 +60,44 @@ impl extract_params(
                 } elif (key == 'incl_info') {
                     if isinstance(value, uni.AtomUnit) {
                         var_name = value.value.right.value
-                        if (
-                            isinstance(value.value, uni.AtomTrailer)
-                            and isinstance(value.value.right, uni.Name)
-                        )
-                        else value.value.value
-                        if isinstance(value.value, uni.Name)
-                        else '';
+                            if (
+                                isinstance(value.value, uni.AtomTrailer)
+                                and isinstance(value.value.right, uni.Name)
+                            )
+                            else value.value.value
+                                if isinstance(value.value, uni.Name)
+                                else '';
                         include_info.append((var_name, value.gen.py_ast[0]));
                     } elif (isinstance(value, uni.TupleVal) and value.values) {
                         for i in value.values {
                             var_name = i.right.value
-                            if (
-                                isinstance(i, uni.AtomTrailer)
-                                and isinstance(i.right, uni.Name)
-                            )
-                            else i.value if isinstance(i, uni.Name) else '';
+                                if (
+                                    isinstance(i, uni.AtomTrailer)
+                                    and isinstance(i.right, uni.Name)
+                                )
+                                else i.value if isinstance(i, uni.Name) else '';
                             include_info.append((var_name, i.gen.py_ast[0]));
                         }
                     }
                 } elif (key == 'excl_info') {
                     if isinstance(value, uni.AtomUnit) {
                         var_name = value.value.right.value
-                        if (
-                            isinstance(value.value, uni.AtomTrailer)
-                            and isinstance(value.value.right, uni.Name)
-                        )
-                        else value.value.value
-                        if isinstance(value.value, uni.Name)
-                        else '';
+                            if (
+                                isinstance(value.value, uni.AtomTrailer)
+                                and isinstance(value.value.right, uni.Name)
+                            )
+                            else value.value.value
+                                if isinstance(value.value, uni.Name)
+                                else '';
                         exclude_info.append((var_name, value.gen.py_ast[0]));
                     } elif (isinstance(value, uni.TupleVal) and value.values) {
                         for i in value.values {
                             var_name = i.right.value
-                            if (
-                                isinstance(i, uni.AtomTrailer)
-                                and isinstance(i.right, uni.Name)
-                            )
-                            else i.value if isinstance(i, uni.Name) else '';
+                                if (
+                                    isinstance(i, uni.AtomTrailer)
+                                    and isinstance(i.right, uni.Name)
+                                )
+                                else i.value if isinstance(i, uni.Name) else '';
                             exclude_info.append((var_name, i.gen.py_ast[0]));
                         }
                     }
@@ -152,8 +152,8 @@ impl traverse_graph(
             and (other_nd := other_nda.archetype)
         ) {
             new_con = (nd, other_nd, `edge.archetype)
-            if not is_in_edge
-            else (other_nd, nd, `edge.archetype);
+                if not is_in_edge
+                else (other_nd, nd, `edge.archetype);
             if ((nd in node_depths) and (node_depths[nd] is not None)) {
                 if (other_nd in node_depths) {
                     node_depths[nd] = min(
@@ -165,7 +165,7 @@ impl traverse_graph(
                 } elif other_nd {
                     node_depths[other_nd] = min((cur_depth + 1), (node_depths[nd] + 1));
                 } else {
-                    raise ValueError('Edge is detached from node in graph') ;
+                    raise ValueError('Edge is detached from node in graph');
                 }
             }
             if (
@@ -235,4 +235,48 @@ impl sys_path_context(path: str) -> Iterator[None] {
             sys.path.remove(path);
         }
     }
+}
+
+"""Get project name from jac.toml if exists, None otherwise."""
+impl get_name -> str | None {
+    import from pathlib { Path }
+    import from jaclang.project.config { get_config }
+    import from jaclang.jac0core.runtime { JacRuntime }
+
+    if not JacRuntime.full_target_path {
+        return None;
+    }
+    file_path = Path(JacRuntime.full_target_path);
+
+    try {
+        # Check ONLY the same directory as the entry file (not parent directories)
+        cfg = get_config(start_path=file_path.parent, force_discover=False);
+        if cfg and cfg.toml_path and cfg.project.name {
+            # Verify the config is from the SAME directory, not a parent
+            if cfg.toml_path.parent == file_path.parent {
+                return cfg.project.name;
+            }
+        }
+    } except Exception {
+        ;  # No config found or error
+    }
+    # No project found → use filename stem for standalone files
+    stem = file_path.stem;
+    return stem if stem not in ['jac', '__main__'] else None;
+}
+
+"""Get database path:
+- Projects (jac.toml in same dir) → .jac/data/project-name.db
+- Standalone files (no jac.toml) → .jac/data/filename.db
+"""
+impl get_db_path(base_path: str) -> (str | None) {
+    import from pathlib { Path }
+    data_dir = Path(base_path) / ".jac" / "data";
+    # Get project name (either from jac.toml in same dir, or filename stem)
+    if (project_name := get_name()) {
+        return str(data_dir / f"{project_name}.db");
+    }
+
+    # Fallback for files like __main__.jac
+    return str(data_dir / "main.db");
 }

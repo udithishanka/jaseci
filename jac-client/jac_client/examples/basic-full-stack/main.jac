@@ -54,47 +54,64 @@ cl {
         }
 
         # Toggle todo completion status
-        async def toggleTodo(id: any) -> None {
+        async def toggleTodo(id: Any) -> None {
             print("toggleTodo", id);
             id spawn toggle_todo();
-            todos = todos.map(
-                lambda todo: any  -> any { if todo._jac_id == id {
-                    updatedTodo = {
-                        "_jac_id": todo._jac_id,
-                        "text": todo.text,
-                        "done": not todo.done,
-                        "id": todo.id
-                    };
-                    return updatedTodo;
-                }return todo; }
-            );
+            todos = [
+                {
+                    "_jac_id": todo._jac_id,
+                    "text": todo.text,
+                    "done": not todo.done,
+                    "id": todo.id
+                }
+                    if todo._jac_id == id
+                    else todo for todo in todos
+            ];
         }
 
         # Delete a todo
-        def deleteTodo(id: any) -> None {
-            todos = todos.filter(lambda todo: any  -> bool { return todo.id != id; });
+        def deleteTodo(id: Any) -> None {
+            todos = [
+                todo
+                for todo in todos
+                if todo.id != id
+            ];
         }
 
         # Clear all completed todos
         def clearCompleted -> None {
-            todos = todos.filter(lambda todo: any  -> bool { return not todo.done; });
+            todos = [
+                todo
+                for todo in todos
+                if not todo.done
+            ];
         }
 
         # Filter todos based on current filter
         def getFilteredTodos -> list {
             if filter == "active" {
-                return todos.filter(
-                    lambda todo: any  -> bool { return not todo.done; }
-                );
+                return [
+                    todo
+                    for todo in todos
+                    if not todo.done
+                ];
             } elif filter == "completed" {
-                return todos.filter(lambda todo: any  -> bool { return todo.done; });
+                return [
+                    todo
+                    for todo in todos
+                    if todo.done
+                ];
             }
             return todos;
         }
 
         # Count active todos
         activeCount = len(
-            todos.filter(lambda todo: any  -> bool { return not todo.done; })
+            [
+                todo
+                for todo in todos
+                if not todo.done
+            ]
         );
 
         filteredTodos = getFilteredTodos();
@@ -136,8 +153,8 @@ cl {
                     <input
                         type="text"
                         value={inputValue}
-                        onChange={lambda e: any  -> None { inputValue = e.target.value;}}
-                        onKeyPress={lambda e: any  -> None { if e.key == "Enter" {
+                        onChange={lambda e: Any  -> None { inputValue = e.target.value;}}
+                        onKeyPress={lambda e: Any  -> None { if e.key == "Enter" {
                             addTodo();
                         }}}
                         placeholder="What needs to be done?"
@@ -247,19 +264,18 @@ cl {
                         >
                             {(
                                 "No todos yet. Add one above!"
-                                if filter == "all"
-                                else (
-                                    "No active todos!"
-                                    if filter == "active"
-                                    else "No completed todos!"
-                                )
+                                    if filter == "all"
+                                    else (
+                                        "No active todos!"
+                                            if filter == "active"
+                                            else "No completed todos!"
+                                    )
                             )}
                         </div>
                     )
-                    if len(filteredTodos) == 0
-                    else (
-                        filteredTodos.map(
-                            lambda todo: any  -> any { return
+                        if len(filteredTodos) == 0
+                        else (
+                            [
                                 <div
                                     key={todo._jac_id}
                                     style={{
@@ -315,9 +331,9 @@ cl {
                                     >
                                         Delete
                                     </button>
-                                </div>; }
-                        )
-                    )}
+                                </div> for todo in filteredTodos
+                            ]
+                        )}
                 </div>
                 # Stats and clear completed button
                 {(
@@ -353,12 +369,14 @@ cl {
                                 Clear Completed
                             </button>
                         )
-                        if todos.some(lambda todo: any  -> bool { return todo.done; })
-                        else None}
+                            if todos.some(
+                                lambda todo: Any  -> bool { return todo.done; }
+                            )
+                            else None}
                     </div>
                 )
-                if len(todos) > 0
-                else None}
+                    if len(todos) > 0
+                    else None}
             </div>;
     }
 }

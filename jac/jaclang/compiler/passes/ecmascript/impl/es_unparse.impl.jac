@@ -33,7 +33,9 @@ impl JSCodeGenerator.gen_export_specifier(nd: es.ExportSpecifier) -> str {
 }
 
 """Generate export named declaration."""
-impl JSCodeGenerator.gen_export_named_declaration(nd: es.ExportNamedDeclaration) -> str {
+impl JSCodeGenerator.gen_export_named_declaration(
+    nd: es.ExportNamedDeclaration
+) -> str {
     if nd.declaration {
         return f"{self.indent()}export {self.generate(nd.declaration).lstrip()}";
     }
@@ -53,7 +55,9 @@ impl JSCodeGenerator.gen_import_namespace_specifier(
 }
 
 """Generate import default specifier."""
-impl JSCodeGenerator.gen_import_default_specifier(nd: es.ImportDefaultSpecifier) -> str {
+impl JSCodeGenerator.gen_import_default_specifier(
+    nd: es.ImportDefaultSpecifier
+) -> str {
     return self.generate(nd.local);
 }
 
@@ -305,9 +309,17 @@ impl JSCodeGenerator.gen_arrow_function_expression(
 ) -> str {
     async_str = 'async ' if nd.async_ else '';
     params = ', '.join(self.generate(p) for p in nd.params);
-    params = self.generate(nd.params[0]) if (len(nd.params) == 1) else f"({params})";
+    if len(nd.params) == 1
+    and not isinstance(nd.params[0], (es.ArrayPattern, es.ObjectPattern)) {
+        params = self.generate(nd.params[0]);
+    } else {
+        params = f"({params})";
+    }
     if nd.expression {
         body = self.generate(nd.body);
+        if isinstance(nd.body, es.ObjectExpression) {
+            body = f"({body})";
+        }
         return f"{async_str}{params} => {body}";
     } else {
         body = self.generate(nd.body);
@@ -368,7 +380,9 @@ impl JSCodeGenerator.gen_literal(nd: es.Literal) -> str {
         return nd.raw;
     }
     if isinstance(nd.value, str) {
-        escaped = nd.value.replace('\\', '\\\\').replace('"', '\\"').replace(
+        escaped = nd.value.replace('\\', '\\\\').replace(
+            '"', '\\"'
+        ).replace(
             '\n', '\\n'
         ).replace(
             '\r', '\\r'
@@ -489,8 +503,8 @@ impl JSCodeGenerator.gen_function_declaration(nd: es.FunctionDeclaration) -> str
 """Generate switch case."""
 impl JSCodeGenerator.gen_switch_case(nd: es.SwitchCase) -> str {
     result = f"{self.indent()}case {self.generate(nd.test)}:\\n"
-    if nd.test
-    else f"{self.indent()}default:\\n";
+        if nd.test
+        else f"{self.indent()}default:\\n";
     self.indent_level += 1;
     for stmt in nd.consequent {
         result += f"{self.generate(stmt)}\\n";

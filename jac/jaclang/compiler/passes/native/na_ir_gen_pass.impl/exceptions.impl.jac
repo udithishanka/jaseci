@@ -42,10 +42,13 @@ impl NaIRGenPass._declare_exception_runtime -> None {
         self._exc_handler_global = handler_global;
     }
     # Declare setjmp: i32 setjmp(i8*)  — takes pointer to jmp_buf
+    # Must mark as returns_twice so LLVM optimizer doesn't break setjmp/longjmp control flow
     jmp_buf_ptr = ir.ArrayType(ir.IntType(8), 200).as_pointer();
-    self._get_or_declare_extern("setjmp", i32, [i8p]);
+    setjmp_fn = self._get_or_declare_extern("setjmp", i32, [i8p]);
+    setjmp_fn.attributes.add("returns_twice");
     # Declare longjmp: void longjmp(i8*, i32)
-    self._get_or_declare_extern("longjmp", ir.VoidType(), [i8p, i32]);
+    longjmp_fn = self._get_or_declare_extern("longjmp", ir.VoidType(), [i8p, i32]);
+    longjmp_fn.attributes.add("noreturn");
     # Declare abort for uncaught exceptions
     self._get_or_declare_extern("abort", ir.VoidType(), []);
     # Emit __jac_exc_push: initialize state and push onto handler stack
@@ -73,14 +76,10 @@ impl NaIRGenPass._emit_exc_push_helper -> None {
     # state.prev_handler = __jac_current_handler
     prev_handler = b.load(self._exc_handler_global, name="prev");
     prev_as_i8p = b.bitcast(prev_handler, i8p, name="prev.i8p");
-    prev_ptr = b.gep(
-        state, [ir.Constant(i32, 0), ir.Constant(i32, 3)], name="prev.ptr"
-    );
+    prev_ptr = b.gep(state, [ir.Constant(i32, 0), ir.Constant(i32, 3)], name="prev.ptr");
     b.store(prev_as_i8p, prev_ptr);
     # state.exception_type = 0
-    type_ptr = b.gep(
-        state, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="type.ptr"
-    );
+    type_ptr = b.gep(state, [ir.Constant(i32, 0), ir.Constant(i32, 2)], name="type.ptr");
     b.store(ir.Constant(i32, 0), type_ptr);
     # state.exception_obj = null
     obj_ptr = b.gep(state, [ir.Constant(i32, 0), ir.Constant(i32, 1)], name="obj.ptr");
@@ -227,6 +226,46 @@ impl NaIRGenPass._emit_runtime_raise(
 }
 
 # ─── Exception Type Registry ────────────────────────────────
+
+# Canonical exception hierarchy: child → direct parent.
+# Used by _get_exc_descendants to enable hierarchy-aware matching.
+glob _EXC_PARENT: dict[str, str] = {
+         "Exception": "BaseException",
+         "ArithmeticError": "Exception",
+         "ZeroDivisionError": "ArithmeticError",
+         "OverflowError": "ArithmeticError",
+         "FloatingPointError": "ArithmeticError",
+         "LookupError": "Exception",
+         "IndexError": "LookupError",
+         "KeyError": "LookupError",
+         "ValueError": "Exception",
+         "TypeError": "Exception",
+         "AttributeError": "Exception",
+         "RuntimeError": "Exception",
+         "NotImplementedError": "RuntimeError",
+         "RecursionError": "RuntimeError",
+         "OSError": "Exception",
+         "FileNotFoundError": "OSError",
+         "FileExistsError": "OSError",
+         "PermissionError": "OSError",
+         "TimeoutError": "OSError",
+         "IsADirectoryError": "OSError",
+         "NotADirectoryError": "OSError",
+         "AssertionError": "Exception",
+         "ImportError": "Exception",
+         "ModuleNotFoundError": "ImportError",
+         "NameError": "Exception",
+         "UnboundLocalError": "NameError",
+         "StopIteration": "Exception",
+         "StopAsyncIteration": "Exception",
+         "EOFError": "Exception",
+         "MemoryError": "Exception",
+         "ReferenceError": "Exception",
+         "KeyboardInterrupt": "BaseException",
+         "SystemExit": "BaseException",
+         "GeneratorExit": "BaseException"
+     };
+
 """Get or register an exception type ID for type-based matching."""
 impl NaIRGenPass._get_or_register_exc_type(exc_name: str) -> int {
     if exc_name in self._exc_type_registry {
@@ -241,6 +280,29 @@ impl NaIRGenPass._get_or_register_exc_type(exc_name: str) -> int {
         self._exc_type_registry["Exception"] = 0;
     }
     return type_id;
+}
+
+"""Get all descendant type names for a given exception type.
+
+Walks _EXC_PARENT to find all types whose ancestor chain includes type_name.
+Registers each descendant via _get_or_register_exc_type to ensure IDs exist.
+Returns the list of descendant names (NOT including type_name itself).
+"""
+impl NaIRGenPass._get_exc_descendants(type_name: str) -> list[str] {
+    descendants: list[str] = [];
+    for (child, parent) in _EXC_PARENT.items() {
+        # Walk the ancestor chain of child to see if type_name is an ancestor.
+        cur = child;
+        while cur in _EXC_PARENT {
+            if _EXC_PARENT[cur] == type_name {
+                descendants.append(child);
+                self._get_or_register_exc_type(child);
+                break;
+            }
+            cur = _EXC_PARENT[cur];
+        }
+    }
+    return descendants;
 }
 
 # ─── Raise Statement Codegen ────────────────────────────────
@@ -307,6 +369,12 @@ impl NaIRGenPass._codegen_try(nd: uni.TryStmt) -> None {
     exc_state_type = self._exc_state_type;
     exc_state_ptr = exc_state_type.as_pointer();
     func = self.builder.function;
+    # Prevent the optimizer from promoting allocas to SSA across setjmp.
+    # Without optnone, LLVM's SROA/mem2reg promotes local variables to
+    # registers even with returns_twice on setjmp, causing values modified
+    # between setjmp and longjmp to be lost (e.g. result=1 before raise).
+    func.attributes.add("optnone");
+    func.attributes.add("noinline");
     # Create basic blocks
     setup_bb = func.append_basic_block(name="try.setup");
     body_bb = func.append_basic_block(name="try.body");
@@ -407,12 +475,28 @@ impl NaIRGenPass._codegen_try(nd: uni.TryStmt) -> None {
                 # Catch-all: always matches
                 self.builder.branch(handler_bb);
             } else {
+                # Hierarchy-aware matching: check the caught type AND all
+                # its descendants. E.g. "except ArithmeticError" also catches
+                # ZeroDivisionError, OverflowError, FloatingPointError.
+                descendants = self._get_exc_descendants(caught_type_name);
                 does_match = self.builder.icmp_signed(
                     "==",
                     exc_type_val,
                     ir.Constant(i32, caught_type_id),
                     name=f"exc.match.{i}"
                 );
+                for desc_name in descendants {
+                    desc_id = self._get_or_register_exc_type(desc_name);
+                    desc_match = self.builder.icmp_signed(
+                        "==",
+                        exc_type_val,
+                        ir.Constant(i32, desc_id),
+                        name=f"exc.match.{i}.{desc_name}"
+                    );
+                    does_match = self.builder.or_(
+                        does_match, desc_match, name=f"exc.or.{i}.{desc_name}"
+                    );
+                }
                 if next_dispatch_bb is not None {
                     self.builder.cbranch(does_match, handler_bb, next_dispatch_bb);
                 } else {
@@ -436,8 +520,8 @@ impl NaIRGenPass._codegen_try(nd: uni.TryStmt) -> None {
             # Bind exception variable if "except ExcType as e"
             if except_node.name is not None {
                 var_name = except_node.name.value
-                if isinstance(except_node.name, uni.Name)
-                else str(except_node.name);
+                    if isinstance(except_node.name, uni.Name)
+                    else str(except_node.name);
                 # Re-load exc_obj in this block
                 handler_exc_obj = self.builder.load(exc_obj_ptr, name="exc.bound.obj");
                 alloca = self._entry_alloca(i8p, var_name);
