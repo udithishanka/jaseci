@@ -456,6 +456,7 @@ export default defineConfig({{
     sourcemap: true, // Enable source maps for better error messages{build_overrides_str}
   }},
   server: {{
+    host: true,
     watch: {{
       usePolling: true,
       interval: 100,
