@@ -211,8 +211,9 @@ class KubernetesSandbox(SandboxEnvironment) {
         cm_name = f"{sandbox_id}-code";
 
         # Walk code_path and collect files
+        import base64 as b64;
         data: dict[str, str] = {};
-        binary_data: dict[str, bytes] = {};
+        binary_data: dict[str, str] = {};
         total_size = 0;
 
         if os.path.isdir(code_path) {
@@ -266,7 +267,7 @@ class KubernetesSandbox(SandboxEnvironment) {
                             break;
                         }
                         safe_key = rel.replace("/", "--");
-                        binary_data[safe_key] = raw;
+                        binary_data[safe_key] = b64.b64encode(raw).decode("ascii");
                     }
                 }
             }

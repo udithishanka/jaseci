@@ -29,7 +29,8 @@ glob log = _setup_logging(),
      INTERNAL_PORT = int(os.environ.get("INTERNAL_PORT", "8000")),
      PROXY_PORT = int(os.environ.get("PROXY_PORT", "8080")),
      routes: dict[str, dict] = {},
-     _session: aiohttp.ClientSession | None = None;
+     _session: aiohttp.ClientSession | None = None,
+     _ws_session: aiohttp.ClientSession | None = None;
 
 
 """Watch sandbox pods and maintain routing table."""
@@ -108,22 +109,48 @@ async def _get_session -> aiohttp.ClientSession {
     return _session;
 }
 
+"""Get or create WebSocket session (no timeout for long-lived connections)."""
+async def _get_ws_session -> aiohttp.ClientSession {
+    global _ws_session;
+    if _ws_session is None or _ws_session.closed {
+        _ws_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None));
+    }
+    return _ws_session;
+}
+
 """Health check endpoint."""
 async def health(request: web.Request) -> web.Response {
     return web.Response(text=f"ok ({len(routes)} routes)");
+}
+
+"""Check if request is a browser navigation (expects HTML)."""
+def _wants_html(request: web.Request) -> bool {
+    accept = request.headers.get("Accept", "");
+    return "text/html" in accept;
 }
 
 """Handle incoming HTTP and WebSocket requests."""
 async def handle_request(request: web.Request) -> web.Response {
     sandbox_id = _get_sandbox_id(request);
     route = routes.get(sandbox_id);
+    is_nav = _wants_html(request);
 
     if not route {
-        return web.Response(status=200, text=LOADING_HTML, content_type="text/html");
+        if is_nav {
+            return web.Response(
+                status=200, text=LOADING_HTML, content_type="text/html"
+            );
+        }
+        return web.Response(status=502, text="Sandbox not found");
     }
 
     if not route["ready"] {
-        return web.Response(status=200, text=LOADING_HTML, content_type="text/html");
+        if is_nav {
+            return web.Response(
+                status=200, text=LOADING_HTML, content_type="text/html"
+            );
+        }
+        return web.Response(status=503, text="Sandbox starting");
     }
 
     # WebSocket upgrade
@@ -144,7 +171,7 @@ async def handle_request(request: web.Request) -> web.Response {
         async with session.request(
             request.method, target, headers=headers, data=body, allow_redirects=False
         ) as resp {
-            if resp.status in (502, 503) {
+            if resp.status in (502, 503) and is_nav {
                 return web.Response(
                     status=200, text=LOADING_HTML, content_type="text/html"
                 );
@@ -160,7 +187,12 @@ async def handle_request(request: web.Request) -> web.Response {
         }
     } except Exception as e {
         log.warning(f"Proxy error for {sandbox_id}: {e}");
-        return web.Response(status=200, text=LOADING_HTML, content_type="text/html");
+        if is_nav {
+            return web.Response(
+                status=200, text=LOADING_HTML, content_type="text/html"
+            );
+        }
+        return web.Response(status=502, text=f"Proxy error: {e}");
     }
 }
 
@@ -173,8 +205,8 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
 
     target = f"ws://{pod_ip}:{INTERNAL_PORT}{request.path_qs}";
     try {
-        session = await _get_session();
-        async with session.ws_connect(target) as ws_backend {
+        ws_session = await _get_ws_session();
+        async with ws_session.ws_connect(target) as ws_backend {
             async def client_to_backend -> None {
                 async for msg in ws_client {
                     if msg.type == WSMsgType.TEXT {
@@ -214,11 +246,14 @@ async def on_startup(app: web.Application) -> None {
     log.info(f"Sandbox proxy started on :{PROXY_PORT}");
 }
 
-"""Cleanup hook — cancel watcher and close shared session."""
+"""Cleanup hook — cancel watcher and close shared sessions."""
 async def on_cleanup(app: web.Application) -> None {
     app["watcher"].cancel();
     if _session and not _session.closed {
         await _session.close();
+    }
+    if _ws_session and not _ws_session.closed {
+        await _ws_session.close();
     }
 }
 
