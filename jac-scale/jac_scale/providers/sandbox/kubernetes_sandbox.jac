@@ -36,7 +36,8 @@ class KubernetesSandbox(SandboxEnvironment) {
         _rbac_provisioned: bool = False,
         _ingress_provider: Any = None,
         _warm_pool: list = [],
-        _pool_initialized: bool = False;
+        _pool_initialized: bool = False,
+        _cleanup_started: bool = False;
 
     def init(
         self: KubernetesSandbox, config: SandboxConfig, logger: (Logger | None) = None
@@ -50,6 +51,7 @@ class KubernetesSandbox(SandboxEnvironment) {
         self._ingress_provider = None;
         self._warm_pool = [];
         self._pool_initialized = False;
+        self._cleanup_started = False;
     }
 
     def _init_k8s(self: KubernetesSandbox) -> None {
@@ -805,6 +807,9 @@ class KubernetesSandbox(SandboxEnvironment) {
             );
         }
 
+        # Start background cleanup on first use
+        self._start_cleanup_loop();
+
         # Bootstrap warm pool on first use
         if self.config.warm_pool_size > 0 and not self._pool_initialized {
             replenish = Thread(target=self._ensure_warm_pool, daemon=True);
@@ -1126,36 +1131,149 @@ class KubernetesSandbox(SandboxEnvironment) {
         return results;
     }
 
+    """Start the background cleanup loop (idempotent)."""
+    def _start_cleanup_loop(self: KubernetesSandbox) -> None {
+        if self._cleanup_started {
+            return;
+        }
+        self._cleanup_started = True;
+        thread = Thread(target=self._cleanup_loop, daemon=True);
+        thread.start();
+        if self.logger {
+            self.logger.info(
+                f"Started cleanup loop (interval=60s, ttl={self.config.ttl_seconds}s)"
+            );
+        }
+    }
+
+    """Background thread that periodically cleans expired sandboxes."""
+    def _cleanup_loop(self: KubernetesSandbox) -> None {
+        while True {
+            time.sleep(60);
+            try {
+                self.cleanup_expired();
+            } except Exception {
+                ;
+            }
+        }
+    }
+
+    """Look up a registry key by K8s pod name.
+
+    Cold-start pods use sandbox_id as pod name, warm-start pods differ.
+    """
+    def _find_registry_key(self: KubernetesSandbox, pod_name: str) -> (str | None) {
+        if pod_name in self._registry {
+            return pod_name;
+        }
+        for (sid, entry) in self._registry.items() {
+            if entry.get("pod_name") == pod_name {
+                return sid;
+            }
+        }
+        return None;
+    }
+
+    """Clean up expired and terminal sandboxes.
+
+    Three phases:
+    1. Delete pods that exceeded TTL or are in a terminal state
+    2. Remove their registry entries and K8s resources
+    3. Purge stale registry/warm-pool entries for pods that no longer exist
+    """
     def cleanup_expired(self: KubernetesSandbox) -> int {
         self._init_k8s();
         import from kubernetes { client }
+        import from kubernetes.client.exceptions { ApiException }
         core_v1 = client.CoreV1Api();
         namespace = self.config.namespace;
-        expired: list[str] = [];
 
         try {
             pods = core_v1.list_namespaced_pod(
                 namespace, label_selector=f"{_SANDBOX_LABEL}=true"
             );
-            now = time.time();
-            for pod in pods.items {
-                created = pod.metadata.creation_timestamp;
-                if created {
-                    import from datetime { timezone }
-                    age = now - created.replace(tzinfo=timezone.utc).timestamp();
-                    if age > self.config.ttl_seconds {
-                        expired.append(pod.metadata.name);
-                    }
-                }
-            }
         } except Exception {
-            ;
+            return 0;
         }
 
-        for sid in expired {
-            self.destroy(sid);
+        now = time.time();
+        import from datetime { timezone }
+        live_pod_names: set = set();
+        pods_to_delete: list[str] = [];
+        cleaned = 0;
+
+        # Phase 1: Identify expired or terminal pods
+        for pod in pods.items {
+            pod_name = pod.metadata.name;
+            phase = pod.status.phase if pod.status else "Unknown";
+            is_terminal = phase in ["Failed", "Succeeded"];
+            is_expired = False;
+            created = pod.metadata.creation_timestamp;
+            if created {
+                age = now - created.replace(tzinfo=timezone.utc).timestamp();
+                is_expired = age > self.config.ttl_seconds;
+            }
+            if is_terminal or is_expired {
+                pods_to_delete.append(pod_name);
+            } else {
+                live_pod_names.add(pod_name);
+            }
         }
-        return len(expired);
+
+        # Phase 2: Delete pods and their associated K8s resources
+        for pod_name in pods_to_delete {
+            registry_key = self._find_registry_key(pod_name);
+            if registry_key {
+                self._cleanup_k8s_resources(registry_key, namespace);
+                self._lock.acquire();
+                try {
+                    self._registry.pop(registry_key, None);
+                } finally {
+                    self._lock.release();
+                }
+            } else {
+                try {
+                    core_v1.delete_namespaced_pod(pod_name, namespace);
+                } except ApiException {
+                    ;
+                }
+            }
+            self._lock.acquire();
+            try {
+                if pod_name in self._warm_pool {
+                    self._warm_pool.remove(pod_name);
+                }
+            } finally {
+                self._lock.release();
+            }
+            cleaned += 1;
+        }
+
+        # Phase 3: Purge registry/warm-pool entries whose pods no longer exist
+        self._lock.acquire();
+        try {
+            stale_keys = [
+                sid
+                for (sid, entry) in self._registry.items()
+                if entry.get("pod_name", sid) not in live_pod_names
+            ];
+            for key in stale_keys {
+                self._registry.pop(key, None);
+                cleaned += 1;
+            }
+            self._warm_pool = [
+                p
+                for p in self._warm_pool
+                if p in live_pod_names
+            ];
+        } finally {
+            self._lock.release();
+        }
+
+        if cleaned > 0 and self.logger {
+            self.logger.info(f"Cleanup: removed {cleaned} stale sandboxes/pods");
+        }
+        return cleaned;
     }
 
     def logs(self: KubernetesSandbox, sandbox_id: str, offset: int = 0) -> dict {
