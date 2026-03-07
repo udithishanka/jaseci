@@ -198,15 +198,22 @@ async def handle_request(request: web.Request) -> web.Response {
 
 """Bidirectional WebSocket proxy for Vite HMR."""
 async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketResponse {
-    ws_client = web.WebSocketResponse(
-        protocols=[p for p in request.headers.getall("Sec-WebSocket-Protocol", [])]
-    );
+    protocols = [p for p in request.headers.getall("Sec-WebSocket-Protocol", [])];
+    ws_client = web.WebSocketResponse(protocols=protocols);
     await ws_client.prepare(request);
 
     target = f"ws://{pod_ip}:{INTERNAL_PORT}{request.path_qs}";
     try {
         ws_session = await _get_ws_session();
-        async with ws_session.ws_connect(target) as ws_backend {
+        # Forward sub-protocols (e.g. vite-hmr) and Origin to backend
+        ws_headers = {};
+        origin = request.headers.get("Origin");
+        if origin {
+            ws_headers["Origin"] = origin;
+        }
+        async with ws_session.ws_connect(
+            target, protocols=protocols, headers=ws_headers if ws_headers else None
+        ) as ws_backend {
             async def client_to_backend -> None {
                 async for msg in ws_client {
                     if msg.type == WSMsgType.TEXT {
@@ -214,6 +221,7 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
                     } elif msg.type == WSMsgType.BINARY {
                         await ws_backend.send_bytes(msg.data);
                     } elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR) {
+                        await ws_backend.close();
                         break;
                     }
                 }
@@ -225,6 +233,7 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
                     } elif msg.type == WSMsgType.BINARY {
                         await ws_client.send_bytes(msg.data);
                     } elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR) {
+                        await ws_client.close();
                         break;
                     }
                 }
