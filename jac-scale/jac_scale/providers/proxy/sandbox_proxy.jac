@@ -119,9 +119,7 @@ async def handle_request(request: web.Request) -> web.Response {
     route = routes.get(sandbox_id);
 
     if not route {
-        return web.Response(
-            status=502, text="Sandbox not found", content_type="text/plain"
-        );
+        return web.Response(status=200, text=LOADING_HTML, content_type="text/html");
     }
 
     if not route["ready"] {
@@ -146,6 +144,11 @@ async def handle_request(request: web.Request) -> web.Response {
         async with session.request(
             request.method, target, headers=headers, data=body, allow_redirects=False
         ) as resp {
+            if resp.status in (502, 503) {
+                return web.Response(
+                    status=200, text=LOADING_HTML, content_type="text/html"
+                );
+            }
             resp_headers = {
                 k: v
                 for (k, v) in resp.headers.items()
@@ -157,7 +160,7 @@ async def handle_request(request: web.Request) -> web.Response {
         }
     } except Exception as e {
         log.warning(f"Proxy error for {sandbox_id}: {e}");
-        return web.Response(status=502, text=f"Proxy error: {e}");
+        return web.Response(status=200, text=LOADING_HTML, content_type="text/html");
     }
 }
 

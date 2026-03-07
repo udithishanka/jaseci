@@ -251,7 +251,22 @@ class KubernetesSandbox(SandboxEnvironment) {
                         safe_key = rel.replace("/", "--");
                         data[safe_key] = content;
                     } except UnicodeDecodeError {
-                        ;  # Skip binary files in ConfigMap
+                        # Binary file — use binaryData field
+                        with open(full, "rb") as bf {
+                            raw = bf.read();
+                        }
+                        total_size += len(raw);
+                        if total_size > _CONFIGMAP_SIZE_LIMIT {
+                            if self.logger {
+                                self.logger.warn(
+                                    f"Code exceeds ConfigMap limit ({_CONFIGMAP_SIZE_LIMIT} bytes), "
+                                    f"truncating at binary file {rel}"
+                                );
+                            }
+                            break;
+                        }
+                        safe_key = rel.replace("/", "--");
+                        binary_data[safe_key] = raw;
                     }
                 }
             }
@@ -263,7 +278,8 @@ class KubernetesSandbox(SandboxEnvironment) {
                 namespace=namespace,
                 labels={_SANDBOX_LABEL: "true", "jac-sandbox-id": sandbox_id}
             ),
-            data=data
+            data=data,
+            binary_data=binary_data if binary_data else None
         );
         core_v1.create_namespaced_config_map(namespace, cm);
         return cm_name;
