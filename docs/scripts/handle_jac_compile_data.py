@@ -4,10 +4,12 @@ This script is used to handle the jac compile data for jac playground.
 """
 
 import os
+import shutil
 import subprocess
 import time
 import zipfile
 
+import jaclang
 from jaclang.utils.lang_tools import AstTool
 
 TARGET_FOLDER = "../jac/jaclang"
@@ -26,33 +28,39 @@ EXCLUDE_EXTS = {".pyc", ".pyo", ".pyi"}
 
 
 def precompile_jaclang() -> None:
-    """Run the jaclang precompilation script to generate .jir bytecode.
+    """Copy precompiled .jir bytecode from the installed jaclang PyPI package.
 
-    Precompiles the entire jaclang source, same as PyPI release builds.
+    Instead of running the full compilation pipeline (which requires >2Gi RAM
+    and exceeds container startup probe timeouts), copies the _precompiled/
+    directory that ships with the PyPI jaclang package into the source tree
+    so create_playground_zip() can include .jir files.
     """
-    jac_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "jac")
-    )
-    script_path = os.path.join(jac_root, "scripts", "precompile_bytecode.jac")
+    jaclang_dir = os.path.abspath(TARGET_FOLDER)
+    dest_precompiled = os.path.join(jaclang_dir, "_precompiled")
 
-    if not os.path.exists(script_path):
-        print(f"Warning: Precompile script not found at {script_path}. Skipping.")
+    # Skip if source tree already has precompiled files
+    if os.path.exists(os.path.join(dest_precompiled, "manifest.json")):
+        print("Precompiled .jir files already present in source tree. Skipping.")
         return
 
-    print("Precompiling jaclang bytecode for playground...")
-    try:
-        subprocess.run(
-            ["jac", "run", "scripts/precompile_bytecode.jac", "."],
-            check=True,
-            cwd=jac_root,
-        )
-        print("Precompilation complete.")
-    except subprocess.CalledProcessError as e:
+    # Find precompiled files from the installed PyPI package
+    installed_dir = os.path.dirname(jaclang.__file__)
+    src_precompiled = os.path.join(installed_dir, "_precompiled")
+
+    if os.path.isdir(src_precompiled):
         print(
-            f"Warning: Precompilation failed: {e}. Playground will use on-the-fly compilation."
+            f"Copying precompiled .jir files from PyPI package: {src_precompiled}"
         )
-    except FileNotFoundError:
-        print("Warning: 'jac' command not found. Skipping precompilation.")
+        shutil.copytree(src_precompiled, dest_precompiled, dirs_exist_ok=True)
+        jir_count = sum(
+            1 for _, _, fs in os.walk(dest_precompiled) for f in fs if f.endswith(".jir")
+        )
+        print(f"  Copied {jir_count} .jir files to source tree.")
+    else:
+        print(
+            "Warning: No _precompiled/ in installed jaclang. "
+            "Playground will use on-the-fly compilation."
+        )
 
 
 def pre_build_hook(**kwargs: dict) -> None:
