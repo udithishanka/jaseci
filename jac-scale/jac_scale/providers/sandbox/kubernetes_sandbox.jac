@@ -280,7 +280,7 @@ class KubernetesSandbox(SandboxEnvironment) {
                 labels={_SANDBOX_LABEL: "true", "jac-sandbox-id": sandbox_id}
             ),
             data=data,
-            binary_data=binary_data if binary_data else None
+            binary_data=binary_data
         );
         core_v1.create_namespaced_config_map(namespace, cm);
         return cm_name;

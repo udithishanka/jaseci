@@ -212,7 +212,7 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
             ws_headers["Origin"] = origin;
         }
         async with ws_session.ws_connect(
-            target, protocols=protocols, headers=ws_headers if ws_headers else None
+            target, protocols=protocols, headers=ws_headers
         ) as ws_backend {
             async def client_to_backend -> None {
                 async for msg in ws_client {
