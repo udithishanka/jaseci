@@ -2002,40 +2002,44 @@ glob sandbox = SandboxFactory.create("kubernetes", {
 #### Creating a Sandbox
 
 ```jac
-result = sandbox.create(
-    user_id="user-123",
-    project_id="my-project",
-    code_path="/path/to/project/files"
-);
+with entry {
+    result = sandbox.create(
+        user_id="user-123",
+        project_id="my-project",
+        code_path="/path/to/project/files"
+    );
 
-if result.success {
-    print(f"Sandbox ready at: {result.url}");
-    print(f"Sandbox ID: {result.sandbox_id}");
+    if result.success {
+        print(f"Sandbox ready at: {result.url}");
+        print(f"Sandbox ID: {result.sandbox_id}");
+    }
 }
 ```
 
 #### Sandbox Lifecycle
 
 ```jac
-# Check status
-status = sandbox.status("jac-sbx-abc123");
-print(f"State: {status.state}");  # pending, starting, running, stopped, error
+with entry {
+    # Check status
+    status = sandbox.status("jac-sbx-abc123");
+    print(f"State: {status.state}");  # pending, starting, running, stopped, error
 
-# List user's sandboxes
-sandboxes = sandbox.list_sandboxes("user-123");
-for s in sandboxes {
-    print(f"{s.sandbox_id}: {s.state} - {s.url}");
+    # List user's sandboxes
+    sandboxes = sandbox.list_sandboxes("user-123");
+    for s in sandboxes {
+        print(f"{s.sandbox_id}: {s.state} - {s.url}");
+    }
+
+    # Stop a sandbox
+    sandbox.stop("jac-sbx-abc123");
+
+    # Destroy and clean up all resources
+    sandbox.destroy("jac-sbx-abc123");
+
+    # Clean up expired sandboxes (beyond TTL)
+    cleaned = sandbox.cleanup_expired();
+    print(f"Cleaned {cleaned} expired sandboxes");
 }
-
-# Stop a sandbox
-sandbox.stop("jac-sbx-abc123");
-
-# Destroy and clean up all resources
-sandbox.destroy("jac-sbx-abc123");
-
-# Clean up expired sandboxes (beyond TTL)
-cleaned = sandbox.cleanup_expired();
-print(f"Cleaned {cleaned} expired sandboxes");
 ```
 
 #### File Operations
@@ -2043,24 +2047,26 @@ print(f"Cleaned {cleaned} expired sandboxes");
 Read, write, and manage files inside a running sandbox:
 
 ```jac
-# Write a file
-sandbox.write_file("jac-sbx-abc123", "main.jac", "with entry { print('hello'); }");
+with entry {
+    # Write a file
+    sandbox.write_file("jac-sbx-abc123", "main.jac", "with entry { print('hello'); }");
 
-# Read a file
-result = sandbox.read_file("jac-sbx-abc123", "main.jac");
-print(result["content"]);
+    # Read a file
+    result = sandbox.read_file("jac-sbx-abc123", "main.jac");
+    print(result["content"]);
 
-# Read binary files (images) -- returned as base64
-result = sandbox.read_file("jac-sbx-abc123", "assets/logo.png");
-# result = {"success": True, "content": "<base64>", "is_binary": True, "mime_type": "image/png"}
+    # Read binary files (images) -- returned as base64
+    result = sandbox.read_file("jac-sbx-abc123", "assets/logo.png");
+    # result = {"success": True, "content": "<base64>", "is_binary": True, "mime_type": "image/png"}
 
-# Delete a file
-sandbox.delete_file("jac-sbx-abc123", "old_file.jac");
+    # Delete a file
+    sandbox.delete_file("jac-sbx-abc123", "old_file.jac");
 
-# List files
-result = sandbox.list_files("jac-sbx-abc123");
-for f in result["files"] {
-    print(f);
+    # List files
+    result = sandbox.list_files("jac-sbx-abc123");
+    for f in result["files"] {
+        print(f);
+    }
 }
 ```
 
@@ -2071,16 +2077,20 @@ for f in result["files"] {
 #### Command Execution
 
 ```jac
-result = sandbox.exec_command("jac-sbx-abc123", "ls -la /app", timeout=30);
-print(result["stdout"]);
+with entry {
+    result = sandbox.exec_command("jac-sbx-abc123", "ls -la /app", timeout=30);
+    print(result["stdout"]);
+}
 ```
 
 #### Log Retrieval
 
 ```jac
-result = sandbox.logs("jac-sbx-abc123", offset=0);
-print(result["content"]);
-# result["offset"] contains the byte offset for the next read (streaming)
+with entry {
+    result = sandbox.logs("jac-sbx-abc123", offset=0);
+    print(result["content"]);
+    # result["offset"] contains the byte offset for the next read (streaming)
+}
 ```
 
 ---
