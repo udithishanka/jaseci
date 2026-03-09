@@ -1983,7 +1983,6 @@ Configuration priority: `jac.toml` > environment variables > defaults.
 
 Use `SandboxFactory` to create and manage sandboxes in your Jac code:
 
-<!-- jac-skip -->
 ```jac
 import from jac_scale.factories.sandbox_factory { SandboxFactory }
 
@@ -2002,7 +2001,6 @@ glob sandbox = SandboxFactory.create("kubernetes", {
 
 #### Creating a Sandbox
 
-<!-- jac-skip -->
 ```jac
 result = sandbox.create(
     user_id="user-123",
@@ -2018,7 +2016,6 @@ if result.success {
 
 #### Sandbox Lifecycle
 
-<!-- jac-skip -->
 ```jac
 # Check status
 status = sandbox.status("jac-sbx-abc123");
@@ -2045,7 +2042,6 @@ print(f"Cleaned {cleaned} expired sandboxes");
 
 Read, write, and manage files inside a running sandbox:
 
-<!-- jac-skip -->
 ```jac
 # Write a file
 sandbox.write_file("jac-sbx-abc123", "main.jac", "with entry { print('hello'); }");
@@ -2074,7 +2070,6 @@ for f in result["files"] {
 
 #### Command Execution
 
-<!-- jac-skip -->
 ```jac
 result = sandbox.exec_command("jac-sbx-abc123", "ls -la /app", timeout=30);
 print(result["stdout"]);
@@ -2082,7 +2077,6 @@ print(result["stdout"]);
 
 #### Log Retrieval
 
-<!-- jac-skip -->
 ```jac
 result = sandbox.logs("jac-sbx-abc123", offset=0);
 print(result["content"]);
