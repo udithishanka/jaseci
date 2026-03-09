@@ -48,12 +48,13 @@ def precompile_jaclang() -> None:
     src_precompiled = os.path.join(installed_dir, "_precompiled")
 
     if os.path.isdir(src_precompiled):
-        print(
-            f"Copying precompiled .jir files from PyPI package: {src_precompiled}"
-        )
+        print(f"Copying precompiled .jir files from PyPI package: {src_precompiled}")
         shutil.copytree(src_precompiled, dest_precompiled, dirs_exist_ok=True)
         jir_count = sum(
-            1 for _, _, fs in os.walk(dest_precompiled) for f in fs if f.endswith(".jir")
+            1
+            for _, _, fs in os.walk(dest_precompiled)
+            for f in fs
+            if f.endswith(".jir")
         )
         print(f"  Copied {jir_count} .jir files to source tree.")
     else:
