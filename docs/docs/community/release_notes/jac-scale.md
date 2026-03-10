@@ -6,6 +6,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 - [Internal] Refactor: Extract graph visualizer HTML into a standalone template file.
 - **User storage now supports both MongoDB and SQLite**: User authentication and management automatically uses SQLite when MongoDB is not configured, maintaining full backward compatibility with existing installations.
+- [fix] Include `redis.conf.template` in package distribution so Redis deployment works with non-editable installs.
 
 ## jac-scale 0.2.4 (Latest Release)
 
