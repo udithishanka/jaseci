@@ -148,17 +148,17 @@ class LocalSandbox(SandboxEnvironment) {
         }
     }
 
-    def _stop_process(self: LocalSandbox, entry: dict) -> None {
-        log_file = entry.get("log_file");
+    def _stop_process(self: LocalSandbox, rec: dict) -> None {
+        log_file = rec.get("log_file");
         if log_file {
             try {
                 log_file.close();
             } except Exception {
                 ;
             }
-            entry["log_file"] = None;
+            rec["log_file"] = None;
         }
-        process = entry.get("process");
+        process = rec.get("process");
         if process is not None {
             try {
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM);
@@ -170,10 +170,10 @@ class LocalSandbox(SandboxEnvironment) {
                     ;
                 }
             } finally {
-                entry["process"] = None;
+                rec["process"] = None;
             }
         }
-        port = entry.get("port", 0);
+        port = rec.get("port", 0);
         if port {
             for check_port in [port, port + 1] {
                 self._kill_port_listeners(check_port);
@@ -230,21 +230,21 @@ class LocalSandbox(SandboxEnvironment) {
         }
         self._lock.acquire();
         try {
-            entry = self._registry.get(key);
-            if not entry {
+            rec = self._registry.get(key);
+            if not rec {
                 return;
             }
             if ready {
-                entry["status"] = SandboxState.RUNNING;
-                entry["needs_install"] = False;
+                rec["status"] = SandboxState.RUNNING;
+                rec["needs_install"] = False;
             } else {
-                self._stop_process(entry);
+                self._stop_process(rec);
                 if port not in self._port_pool {
                     self._port_pool.append(port);
                 }
-                entry["status"] = SandboxState.ERROR;
-                entry["port"] = 0;
-                entry["process"] = None;
+                rec["status"] = SandboxState.ERROR;
+                rec["port"] = 0;
+                rec["process"] = None;
             }
         } finally {
             self._lock.release();
@@ -264,11 +264,11 @@ class LocalSandbox(SandboxEnvironment) {
             preview_dir = f"/tmp/jac-preview-{user_id}{preview_suffix}";
 
             if key in self._registry {
-                entry = self._registry[key];
+                rec = self._registry[key];
                 # Stop existing process, reuse port
-                previous_port = entry.get("port", 0);
-                if entry.get("process") is not None {
-                    self._stop_process(entry);
+                previous_port = rec.get("port", 0);
+                if rec.get("process") is not None {
+                    self._stop_process(rec);
                 }
             } else {
                 previous_port = 0;
@@ -413,10 +413,10 @@ class LocalSandbox(SandboxEnvironment) {
     def stop(self: LocalSandbox, sandbox_id: str) -> None {
         self._lock.acquire();
         try {
-            for (key, entry) in self._registry.items() {
-                if entry.get("sandbox_id") == sandbox_id {
-                    self._stop_process(entry);
-                    port = entry.get("port", 0);
+            for (key, rec) in self._registry.items() {
+                if rec.get("sandbox_id") == sandbox_id {
+                    self._stop_process(rec);
+                    port = rec.get("port", 0);
                     if port
                     and port in range(
                         self._base_port, self._base_port + self._port_count * 2, 2
@@ -425,9 +425,9 @@ class LocalSandbox(SandboxEnvironment) {
                             self._port_pool.append(port);
                         }
                     }
-                    entry["port"] = 0;
-                    entry["api_port"] = 0;
-                    entry["status"] = SandboxState.STOPPED;
+                    rec["port"] = 0;
+                    rec["api_port"] = 0;
+                    rec["status"] = SandboxState.STOPPED;
                     return;
                 }
             }
@@ -437,27 +437,27 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def status(self: LocalSandbox, sandbox_id: str) -> SandboxStatus {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
-                process = entry.get("process");
-                state = entry.get("status", SandboxState.STOPPED);
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
+                process = rec.get("process");
+                state = rec.get("status", SandboxState.STOPPED);
                 alive = process is not None and process.poll() is None;
                 if not alive
                 and state in [SandboxState.RUNNING, SandboxState.STARTING] {
                     state = SandboxState.STOPPED;
                 }
-                uptime = time.time() - entry.get(
+                uptime = time.time() - rec.get(
                     "created_at", time.time()
                 )
                     if alive
                     else 0.0;
-                url = f"http://localhost:{entry.get('port', 0)}" if alive else "";
+                url = f"http://localhost:{rec.get('port', 0)}" if alive else "";
                 return SandboxStatus(
                     state=state,
                     sandbox_id=sandbox_id,
                     uptime_seconds=uptime,
                     url=url,
-                    port=entry.get("port", 0)
+                    port=rec.get("port", 0)
                 );
             }
         }
@@ -469,10 +469,10 @@ class LocalSandbox(SandboxEnvironment) {
         self._lock.acquire();
         try {
             to_remove = "";
-            for (key, entry) in self._registry.items() {
-                if entry.get("sandbox_id") == sandbox_id {
+            for (key, rec) in self._registry.items() {
+                if rec.get("sandbox_id") == sandbox_id {
                     to_remove = key;
-                    preview_dir = entry.get("dir", "");
+                    preview_dir = rec.get("dir", "");
                     if preview_dir and os.path.exists(preview_dir) {
                         shutil.rmtree(preview_dir, ignore_errors=True);
                     }
@@ -489,16 +489,16 @@ class LocalSandbox(SandboxEnvironment) {
 
     def list_sandboxes(self: LocalSandbox, user_id: str) -> list[SandboxInfo] {
         results: list[SandboxInfo] = [];
-        for (key, entry) in self._registry.items() {
-            if entry.get("user_id") == user_id {
+        for (key, rec) in self._registry.items() {
+            if rec.get("user_id") == user_id {
                 results.append(
                     SandboxInfo(
-                        sandbox_id=entry.get("sandbox_id", ""),
-                        user_id=entry.get("user_id", ""),
-                        project_id=entry.get("project_id", ""),
-                        state=entry.get("status", SandboxState.STOPPED),
-                        url=f"http://localhost:{entry.get('port', 0)}",
-                        created_at=entry.get("created_at", 0.0)
+                        sandbox_id=rec.get("sandbox_id", ""),
+                        user_id=rec.get("user_id", ""),
+                        project_id=rec.get("project_id", ""),
+                        state=rec.get("status", SandboxState.STOPPED),
+                        url=f"http://localhost:{rec.get('port', 0)}",
+                        created_at=rec.get("created_at", 0.0)
                     )
                 );
             }
@@ -509,10 +509,10 @@ class LocalSandbox(SandboxEnvironment) {
     def cleanup_expired(self: LocalSandbox) -> int {
         now = time.time();
         expired: list[str] = [];
-        for (key, entry) in self._registry.items() {
-            created = entry.get("created_at", now);
+        for (key, rec) in self._registry.items() {
+            created = rec.get("created_at", now);
             if now - created > self.config.ttl_seconds {
-                expired.append(entry.get("sandbox_id", ""));
+                expired.append(rec.get("sandbox_id", ""));
             }
         }
         for sid in expired {
@@ -522,10 +522,10 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def logs(self: LocalSandbox, sandbox_id: str, offset: int = 0) -> dict {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
-                log_path = entry.get(
-                    "log_path", os.path.join(entry.get("dir", ""), ".jac-preview.log")
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
+                log_path = rec.get(
+                    "log_path", os.path.join(rec.get("dir", ""), ".jac-preview.log")
                 );
                 if not os.path.exists(log_path) {
                     return {"success": True, "content": "", "offset": 0};
@@ -548,8 +548,8 @@ class LocalSandbox(SandboxEnvironment) {
     def write_file(
         self: LocalSandbox, sandbox_id: str, path: str, content: str
     ) -> dict {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
                 basename = os.path.basename(path);
                 if basename in PROTECTED_FILES
                 and basename not in _WRITE_ALLOWED_PROTECTED {
@@ -560,7 +560,7 @@ class LocalSandbox(SandboxEnvironment) {
                     };
                 }
                 try {
-                    full_path = self._resolve_path(entry["dir"], path);
+                    full_path = self._resolve_path(rec["dir"], path);
                     parent = os.path.dirname(full_path);
                     if parent and not os.path.exists(parent) {
                         os.makedirs(parent, exist_ok=True);
@@ -578,10 +578,10 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def read_file(self: LocalSandbox, sandbox_id: str, path: str) -> dict {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
                 try {
-                    full_path = self._resolve_path(entry["dir"], path);
+                    full_path = self._resolve_path(rec["dir"], path);
                     if not os.path.isfile(full_path) {
                         return {"success": False, "error": "File not found"};
                     }
@@ -612,8 +612,8 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def delete_file(self: LocalSandbox, sandbox_id: str, path: str) -> dict {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
                 basename = os.path.basename(path);
                 if basename in PROTECTED_FILES {
                     return {
@@ -622,7 +622,7 @@ class LocalSandbox(SandboxEnvironment) {
                     };
                 }
                 try {
-                    full_path = self._resolve_path(entry["dir"], path);
+                    full_path = self._resolve_path(rec["dir"], path);
                     if os.path.isfile(full_path) {
                         os.remove(full_path);
                     } elif os.path.isdir(full_path) {
@@ -640,18 +640,18 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     def list_files(self: LocalSandbox, sandbox_id: str, path: str = ".") -> dict {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
                 try {
-                    preview_dir = entry["dir"];
+                    preview_dir = rec["dir"];
                     base = self._resolve_path(preview_dir, path);
                     real_preview = os.path.realpath(preview_dir);
                     skip_dirs = [".jac", "node_modules", "__pycache__", "dist", ".git"];
                     file_list: list[str] = [];
-                    for walk_entry in os.walk(base) {
-                        dirpath = walk_entry[0];
-                        dirnames = walk_entry[1];
-                        filenames = walk_entry[2];
+                    for walk_rec in os.walk(base) {
+                        dirpath = walk_rec[0];
+                        dirnames = walk_rec[1];
+                        filenames = walk_rec[2];
                         kept = [
                             d
                             for d in dirnames
@@ -680,13 +680,13 @@ class LocalSandbox(SandboxEnvironment) {
     def exec_command(
         self: LocalSandbox, sandbox_id: str, command: str, timeout: int = 30
     ) -> dict {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
                 try {
                     result = subprocess.run(
                         command,
                         shell=True,
-                        cwd=entry["dir"],
+                        cwd=rec["dir"],
                         capture_output=True,
                         text=True,
                         timeout=timeout
@@ -706,7 +706,7 @@ class LocalSandbox(SandboxEnvironment) {
     }
 
     # ---- Convenience methods for preview_manager compatibility ----
-    """Get the sandbox entry by user_id and project_id (for preview_manager compat)."""
+    """Get the sandbox record by user_id and project_id (for preview_manager compat)."""
     def get_by_user_project(
         self: LocalSandbox, user_id: str, project_id: str
     ) -> (dict | None) {
@@ -719,18 +719,18 @@ class LocalSandbox(SandboxEnvironment) {
         self: LocalSandbox, user_id: str, project_id: str
     ) -> (str | None) {
         key = self._sandbox_key(user_id, project_id);
-        entry = self._registry.get(key);
-        if entry {
-            return entry.get("sandbox_id");
+        rec = self._registry.get(key);
+        if rec {
+            return rec.get("sandbox_id");
         }
         return None;
     }
 
     """Get the preview directory path for a sandbox."""
     def get_sandbox_dir(self: LocalSandbox, sandbox_id: str) -> (str | None) {
-        for (key, entry) in self._registry.items() {
-            if entry.get("sandbox_id") == sandbox_id {
-                return entry.get("dir");
+        for (key, rec) in self._registry.items() {
+            if rec.get("sandbox_id") == sandbox_id {
+                return rec.get("dir");
             }
         }
         return None;
