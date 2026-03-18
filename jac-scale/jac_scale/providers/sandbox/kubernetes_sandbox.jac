@@ -24,28 +24,13 @@ glob _SANDBOX_LABEL: str = "jac-sandbox",
 
 obj KubernetesSandbox(SandboxEnvironment) {
     has _registry: dict = {},
-        _lock: Any = None,
+        _lock: Lock = Lock(),
         _k8s_initialized: bool = False,
         _rbac_provisioned: bool = False,
         _ingress_provider: Any = None,
         _warm_pool: list = [],
         _pool_initialized: bool = False,
         _cleanup_started: bool = False;
-
-    def init(
-        self: KubernetesSandbox, config: SandboxConfig, logger: (Logger | None) = None
-    ) -> None {
-        self.config = config;
-        self.logger = logger;
-        self._registry = {};
-        self._lock = Lock();
-        self._k8s_initialized = False;
-        self._rbac_provisioned = False;
-        self._ingress_provider = None;
-        self._warm_pool = [];
-        self._pool_initialized = False;
-        self._cleanup_started = False;
-    }
 
     def _init_k8s(self: KubernetesSandbox) -> None {
         if self._k8s_initialized {

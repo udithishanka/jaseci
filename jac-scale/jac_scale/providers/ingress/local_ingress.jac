@@ -2,13 +2,8 @@ import from typing { Any }
 import from jac_scale.abstractions.ingress_provider { IngressProvider }
 
 obj LocalIngressProvider(IngressProvider) {
-    has _config: dict = {},
+    has config: dict = {},
         _routes: dict = {};
-
-    def init(self: LocalIngressProvider, config: dict[str, Any] = {}) -> None {
-        self._config = config;
-        self._routes = {};
-    }
 
     def create_route(
         self: LocalIngressProvider,
