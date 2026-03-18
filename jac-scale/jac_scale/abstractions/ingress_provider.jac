@@ -11,6 +11,5 @@ obj IngressProvider {
     ) -> str;
 
     def delete_route(self: IngressProvider, sandbox_id: str, namespace: str) -> None;
-
     def get_url(self: IngressProvider, sandbox_id: str) -> (str | None);
 }

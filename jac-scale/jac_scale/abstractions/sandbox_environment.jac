@@ -35,27 +35,18 @@ obj SandboxEnvironment {
     ) -> SandboxResult;
 
     def stop(self: SandboxEnvironment, sandbox_id: str) -> None;
-
     def status(self: SandboxEnvironment, sandbox_id: str) -> SandboxStatus;
-
     def destroy(self: SandboxEnvironment, sandbox_id: str) -> None;
-
     def list_sandboxes(self: SandboxEnvironment, user_id: str) -> list[SandboxInfo];
-
     def cleanup_expired(self: SandboxEnvironment) -> int;
-
     def logs(self: SandboxEnvironment, sandbox_id: str, offset: int = 0) -> dict;
-
     def write_file(
         self: SandboxEnvironment, sandbox_id: str, path: str, content: str
     ) -> dict;
 
     def read_file(self: SandboxEnvironment, sandbox_id: str, path: str) -> dict;
-
     def delete_file(self: SandboxEnvironment, sandbox_id: str, path: str) -> dict;
-
     def list_files(self: SandboxEnvironment, sandbox_id: str, path: str = ".") -> dict;
-
     def exec_command(
         self: SandboxEnvironment, sandbox_id: str, command: str, timeout: int = 30
     ) -> dict;
