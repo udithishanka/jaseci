@@ -1,7 +1,10 @@
+"""Plugin configuration hooks for jac-scale."""
 import from typing { Any }
 import from jaclang.jac0core.runtime { hookimpl }
 
+"""Plugin configuration hooks for jac-scale."""
 class JacScalePluginConfig {
+    """Return plugin metadata."""
     @hookimpl
     static def get_plugin_metadata -> dict[str, Any] {
         return {
@@ -11,6 +14,7 @@ class JacScalePluginConfig {
         };
     }
 
+    """Return the plugin's configuration schema for [plugins.scale]."""
     @hookimpl
     static def get_config_schema -> dict[str, Any] {
         return {
