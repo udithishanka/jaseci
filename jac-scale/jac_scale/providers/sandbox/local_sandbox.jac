@@ -1,8 +1,3 @@
-"""Local subprocess sandbox provider — backward-compatible fallback.
-
-Wraps the original preview_manager subprocess logic as a SandboxEnvironment
-provider. Used when JAC_SANDBOX_TYPE is unset or "local".
-"""
 import os;
 import shutil;
 import subprocess;
@@ -37,8 +32,7 @@ glob _IMAGE_MIME_TYPES: dict = {
      PROTECTED_FILES: list = ["jac.toml"],
      _WRITE_ALLOWED_PROTECTED: list = ["jac.toml"];
 
-"""Local subprocess sandbox — runs jac start as a child process on the host."""
-class LocalSandbox(SandboxEnvironment) {
+obj LocalSandbox(SandboxEnvironment) {
     has _registry: dict = {},
         _port_pool: list = [],
         _lock: Any = None,
@@ -259,20 +253,17 @@ class LocalSandbox(SandboxEnvironment) {
             key = self._sandbox_key(user_id, project_id);
             sid = self._sandbox_id(user_id, project_id);
 
-            # Setup preview directory
             preview_suffix = f"-{project_id}" if project_id else "";
             preview_dir = f"/tmp/jac-preview-{user_id}{preview_suffix}";
 
             if key in self._registry {
                 rec = self._registry[key];
-                # Stop existing process, reuse port
                 previous_port = rec.get("port", 0);
                 if rec.get("process") is not None {
                     self._stop_process(rec);
                 }
             } else {
                 previous_port = 0;
-                # Copy code to preview dir (skip if code_path IS the preview dir)
                 real_code = os.path.realpath(code_path) if code_path else "";
                 real_preview = os.path.realpath(preview_dir);
                 if real_code and real_code != real_preview {
@@ -289,7 +280,6 @@ class LocalSandbox(SandboxEnvironment) {
                 }
             }
 
-            # Allocate port
             if previous_port
             and previous_port in range(
                 self._base_port, self._base_port + self._port_count * 2, 2
@@ -313,18 +303,15 @@ class LocalSandbox(SandboxEnvironment) {
                 );
             }
 
-            # Kill orphan processes
             api_port = port + 1;
             for check_port in [port, api_port] {
                 self._kill_port_listeners(check_port);
             }
             time.sleep(0.5);
 
-            # Build shell command
             activate_script = self._find_activate_script();
             jac_bin = self._find_jac_binary();
 
-            # Env sourcing
             src_dir = code_path or "";
             global_env = os.path.join(str(Path.home()), ".jac-ide", "global.env");
             project_env_file = os.path.join(src_dir, ".env") if src_dir else "";
@@ -386,7 +373,6 @@ class LocalSandbox(SandboxEnvironment) {
                 "created_at": time.time()
             };
 
-            # Launch readiness checker
             checker = Thread(
                 target=self._poll_readiness,
                 args=(key, port, process, log_path),
@@ -705,8 +691,6 @@ class LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    # ---- Convenience methods for preview_manager compatibility ----
-    """Get the sandbox record by user_id and project_id (for preview_manager compat)."""
     def get_by_user_project(
         self: LocalSandbox, user_id: str, project_id: str
     ) -> (dict | None) {
@@ -714,7 +698,6 @@ class LocalSandbox(SandboxEnvironment) {
         return self._registry.get(key);
     }
 
-    """Get sandbox_id for a user/project pair."""
     def get_sandbox_id(
         self: LocalSandbox, user_id: str, project_id: str
     ) -> (str | None) {
@@ -726,7 +709,6 @@ class LocalSandbox(SandboxEnvironment) {
         return None;
     }
 
-    """Get the preview directory path for a sandbox."""
     def get_sandbox_dir(self: LocalSandbox, sandbox_id: str) -> (str | None) {
         for (key, rec) in self._registry.items() {
             if rec.get("sandbox_id") == sandbox_id {

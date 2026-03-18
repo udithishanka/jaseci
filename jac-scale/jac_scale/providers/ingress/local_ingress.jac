@@ -1,12 +1,7 @@
-"""Local ingress provider — no-op for local development.
-
-Returns localhost URLs directly without creating any infrastructure.
-"""
 import from typing { Any }
 import from jac_scale.abstractions.ingress_provider { IngressProvider }
 
-"""Local no-op ingress provider — returns localhost URLs."""
-class LocalIngressProvider(IngressProvider) {
+obj LocalIngressProvider(IngressProvider) {
     has _config: dict = {},
         _routes: dict = {};
 

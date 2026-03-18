@@ -1,5 +1,3 @@
-"""Tests for the sandbox factory and provider architecture."""
-
 import os;
 import from jac_scale.factories.sandbox_factory { SandboxFactory }
 import from jac_scale.factories.ingress_factory { IngressFactory }

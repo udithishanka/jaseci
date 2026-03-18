@@ -1,15 +1,3 @@
-"""Sandbox routing proxy for jac-scale.
-
-Routes wildcard subdomain traffic to sandbox pod IPs by watching K8s pods
-with configurable label selectors and maintaining an in-memory routing table.
-Handles both HTTP and WebSocket (for dev server HMR support).
-
-Environment variables:
-    SANDBOX_NAMESPACE: K8s namespace to watch (default: jac-sandboxes)
-    SANDBOX_LABEL: Label selector for sandbox pods (default: jac-sandbox=true)
-    INTERNAL_PORT: Port on sandbox pods (default: 8000)
-    PROXY_PORT: Port for this proxy to listen on (default: 8080)
-"""
 import os;
 import asyncio;
 import logging;
@@ -33,7 +21,6 @@ glob log = _setup_logging(),
      _ws_session: aiohttp.ClientSession | None = None;
 
 
-"""Watch sandbox pods and maintain routing table."""
 async def watch_pods -> None {
     import from kubernetes_asyncio { client, config, watch }
 
@@ -94,13 +81,11 @@ async def watch_pods -> None {
 glob LOADING_HTML = '<!DOCTYPE html>\n<html><head>\n<meta charset="utf-8">\n<meta http-equiv="refresh" content="2">\n<style>\nbody { background: #0d0e11; color: #a1a1b0; font-family: system-ui;\n       display: flex; align-items: center; justify-content: center;\n       height: 100vh; margin: 0; }\n.loader { text-align: center; }\n.spinner { width: 32px; height: 32px; border: 3px solid #22232d;\n           border-top: 3px solid #f97316; border-radius: 50%;\n           animation: spin 1s linear infinite; margin: 0 auto 16px; }\n@keyframes spin { to { transform: rotate(360deg); } }\n</style>\n</head><body>\n<div class="loader">\n<div class="spinner"></div>\n<p>Starting preview server...</p>\n<p style="font-size:12px;color:#5c5c6e">This page will auto-refresh</p>\n</div>\n</body></html>';
 
 
-"""Extract sandbox_id from Host header."""
 def _get_sandbox_id(request: web.Request) -> str {
     host = request.host.split(":")[0];
     return host.split(".")[0];
 }
 
-"""Get or create shared HTTP session."""
 async def _get_session -> aiohttp.ClientSession {
     global _session;
     if _session is None or _session.closed {
@@ -109,7 +94,6 @@ async def _get_session -> aiohttp.ClientSession {
     return _session;
 }
 
-"""Get or create WebSocket session (no timeout for long-lived connections)."""
 async def _get_ws_session -> aiohttp.ClientSession {
     global _ws_session;
     if _ws_session is None or _ws_session.closed {
@@ -118,18 +102,15 @@ async def _get_ws_session -> aiohttp.ClientSession {
     return _ws_session;
 }
 
-"""Health check endpoint."""
 async def health(request: web.Request) -> web.Response {
     return web.Response(text=f"ok ({len(routes)} routes)");
 }
 
-"""Check if request is a browser navigation (expects HTML)."""
 def _wants_html(request: web.Request) -> bool {
     accept = request.headers.get("Accept", "");
     return "text/html" in accept;
 }
 
-"""Handle incoming HTTP and WebSocket requests."""
 async def handle_request(request: web.Request) -> web.Response {
     sandbox_id = _get_sandbox_id(request);
     route = routes.get(sandbox_id);
@@ -153,12 +134,10 @@ async def handle_request(request: web.Request) -> web.Response {
         return web.Response(status=503, text="Sandbox starting");
     }
 
-    # WebSocket upgrade
     if request.headers.get("Upgrade", "").lower() == "websocket" {
         return await handle_websocket(request, route["ip"]);
     }
 
-    # HTTP proxy
     target = f"http://{route['ip']}:{INTERNAL_PORT}{request.path_qs}";
     try {
         session = await _get_session();
@@ -196,7 +175,6 @@ async def handle_request(request: web.Request) -> web.Response {
     }
 }
 
-"""Bidirectional WebSocket proxy for Vite HMR."""
 async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketResponse {
     protocols = [p for p in request.headers.getall("Sec-WebSocket-Protocol", [])];
     ws_client = web.WebSocketResponse(protocols=protocols);
@@ -205,7 +183,6 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
     target = f"ws://{pod_ip}:{INTERNAL_PORT}{request.path_qs}";
     try {
         ws_session = await _get_ws_session();
-        # Forward sub-protocols (e.g. vite-hmr) and Origin to backend
         ws_headers = {};
         origin = request.headers.get("Origin");
         if origin {
@@ -249,13 +226,11 @@ async def handle_websocket(request: web.Request, pod_ip: str) -> web.WebSocketRe
     return ws_client;
 }
 
-"""Startup hook — launch pod watcher and create shared session."""
 async def on_startup(app: web.Application) -> None {
     app["watcher"] = asyncio.create_task(watch_pods());
     log.info(f"Sandbox proxy started on :{PROXY_PORT}");
 }
 
-"""Cleanup hook — cancel watcher and close shared sessions."""
 async def on_cleanup(app: web.Application) -> None {
     app["watcher"].cancel();
     if _session and not _session.closed {
@@ -266,7 +241,6 @@ async def on_cleanup(app: web.Application) -> None {
     }
 }
 
-"""Create and configure the proxy application."""
 def create_app -> web.Application {
     app = web.Application();
     app.on_startup.append(on_startup);
@@ -281,6 +255,3 @@ glob app = create_app();
 with entry {
     web.run_app(app, host="0.0.0.0", port=PROXY_PORT);
 }
-# Routing table: sandbox_id -> {"ip": str, "phase": str, "ready": bool}
-
-# Shared HTTP session for connection reuse

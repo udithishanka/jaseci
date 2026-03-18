@@ -1,9 +1,3 @@
-"""Kubernetes ephemeral pod sandbox provider.
-
-Creates isolated K8s pods for each preview sandbox. Designed to work
-both from a local machine (kubeconfig) and from inside a K8s pod
-(in-cluster config via ServiceAccount token).
-"""
 import os;
 import time;
 import uuid;
@@ -28,8 +22,7 @@ glob _SANDBOX_LABEL: str = "jac-sandbox",
      _INTERNAL_PORT: int = 8000,
      _CONFIGMAP_SIZE_LIMIT: int = 1048576;
 
-"""Kubernetes ephemeral pod sandbox — creates sibling pods in a dedicated namespace."""
-class KubernetesSandbox(SandboxEnvironment) {
+obj KubernetesSandbox(SandboxEnvironment) {
     has _registry: dict = {},
         _lock: Any = None,
         _k8s_initialized: bool = False,
@@ -189,7 +182,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    """Get the actual K8s pod name for a sandbox (may differ for warm pods)."""
     def _get_pod_name(self: KubernetesSandbox, sandbox_id: str) -> str {
         rec = self._registry.get(sandbox_id);
         return rec.get("pod_name", sandbox_id) if rec else sandbox_id;
@@ -424,13 +416,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         return svc_name;
     }
 
-    # ---- Warm Pool Methods ----
-    """Build a pod spec for warm pool pods.
-
-    Warm pods start with a signal-file loop: they wait for /app/.jac-start
-    to exist before running jac install + jac start. This allows code
-    injection via kubectl exec before the app launches.
-    """
     def _build_warm_pod_spec(self: KubernetesSandbox, pod_name: str) -> Any {
         import from kubernetes { client }
 
@@ -500,11 +485,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         return pod;
     }
 
-    """Ensure the warm pool is at the configured size.
-
-    Lists existing warm pods, creates new ones to fill the pool.
-    Intended to be called in a background thread.
-    """
     def _ensure_warm_pool(self: KubernetesSandbox) -> None {
         if self.config.warm_pool_size <= 0 {
             return;
@@ -560,11 +540,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    """Claim a warm pod from the pool for an active sandbox.
-
-    Relabels the pod with the sandbox_id and marks it as active.
-    Returns the pod name if claimed, None if pool is empty.
-    """
     def _claim_warm_pod(
         self: KubernetesSandbox, sandbox_id: str, user_id: str, project_id: str
     ) -> (str | None) {
@@ -611,7 +586,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    """Inject project files into a running pod via kubectl exec tar."""
     def _inject_code(self: KubernetesSandbox, pod_name: str, code_path: str) -> bool {
         import from kubernetes { client }
         import from kubernetes.stream { stream }
@@ -729,7 +703,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    """Signal a warm pod to start the jac application."""
     def _signal_start(self: KubernetesSandbox, pod_name: str) -> None {
         import from kubernetes { client }
         import from kubernetes.stream { stream }
@@ -1145,7 +1118,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         return results;
     }
 
-    """Start the background cleanup loop (idempotent)."""
     def _start_cleanup_loop(self: KubernetesSandbox) -> None {
         if self._cleanup_started {
             return;
@@ -1160,7 +1132,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    """Background thread that periodically cleans expired sandboxes."""
     def _cleanup_loop(self: KubernetesSandbox) -> None {
         while True {
             time.sleep(60);
@@ -1172,10 +1143,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    """Look up a registry key by K8s pod name.
-
-    Cold-start pods use sandbox_id as pod name, warm-start pods differ.
-    """
     def _find_registry_key(self: KubernetesSandbox, pod_name: str) -> (str | None) {
         if pod_name in self._registry {
             return pod_name;
@@ -1188,13 +1155,6 @@ class KubernetesSandbox(SandboxEnvironment) {
         return None;
     }
 
-    """Clean up expired and terminal sandboxes.
-
-    Three phases:
-    1. Delete pods that exceeded TTL or are in a terminal state
-    2. Remove their registry entries and K8s resources
-    3. Purge stale registry/warm-pool entries for pods that no longer exist
-    """
     def cleanup_expired(self: KubernetesSandbox) -> int {
         self._init_k8s();
         import from kubernetes { client }

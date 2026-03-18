@@ -1,17 +1,7 @@
-"""Plugin configuration hooks for jac-scale.
-
-This module implements JacPluginConfig hooks to integrate with core's
-configuration system, registering:
-- Plugin metadata (name, version)
-- Config schema for [plugins.scale] section
-"""
-
 import from typing { Any }
 import from jaclang.jac0core.runtime { hookimpl }
 
-"""Plugin configuration hooks for jac-scale."""
-class JacScalePluginConfig {
-    """Return plugin metadata."""
+obj JacScalePluginConfig {
     @hookimpl
     static def get_plugin_metadata -> dict[str, Any] {
         return {
@@ -21,7 +11,6 @@ class JacScalePluginConfig {
         };
     }
 
-    """Return the plugin's configuration schema for [plugins.scale]."""
     @hookimpl
     static def get_config_schema -> dict[str, Any] {
         return {

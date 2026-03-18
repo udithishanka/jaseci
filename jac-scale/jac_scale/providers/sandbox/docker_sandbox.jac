@@ -1,9 +1,3 @@
-"""Docker container sandbox provider.
-
-Runs each preview in an isolated Docker container with resource limits,
-network isolation, and filesystem sandboxing. Inspired by Coolify
-(container-per-preview) and Beam (fast container startup).
-"""
 import os;
 import io;
 import tarfile;
@@ -27,8 +21,7 @@ import from jac_scale.abstractions.logger { Logger }
 glob _SANDBOX_LABEL: str = "jac-sandbox",
      _INTERNAL_PORT: int = 8000;
 
-"""Docker container sandbox — runs each preview in an isolated Docker container."""
-class DockerSandbox(SandboxEnvironment) {
+obj DockerSandbox(SandboxEnvironment) {
     has _client: Any = None,
         _registry: dict = {},
         _lock: Any = None;
@@ -150,7 +143,6 @@ class DockerSandbox(SandboxEnvironment) {
     ) -> SandboxResult {
         self._lock.acquire();
         try {
-            # Enforce max_per_user
             user_count = 0;
             for (sid, rec) in self._registry.items() {
                 if rec.get("user_id") == user_id
@@ -173,7 +165,6 @@ class DockerSandbox(SandboxEnvironment) {
         container_name = self._container_name(sandbox_id);
 
         try {
-            # Ensure base image is available
             try {
                 client.images.get(self.config.base_image);
             } except Exception {
@@ -183,24 +174,20 @@ class DockerSandbox(SandboxEnvironment) {
                 client.images.pull(self.config.base_image);
             }
 
-            # Create network for isolation
             net_name = self._ensure_network(sandbox_id);
 
-            # Build container config
             environment = {
                 "JAC_SANDBOX_ID": sandbox_id,
                 "JAC_SANDBOX_USER": user_id,
                 "JAC_SANDBOX_PROJECT": project_id
             };
 
-            # Resource limits
             mem_bytes = self._parse_memory(self.config.memory_limit);
             nano_cpus = self._parse_cpu(self.config.cpu_limit);
 
             volumes: dict = {};
             tmpfs_mounts: dict = {"/tmp": f"size={self.config.storage_limit}"};
 
-            # Create container
             networking_config = {};
             if net_name {
                 networking_config = client.api.create_networking_config(
@@ -228,16 +215,13 @@ class DockerSandbox(SandboxEnvironment) {
                 auto_remove=False
             );
 
-            # Copy code into container
             if code_path and os.path.isdir(code_path) {
                 self._copy_code_to_container(container, code_path);
             }
 
-            # Start the container
             container.start();
             container.reload();
 
-            # Get the mapped port
             port_bindings = container.attrs.get("NetworkSettings", {}).get("Ports", {});
             mapped_port = 0;
             binding = port_bindings.get(f"{_INTERNAL_PORT}/tcp");
@@ -264,7 +248,6 @@ class DockerSandbox(SandboxEnvironment) {
                 self._lock.release();
             }
 
-            # Poll readiness in background
             checker = Thread(
                 target=self._poll_container_readiness,
                 args=(sandbox_id, mapped_port),
@@ -280,7 +263,6 @@ class DockerSandbox(SandboxEnvironment) {
                 message="starting"
             );
         } except Exception as e {
-            # Clean up on failure
             try {
                 client.containers.get(container_name).remove(force=True);
             } except Exception {
@@ -320,7 +302,6 @@ class DockerSandbox(SandboxEnvironment) {
         if not rec {
             return SandboxStatus(state=SandboxState.STOPPED, sandbox_id=sandbox_id);
         }
-        # Check actual container status
         try {
             container = self._get_client().containers.get(rec["container_name"]);
             container_status = container.status;
@@ -423,7 +404,6 @@ class DockerSandbox(SandboxEnvironment) {
         }
         try {
             container = self._get_client().containers.get(rec["container_name"]);
-            # Create tar archive with the file
             buf = io.BytesIO();
             content_bytes = content.encode("utf-8");
             with tarfile.open(fileobj=buf, mode="w") as tar {
@@ -543,7 +523,6 @@ class DockerSandbox(SandboxEnvironment) {
         }
     }
 
-    # ---- Helpers ----
     def _parse_memory(self: DockerSandbox, mem_str: str) -> int {
         mem_str = mem_str.strip().upper();
         if mem_str.endswith("GI") {
@@ -571,7 +550,6 @@ class DockerSandbox(SandboxEnvironment) {
         return int(float(cpu_str) * 1000000000);
     }
 
-    # ---- Convenience methods for preview_manager compatibility ----
     def get_sandbox_id(
         self: DockerSandbox, user_id: str, project_id: str
     ) -> (str | None) {
