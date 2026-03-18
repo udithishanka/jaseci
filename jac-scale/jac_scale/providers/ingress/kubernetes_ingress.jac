@@ -2,13 +2,8 @@ import from typing { Any }
 import from jac_scale.abstractions.ingress_provider { IngressProvider }
 
 obj KubernetesIngressProvider(IngressProvider) {
-    has _config: dict = {},
+    has config: dict = {},
         _k8s_initialized: bool = False;
-
-    def init(self: KubernetesIngressProvider, config: dict[str, Any] = {}) -> None {
-        self._config = config;
-        self._k8s_initialized = False;
-    }
 
     def _init_k8s(self: KubernetesIngressProvider) -> None {
         if self._k8s_initialized {
@@ -38,14 +33,14 @@ obj KubernetesIngressProvider(IngressProvider) {
 
         domain_template = config.get(
             "domain_template",
-            self._config.get("domain_template", "{sandbox_id}.preview.example.com")
+            self.config.get("domain_template", "{sandbox_id}.preview.example.com")
         );
         ingress_class = config.get(
-            "ingress_class", self._config.get("ingress_class", "nginx")
+            "ingress_class", self.config.get("ingress_class", "nginx")
         );
-        tls_enabled = config.get("tls_enabled", self._config.get("tls_enabled", False));
+        tls_enabled = config.get("tls_enabled", self.config.get("tls_enabled", False));
         tls_issuer = config.get(
-            "tls_issuer", self._config.get("tls_issuer", "letsencrypt-prod")
+            "tls_issuer", self.config.get("tls_issuer", "letsencrypt-prod")
         );
 
         hostname = domain_template.replace("{sandbox_id}", sandbox_id);
@@ -55,7 +50,7 @@ obj KubernetesIngressProvider(IngressProvider) {
 
         annotations: dict[str, str] = {};
         custom_annotations = config.get(
-            "ingress_annotations", self._config.get("ingress_annotations", {})
+            "ingress_annotations", self.config.get("ingress_annotations", {})
         );
         if isinstance(custom_annotations, dict) {
             annotations.update(custom_annotations);
@@ -128,10 +123,10 @@ obj KubernetesIngressProvider(IngressProvider) {
     }
 
     def get_url(self: KubernetesIngressProvider, sandbox_id: str) -> (str | None) {
-        domain_template = self._config.get(
+        domain_template = self.config.get(
             "domain_template", "{sandbox_id}.preview.example.com"
         );
-        tls_enabled = self._config.get("tls_enabled", False);
+        tls_enabled = self.config.get("tls_enabled", False);
         hostname = domain_template.replace("{sandbox_id}", sandbox_id);
         protocol = "https" if tls_enabled else "http";
         return f"{protocol}://{hostname}";

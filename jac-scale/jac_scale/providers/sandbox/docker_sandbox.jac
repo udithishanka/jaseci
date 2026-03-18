@@ -24,17 +24,7 @@ glob _SANDBOX_LABEL: str = "jac-sandbox",
 obj DockerSandbox(SandboxEnvironment) {
     has _client: Any = None,
         _registry: dict = {},
-        _lock: Any = None;
-
-    def init(
-        self: DockerSandbox, config: SandboxConfig, logger: (Logger | None) = None
-    ) -> None {
-        self.config = config;
-        self.logger = logger;
-        self._registry = {};
-        self._lock = Lock();
-        self._client = None;
-    }
+        _lock: Lock = Lock();
 
     def _get_client(self: DockerSandbox) -> Any {
         if self._client is None {

@@ -34,24 +34,10 @@ glob _IMAGE_MIME_TYPES: dict = {
 
 obj LocalSandbox(SandboxEnvironment) {
     has _registry: dict = {},
-        _port_pool: list = [],
-        _lock: Any = None,
+        _port_pool: list = list(range(5180, 5200, 2)),
+        _lock: Lock = Lock(),
         _base_port: int = 5180,
         _port_count: int = 10;
-
-    def init(
-        self: LocalSandbox, config: SandboxConfig, logger: (Logger | None) = None
-    ) -> None {
-        self.config = config;
-        self.logger = logger;
-        self._registry = {};
-        self._base_port = 5180;
-        self._port_count = 10;
-        self._port_pool = list(
-            range(self._base_port, self._base_port + self._port_count * 2, 2)
-        );
-        self._lock = Lock();
-    }
 
     def _sandbox_key(self: LocalSandbox, user_id: str, project_id: str) -> str {
         safe_user = user_id or "session";
