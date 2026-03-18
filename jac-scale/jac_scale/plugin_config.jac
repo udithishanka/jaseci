@@ -1,7 +1,7 @@
 import from typing { Any }
 import from jaclang.jac0core.runtime { hookimpl }
 
-obj JacScalePluginConfig {
+class JacScalePluginConfig {
     @hookimpl
     static def get_plugin_metadata -> dict[str, Any] {
         return {
