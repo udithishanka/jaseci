@@ -1,14 +1,7 @@
-"""Proxy-mode ingress provider for jac-scale sandboxes.
-
-Returns the expected URL without creating any K8s Ingress resources.
-Routing is handled by an external sandbox-proxy service that discovers
-pods via K8s Watch API and routes by sandbox_id label.
-"""
 import from typing { Any }
 import from jac_scale.abstractions.ingress_provider { IngressProvider }
 
-"""Proxy-mode ingress — no-op K8s resource creation."""
-class ProxyIngressProvider(IngressProvider) {
+obj ProxyIngressProvider(IngressProvider) {
     has _config: dict = {};
 
     def init(self: ProxyIngressProvider, config: dict[str, Any] = {}) -> None {

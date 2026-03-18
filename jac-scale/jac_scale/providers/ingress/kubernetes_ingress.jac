@@ -1,13 +1,7 @@
-"""Kubernetes Ingress provider for sandbox routing.
-
-Creates K8s Ingress resources with wildcard subdomain routing,
-TLS support via cert-manager, and cloud-agnostic annotations.
-"""
 import from typing { Any }
 import from jac_scale.abstractions.ingress_provider { IngressProvider }
 
-"""Kubernetes Ingress provider — creates Ingress resources for sandbox routing."""
-class KubernetesIngressProvider(IngressProvider) {
+obj KubernetesIngressProvider(IngressProvider) {
     has _config: dict = {},
         _k8s_initialized: bool = False;
 
@@ -54,13 +48,11 @@ class KubernetesIngressProvider(IngressProvider) {
             "tls_issuer", self._config.get("tls_issuer", "letsencrypt-prod")
         );
 
-        # Build hostname from template
         hostname = domain_template.replace("{sandbox_id}", sandbox_id);
         protocol = "https" if tls_enabled else "http";
         url = f"{protocol}://{hostname}";
         ingress_name = f"{sandbox_id}-ingress";
 
-        # Annotations — merge custom annotations from config
         annotations: dict[str, str] = {};
         custom_annotations = config.get(
             "ingress_annotations", self._config.get("ingress_annotations", {})
@@ -75,7 +67,6 @@ class KubernetesIngressProvider(IngressProvider) {
             annotations["cert-manager.io/cluster-issuer"] = tls_issuer;
         }
 
-        # TLS configuration
         tls_config = None;
         if tls_enabled {
             tls_config = [
@@ -83,7 +74,6 @@ class KubernetesIngressProvider(IngressProvider) {
             ];
         }
 
-        # Ingress spec
         ingress = client.V1Ingress(
             metadata=client.V1ObjectMeta(
                 name=ingress_name,
