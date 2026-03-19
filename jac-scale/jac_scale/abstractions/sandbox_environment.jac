@@ -16,7 +16,7 @@ def validate_sandbox_path(path: str) -> str {
     if os.path.isabs(path) {
         raise ValueError("Absolute paths are not allowed");
     }
-    normalized = os.path.normpath(path);
+    normalized = str(os.path.normpath(path));
     if normalized.startswith("..") or "/../" in normalized or normalized == ".." {
         raise ValueError("Path traversal is not allowed");
     }
