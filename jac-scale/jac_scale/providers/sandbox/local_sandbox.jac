@@ -129,23 +129,25 @@ obj LocalSandbox(SandboxEnvironment) {
     }
 
     def _stop_process(self: LocalSandbox, rec: dict) -> None {
-        log_file: Any = rec.get("log_file");
+        log_file = rec.get("log_file");
         if log_file {
             try {
-                log_file.close();
+                getattr(log_file, "close")();
             } except Exception {
                 ;
             }
             rec["log_file"] = None;
         }
-        process: Any = rec.get("process");
+        process = rec.get("process");
         if process is not None {
             try {
-                os.killpg(os.getpgid(int(process.pid)), int(signal.SIGTERM));
-                process.wait(timeout=5);
+                pid = int(getattr(process, "pid"));
+                os.killpg(os.getpgid(pid), int(signal.SIGTERM));
+                getattr(process, "wait")(timeout=5);
             } except (ProcessLookupError, subprocess.TimeoutExpired) {
                 try {
-                    os.killpg(os.getpgid(int(process.pid)), int(signal.SIGKILL));
+                    pid2 = int(getattr(process, "pid"));
+                    os.killpg(os.getpgid(pid2), int(signal.SIGKILL));
                 } except ProcessLookupError {
                     ;
                 }
@@ -169,7 +171,7 @@ obj LocalSandbox(SandboxEnvironment) {
         start_time = time.time();
         ready = False;
         while time.time() - start_time < 120 {
-            if process.poll() is not None {
+            if getattr(process, "poll")() is not None {
                 break;
             }
             try {
@@ -182,8 +184,8 @@ obj LocalSandbox(SandboxEnvironment) {
                     watching = "Watching for changes" in log_content;
                     if server_ready and (vite_ready or watching) {
                         try {
-                            resp: Any = requests.get(vite_url, timeout=3);
-                            if 200 <= int(resp.status_code) < 400 {
+                            resp = requests.get(vite_url, timeout=3);
+                            if 200 <= int(getattr(resp, "status_code")) < 400 {
                                 ready = True;
                                 break;
                             }
@@ -418,7 +420,7 @@ obj LocalSandbox(SandboxEnvironment) {
             if str(rec_d.get("sandbox_id", "")) == sandbox_id {
                 process: Any = rec_d.get("process");
                 state: Any = rec_d.get("status", SandboxState.STOPPED);
-                alive = process is not None and process.poll() is None;
+                alive = process is not None and getattr(process, "poll")() is None;
                 if not alive
                 and state in [SandboxState.RUNNING, SandboxState.STARTING] {
                     state = SandboxState.STOPPED;
@@ -635,9 +637,9 @@ obj LocalSandbox(SandboxEnvironment) {
                     skip_dirs = [".jac", "node_modules", "__pycache__", "dist", ".git"];
                     file_list: list[str] = [];
                     for walk_rec in os.walk(base) {
-                        dirpath: Any = walk_rec[0];
-                        dirnames: Any = walk_rec[1];
-                        filenames: Any = walk_rec[2];
+                        dirpath = str(walk_rec[0]);
+                        dirnames: list = list(walk_rec[1]);
+                        filenames: list = list(walk_rec[2]);
                         kept = [
                             d
                             for d in dirnames
@@ -647,10 +649,16 @@ obj LocalSandbox(SandboxEnvironment) {
                         for d in kept {
                             dirnames.append(d);
                         }
+                        # Update original walk_rec dirnames in-place
+                        orig_dirs: list = list(walk_rec[1]);
+                        orig_dirs.clear();
+                        for d in kept {
+                            orig_dirs.append(d);
+                        }
                         for fname in filenames {
-                            full = os.path.join(dirpath, fname);
-                            rel = os.path.relpath(full, real_preview);
-                            file_list.append(rel);
+                            full = os.path.join(dirpath, str(fname));
+                            rel = os.path.relpath(str(full), real_preview);
+                            file_list.append(str(rel));
                         }
                     }
                     file_list.sort();
@@ -696,7 +704,8 @@ obj LocalSandbox(SandboxEnvironment) {
         self: LocalSandbox, user_id: str, project_id: str
     ) -> (dict | None) {
         key = self._sandbox_key(user_id, project_id);
-        return self._registry.get(key);
+        result = self._registry.get(key);
+        return dict(result) if result is not None else None;
     }
 
     def get_sandbox_id(
