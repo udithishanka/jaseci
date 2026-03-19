@@ -241,7 +241,7 @@ obj KubernetesTarget(DeploymentTarget) {
         commands.append('jac install');
 
         # Pre-compile jac-scale sandbox modules so lazy imports have bytecode at runtime
-        commands.append('python3 -c "import jac_scale; p=jac_scale.__path__[0]; import subprocess; subprocess.run([\"jac\",\"check\",p+\"/factories/sandbox_factory.jac\"],capture_output=True); subprocess.run([\"jac\",\"check\",p+\"/providers/sandbox/local_sandbox.jac\"],capture_output=True)" || true');
+        commands.append("JAC_SCALE_DIR=$(python3 -c 'import jac_scale; print(jac_scale.__path__[0])') && jac check $JAC_SCALE_DIR/factories/sandbox_factory.jac > /dev/null 2>&1 && jac check $JAC_SCALE_DIR/providers/sandbox/local_sandbox.jac > /dev/null 2>&1 || true");
 
         # Start the application
         commands.append(f"jac start {app_config.file_name}");
