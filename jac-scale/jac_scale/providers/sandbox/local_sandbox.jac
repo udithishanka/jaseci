@@ -49,7 +49,7 @@ obj LocalSandbox(SandboxEnvironment) {
         return f"local-{user_id}-{project_id}" if project_id else f"local-{user_id}";
     }
 
-    def _find_jac_binary() -> str {
+    def _find_jac_binary -> str {
         candidates = [os.path.join(str(Path.home()), ".jacvenv", "bin", "jac")];
         venv = str(os.environ.get("VIRTUAL_ENV", ""));
         if venv {
@@ -67,7 +67,7 @@ obj LocalSandbox(SandboxEnvironment) {
         raise FileNotFoundError("Could not find 'jac' binary.");
     }
 
-    def _find_activate_script() -> str {
+    def _find_activate_script -> str {
         jacvenv_activate = os.path.join(str(Path.home()), ".jacvenv", "bin", "activate");
         if os.path.exists(jacvenv_activate) {
             return jacvenv_activate;
@@ -163,9 +163,7 @@ obj LocalSandbox(SandboxEnvironment) {
         }
     }
 
-    def _poll_readiness(
-        key: str, port: int, process: Any, log_path: str
-    ) -> None {
+    def _poll_readiness(key: str, port: int, process: Any, log_path: str) -> None {
         import requests;
         vite_url = f"http://localhost:{port}";
         start_time = time.time();
@@ -233,9 +231,7 @@ obj LocalSandbox(SandboxEnvironment) {
         }
     }
 
-    def create(
-        user_id: str, project_id: str, code_path: str
-    ) -> SandboxResult {
+    def create(user_id: str, project_id: str, code_path: str) -> SandboxResult {
         self._lock.acquire();
         try {
             key = self._sandbox_key(user_id, project_id);
@@ -486,7 +482,7 @@ obj LocalSandbox(SandboxEnvironment) {
         return results;
     }
 
-    def cleanup_expired() -> int {
+    def cleanup_expired -> int {
         now = time.time();
         expired: list[str] = [];
         for (key, rec) in self._registry.items() {
@@ -530,9 +526,7 @@ obj LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    def write_file(
-        sandbox_id: str, path: str, content: str
-    ) -> dict {
+    def write_file(sandbox_id: str, path: str, content: str) -> dict {
         for (key, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
             if str(rec_d.get("sandbox_id", "")) == sandbox_id {
@@ -672,9 +666,7 @@ obj LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    def exec_command(
-        sandbox_id: str, command: str, timeout: int = 30
-    ) -> dict {
+    def exec_command(sandbox_id: str, command: str, timeout: int = 30) -> dict {
         for (key, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
             if str(rec_d.get("sandbox_id", "")) == sandbox_id {
@@ -701,17 +693,13 @@ obj LocalSandbox(SandboxEnvironment) {
         return {"success": False, "error": "Sandbox not found"};
     }
 
-    def get_by_user_project(
-        user_id: str, project_id: str
-    ) -> (dict | None) {
+    def get_by_user_project(user_id: str, project_id: str) -> (dict | None) {
         key = self._sandbox_key(user_id, project_id);
         result = self._registry.get(key);
         return dict(result) if result is not None else None;
     }
 
-    def get_sandbox_id(
-        user_id: str, project_id: str
-    ) -> (str | None) {
+    def get_sandbox_id(user_id: str, project_id: str) -> (str | None) {
         key = self._sandbox_key(user_id, project_id);
         rec: Any = self._registry.get(key);
         if rec {

@@ -32,7 +32,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         _pool_initialized: bool = False,
         _cleanup_started: bool = False;
 
-    def _init_k8s() -> None {
+    def _init_k8s -> None {
         if self._k8s_initialized {
             return;
         }
@@ -46,7 +46,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         self._k8s_initialized = True;
     }
 
-    def _get_ingress_provider() -> Any {
+    def _get_ingress_provider -> Any {
         if self._ingress_provider is None {
             if self.config.proxy_mode {
                 ingress_type = "proxy";
@@ -69,7 +69,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return self._ingress_provider;
     }
 
-    def _ensure_namespace() -> None {
+    def _ensure_namespace -> None {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         try {
@@ -87,7 +87,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _ensure_rbac() -> None {
+    def _ensure_rbac -> None {
         if self._rbac_provisioned {
             return;
         }
@@ -186,9 +186,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return f"jac-sbx-{safe_user}-{safe_proj}-{short}";
     }
 
-    def _create_configmap(
-        sandbox_id: str, code_path: str, namespace: str
-    ) -> str {
+    def _create_configmap(sandbox_id: str, code_path: str, namespace: str) -> str {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         cm_name = f"{sandbox_id}-code";
@@ -270,10 +268,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _build_pod_spec(
-        sandbox_id: str,
-        cm_name: str,
-        user_id: str,
-        project_id: str
+        sandbox_id: str, cm_name: str, user_id: str, project_id: str
     ) -> dict {
         import from kubernetes { client }
 
@@ -379,9 +374,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return pod;
     }
 
-    def _create_service(
-        sandbox_id: str, namespace: str
-    ) -> str {
+    def _create_service(sandbox_id: str, namespace: str) -> str {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         svc_name = f"{sandbox_id}-svc";
@@ -475,7 +468,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return pod;
     }
 
-    def _ensure_warm_pool() -> None {
+    def _ensure_warm_pool -> None {
         if self.config.warm_pool_size <= 0 {
             return;
         }
@@ -530,9 +523,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _claim_warm_pod(
-        sandbox_id: str, user_id: str, project_id: str
-    ) -> (str | None) {
+    def _claim_warm_pod(sandbox_id: str, user_id: str, project_id: str) -> (str | None) {
         self._lock.acquire();
         try {
             if not self._warm_pool {
@@ -778,9 +769,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def create(
-        user_id: str, project_id: str, code_path: str
-    ) -> SandboxResult {
+    def create(user_id: str, project_id: str, code_path: str) -> SandboxResult {
         try {
             self._init_k8s();
             self._ensure_namespace();
@@ -989,9 +978,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _cleanup_k8s_resources(
-        sandbox_id: str, namespace: str
-    ) -> None {
+    def _cleanup_k8s_resources(sandbox_id: str, namespace: str) -> None {
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
         core_v1 = client.CoreV1Api();
@@ -1125,7 +1112,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return results;
     }
 
-    def _start_cleanup_loop() -> None {
+    def _start_cleanup_loop -> None {
         if self._cleanup_started {
             return;
         }
@@ -1139,7 +1126,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _cleanup_loop() -> None {
+    def _cleanup_loop -> None {
         while True {
             time.sleep(60);
             try {
@@ -1163,7 +1150,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return None;
     }
 
-    def cleanup_expired() -> int {
+    def cleanup_expired -> int {
         self._init_k8s();
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -1288,9 +1275,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def write_file(
-        sandbox_id: str, path: str, content: str
-    ) -> dict {
+    def write_file(sandbox_id: str, path: str, content: str) -> dict {
         try {
             path = validate_sandbox_path(path);
         } except ValueError as e {
@@ -1474,9 +1459,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def exec_command(
-        sandbox_id: str, command: str, timeout: int = 30
-    ) -> dict {
+    def exec_command(sandbox_id: str, command: str, timeout: int = 30) -> dict {
         rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
@@ -1507,9 +1490,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     # ---- Convenience methods for preview_manager compatibility ----
-    def get_sandbox_id(
-        user_id: str, project_id: str
-    ) -> (str | None) {
+    def get_sandbox_id(user_id: str, project_id: str) -> (str | None) {
         for (sid, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
             if str(rec_d.get("user_id", "")) == user_id

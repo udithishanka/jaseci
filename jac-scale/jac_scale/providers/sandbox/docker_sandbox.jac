@@ -26,7 +26,7 @@ obj DockerSandbox(SandboxEnvironment) {
         _registry: dict = {},
         _lock: Lock = Lock();
 
-    def _get_client() -> Any {
+    def _get_client -> Any {
         if self._client is None {
             import docker;
             self._client = docker.from_env();
@@ -73,9 +73,7 @@ obj DockerSandbox(SandboxEnvironment) {
         }
     }
 
-    def _copy_code_to_container(
-        container: Any, code_path: str
-    ) -> None {
+    def _copy_code_to_container(container: Any, code_path: str) -> None {
         buf = io.BytesIO();
         with tarfile.open(fileobj=buf, mode="w") as tar {
             tar.add(code_path, arcname=".");
@@ -84,9 +82,7 @@ obj DockerSandbox(SandboxEnvironment) {
         container.put_archive("/app", buf);
     }
 
-    def _poll_container_readiness(
-        sandbox_id: str, port: int
-    ) -> None {
+    def _poll_container_readiness(sandbox_id: str, port: int) -> None {
         import requests;
         url = f"http://localhost:{port}";
         start_time = time.time();
@@ -124,9 +120,7 @@ obj DockerSandbox(SandboxEnvironment) {
         }
     }
 
-    def create(
-        user_id: str, project_id: str, code_path: str
-    ) -> SandboxResult {
+    def create(user_id: str, project_id: str, code_path: str) -> SandboxResult {
         self._lock.acquire();
         try {
             user_count = 0;
@@ -347,7 +341,7 @@ obj DockerSandbox(SandboxEnvironment) {
         return results;
     }
 
-    def cleanup_expired() -> int {
+    def cleanup_expired -> int {
         now = time.time();
         expired: list[str] = [];
         for (sid, rec) in self._registry.items() {
@@ -383,9 +377,7 @@ obj DockerSandbox(SandboxEnvironment) {
         }
     }
 
-    def write_file(
-        sandbox_id: str, path: str, content: str
-    ) -> dict {
+    def write_file(sandbox_id: str, path: str, content: str) -> dict {
         try {
             path = validate_sandbox_path(path);
         } except ValueError as e {
@@ -499,9 +491,7 @@ obj DockerSandbox(SandboxEnvironment) {
         }
     }
 
-    def exec_command(
-        sandbox_id: str, command: str, timeout: int = 30
-    ) -> dict {
+    def exec_command(sandbox_id: str, command: str, timeout: int = 30) -> dict {
         rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
@@ -552,9 +542,7 @@ obj DockerSandbox(SandboxEnvironment) {
         return int(float(cpu_str) * 1000000000);
     }
 
-    def get_sandbox_id(
-        user_id: str, project_id: str
-    ) -> (str | None) {
+    def get_sandbox_id(user_id: str, project_id: str) -> (str | None) {
         for (sid, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
             if str(rec_d.get("user_id", "")) == user_id

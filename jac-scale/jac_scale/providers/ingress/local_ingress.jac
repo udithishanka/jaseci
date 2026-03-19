@@ -6,7 +6,6 @@ obj LocalIngressProvider(IngressProvider) {
         _routes: dict = {};
 
     def create_route(
-        self: LocalIngressProvider,
         sandbox_id: str,
         service_name: str,
         target_port: int,
@@ -18,13 +17,11 @@ obj LocalIngressProvider(IngressProvider) {
         return url;
     }
 
-    def delete_route(
-        self: LocalIngressProvider, sandbox_id: str, namespace: str
-    ) -> None {
+    def delete_route(sandbox_id: str, namespace: str) -> None {
         self._routes.pop(sandbox_id, None);
     }
 
-    def get_url(self: LocalIngressProvider, sandbox_id: str) -> (str | None) {
+    def get_url(sandbox_id: str) -> (str | None) {
         return self._routes.get(sandbox_id);
     }
 }

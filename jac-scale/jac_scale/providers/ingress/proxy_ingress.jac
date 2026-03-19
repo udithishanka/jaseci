@@ -5,7 +5,6 @@ obj ProxyIngressProvider(IngressProvider) {
     has config: dict = {};
 
     def create_route(
-        self: ProxyIngressProvider,
         sandbox_id: str,
         service_name: str,
         target_port: int,
@@ -22,13 +21,11 @@ obj ProxyIngressProvider(IngressProvider) {
         return f"{protocol}://{hostname}";
     }
 
-    def delete_route(
-        self: ProxyIngressProvider, sandbox_id: str, namespace: str
-    ) -> None {
+    def delete_route(sandbox_id: str, namespace: str) -> None {
         ;
     }
 
-    def get_url(self: ProxyIngressProvider, sandbox_id: str) -> (str | None) {
+    def get_url(sandbox_id: str) -> (str | None) {
         domain_template = self.config.get(
             "domain_template", "{sandbox_id}.preview.example.com"
         );

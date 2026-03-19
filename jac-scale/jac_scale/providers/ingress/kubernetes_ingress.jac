@@ -5,7 +5,7 @@ obj KubernetesIngressProvider(IngressProvider) {
     has config: dict = {},
         _k8s_initialized: bool = False;
 
-    def _init_k8s(self: KubernetesIngressProvider) -> None {
+    def _init_k8s -> None {
         if self._k8s_initialized {
             return;
         }
@@ -20,7 +20,6 @@ obj KubernetesIngressProvider(IngressProvider) {
     }
 
     def create_route(
-        self: KubernetesIngressProvider,
         sandbox_id: str,
         service_name: str,
         target_port: int,
@@ -107,9 +106,7 @@ obj KubernetesIngressProvider(IngressProvider) {
         return url;
     }
 
-    def delete_route(
-        self: KubernetesIngressProvider, sandbox_id: str, namespace: str
-    ) -> None {
+    def delete_route(sandbox_id: str, namespace: str) -> None {
         self._init_k8s();
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -122,7 +119,7 @@ obj KubernetesIngressProvider(IngressProvider) {
         }
     }
 
-    def get_url(self: KubernetesIngressProvider, sandbox_id: str) -> (str | None) {
+    def get_url(sandbox_id: str) -> (str | None) {
         domain_template = self.config.get(
             "domain_template", "{sandbox_id}.preview.example.com"
         );

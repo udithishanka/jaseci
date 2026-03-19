@@ -30,24 +30,16 @@ obj SandboxEnvironment {
     has config: SandboxConfig,
         logger: (Logger | None) = None;
 
-    def create(
-        user_id: str, project_id: str, code_path: str
-    ) -> SandboxResult;
-
+    def create(user_id: str, project_id: str, code_path: str) -> SandboxResult;
     def stop(sandbox_id: str) -> None;
     def status(sandbox_id: str) -> SandboxStatus;
     def destroy(sandbox_id: str) -> None;
     def list_sandboxes(user_id: str) -> list[SandboxInfo];
-    def cleanup_expired() -> int;
+    def cleanup_expired -> int;
     def logs(sandbox_id: str, offset: int = 0) -> dict;
-    def write_file(
-        sandbox_id: str, path: str, content: str
-    ) -> dict;
-
+    def write_file(sandbox_id: str, path: str, content: str) -> dict;
     def read_file(sandbox_id: str, path: str) -> dict;
     def delete_file(sandbox_id: str, path: str) -> dict;
     def list_files(sandbox_id: str, path: str = ".") -> dict;
-    def exec_command(
-        sandbox_id: str, command: str, timeout: int = 30
-    ) -> dict;
+    def exec_command(sandbox_id: str, command: str, timeout: int = 30) -> dict;
 }
