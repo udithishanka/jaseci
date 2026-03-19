@@ -17,7 +17,7 @@ obj SandboxStatus {
         port: int = 0,
         message: (str | None) = None;
 
-    def is_running(self: SandboxStatus) -> bool {
+    def is_running() -> bool {
         return self.state == SandboxState.RUNNING;
     }
 }

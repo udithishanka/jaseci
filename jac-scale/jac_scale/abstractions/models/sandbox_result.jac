@@ -9,7 +9,7 @@ obj SandboxResult {
         message: (str | None) = None,
         details: dict[str, Any] = {};
 
-    def is_successful(self: SandboxResult) -> bool {
+    def is_successful() -> bool {
         return self.success;
     }
 }

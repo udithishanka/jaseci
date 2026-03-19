@@ -32,7 +32,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         _pool_initialized: bool = False,
         _cleanup_started: bool = False;
 
-    def _init_k8s(self: KubernetesSandbox) -> None {
+    def _init_k8s() -> None {
         if self._k8s_initialized {
             return;
         }
@@ -46,7 +46,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         self._k8s_initialized = True;
     }
 
-    def _get_ingress_provider(self: KubernetesSandbox) -> Any {
+    def _get_ingress_provider() -> Any {
         if self._ingress_provider is None {
             if self.config.proxy_mode {
                 ingress_type = "proxy";
@@ -69,7 +69,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return self._ingress_provider;
     }
 
-    def _ensure_namespace(self: KubernetesSandbox) -> None {
+    def _ensure_namespace() -> None {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         try {
@@ -87,7 +87,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _ensure_rbac(self: KubernetesSandbox) -> None {
+    def _ensure_rbac() -> None {
         if self._rbac_provisioned {
             return;
         }
@@ -167,7 +167,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _get_pod_name(self: KubernetesSandbox, sandbox_id: str) -> str {
+    def _get_pod_name(sandbox_id: str) -> str {
         rec: Any = self._registry.get(sandbox_id);
         if rec {
             rec_d: dict = dict(rec);
@@ -176,7 +176,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return sandbox_id;
     }
 
-    def _generate_id(self: KubernetesSandbox, user_id: str, project_id: str) -> str {
+    def _generate_id(user_id: str, project_id: str) -> str {
         short = str(uuid.uuid4())[:8];
         # K8s names must be lowercase, alphanumeric, max 63 chars
         safe_user = str(user_id[:20]).lower().replace("_", "-");
@@ -187,7 +187,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _create_configmap(
-        self: KubernetesSandbox, sandbox_id: str, code_path: str, namespace: str
+        sandbox_id: str, code_path: str, namespace: str
     ) -> str {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
@@ -270,7 +270,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _build_pod_spec(
-        self: KubernetesSandbox,
         sandbox_id: str,
         cm_name: str,
         user_id: str,
@@ -381,7 +380,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _create_service(
-        self: KubernetesSandbox, sandbox_id: str, namespace: str
+        sandbox_id: str, namespace: str
     ) -> str {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
@@ -407,7 +406,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return svc_name;
     }
 
-    def _build_warm_pod_spec(self: KubernetesSandbox, pod_name: str) -> Any {
+    def _build_warm_pod_spec(pod_name: str) -> Any {
         import from kubernetes { client }
 
         security_context = None;
@@ -476,7 +475,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return pod;
     }
 
-    def _ensure_warm_pool(self: KubernetesSandbox) -> None {
+    def _ensure_warm_pool() -> None {
         if self.config.warm_pool_size <= 0 {
             return;
         }
@@ -532,7 +531,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _claim_warm_pod(
-        self: KubernetesSandbox, sandbox_id: str, user_id: str, project_id: str
+        sandbox_id: str, user_id: str, project_id: str
     ) -> (str | None) {
         self._lock.acquire();
         try {
@@ -577,7 +576,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _inject_code(self: KubernetesSandbox, pod_name: str, code_path: str) -> bool {
+    def _inject_code(pod_name: str, code_path: str) -> bool {
         import from kubernetes { client }
         import from kubernetes.stream { stream }
         core_v1 = client.CoreV1Api();
@@ -694,7 +693,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _signal_start(self: KubernetesSandbox, pod_name: str) -> None {
+    def _signal_start(pod_name: str) -> None {
         import from kubernetes { client }
         import from kubernetes.stream { stream }
         core_v1 = client.CoreV1Api();
@@ -712,7 +711,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         );
     }
 
-    def _poll_pod_readiness(self: KubernetesSandbox, sandbox_id: str) -> None {
+    def _poll_pod_readiness(sandbox_id: str) -> None {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         namespace = self.config.namespace;
@@ -780,7 +779,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def create(
-        self: KubernetesSandbox, user_id: str, project_id: str, code_path: str
+        user_id: str, project_id: str, code_path: str
     ) -> SandboxResult {
         try {
             self._init_k8s();
@@ -991,7 +990,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _cleanup_k8s_resources(
-        self: KubernetesSandbox, sandbox_id: str, namespace: str
+        sandbox_id: str, namespace: str
     ) -> None {
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -1037,7 +1036,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def stop(self: KubernetesSandbox, sandbox_id: str) -> None {
+    def stop(sandbox_id: str) -> None {
         self._init_k8s();
         rec: Any = self._registry.get(sandbox_id);
         namespace = self.config.namespace;
@@ -1056,7 +1055,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def status(self: KubernetesSandbox, sandbox_id: str) -> SandboxStatus {
+    def status(sandbox_id: str) -> SandboxStatus {
         rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return SandboxStatus(state=SandboxState.STOPPED, sandbox_id=sandbox_id);
@@ -1095,7 +1094,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         );
     }
 
-    def destroy(self: KubernetesSandbox, sandbox_id: str) -> None {
+    def destroy(sandbox_id: str) -> None {
         self.stop(sandbox_id);
         self._lock.acquire();
         try {
@@ -1105,7 +1104,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def list_sandboxes(self: KubernetesSandbox, user_id: str) -> list[SandboxInfo] {
+    def list_sandboxes(user_id: str) -> list[SandboxInfo] {
         results: list[SandboxInfo] = [];
         for (sid, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
@@ -1126,7 +1125,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return results;
     }
 
-    def _start_cleanup_loop(self: KubernetesSandbox) -> None {
+    def _start_cleanup_loop() -> None {
         if self._cleanup_started {
             return;
         }
@@ -1140,7 +1139,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _cleanup_loop(self: KubernetesSandbox) -> None {
+    def _cleanup_loop() -> None {
         while True {
             time.sleep(60);
             try {
@@ -1151,7 +1150,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _find_registry_key(self: KubernetesSandbox, pod_name: str) -> (str | None) {
+    def _find_registry_key(pod_name: str) -> (str | None) {
         if pod_name in self._registry {
             return pod_name;
         }
@@ -1164,7 +1163,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return None;
     }
 
-    def cleanup_expired(self: KubernetesSandbox) -> int {
+    def cleanup_expired() -> int {
         self._init_k8s();
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -1259,7 +1258,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return cleaned;
     }
 
-    def logs(self: KubernetesSandbox, sandbox_id: str, offset: int = 0) -> dict {
+    def logs(sandbox_id: str, offset: int = 0) -> dict {
         rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
@@ -1290,7 +1289,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def write_file(
-        self: KubernetesSandbox, sandbox_id: str, path: str, content: str
+        sandbox_id: str, path: str, content: str
     ) -> dict {
         try {
             path = validate_sandbox_path(path);
@@ -1347,7 +1346,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def read_file(self: KubernetesSandbox, sandbox_id: str, path: str) -> dict {
+    def read_file(sandbox_id: str, path: str) -> dict {
         try {
             path = validate_sandbox_path(path);
         } except ValueError as e {
@@ -1382,7 +1381,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def delete_file(self: KubernetesSandbox, sandbox_id: str, path: str) -> dict {
+    def delete_file(sandbox_id: str, path: str) -> dict {
         try {
             path = validate_sandbox_path(path);
         } except ValueError as e {
@@ -1417,7 +1416,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def list_files(self: KubernetesSandbox, sandbox_id: str, path: str = ".") -> dict {
+    def list_files(sandbox_id: str, path: str = ".") -> dict {
         try {
             path = validate_sandbox_path(path);
         } except ValueError as e {
@@ -1476,7 +1475,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def exec_command(
-        self: KubernetesSandbox, sandbox_id: str, command: str, timeout: int = 30
+        sandbox_id: str, command: str, timeout: int = 30
     ) -> dict {
         rec: Any = self._registry.get(sandbox_id);
         if not rec {
@@ -1509,7 +1508,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
 
     # ---- Convenience methods for preview_manager compatibility ----
     def get_sandbox_id(
-        self: KubernetesSandbox, user_id: str, project_id: str
+        user_id: str, project_id: str
     ) -> (str | None) {
         for (sid, rec) in self._registry.items() {
             rec_d: dict = dict(rec);

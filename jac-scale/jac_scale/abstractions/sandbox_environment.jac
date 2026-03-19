@@ -31,23 +31,23 @@ obj SandboxEnvironment {
         logger: (Logger | None) = None;
 
     def create(
-        self: SandboxEnvironment, user_id: str, project_id: str, code_path: str
+        user_id: str, project_id: str, code_path: str
     ) -> SandboxResult;
 
-    def stop(self: SandboxEnvironment, sandbox_id: str) -> None;
-    def status(self: SandboxEnvironment, sandbox_id: str) -> SandboxStatus;
-    def destroy(self: SandboxEnvironment, sandbox_id: str) -> None;
-    def list_sandboxes(self: SandboxEnvironment, user_id: str) -> list[SandboxInfo];
-    def cleanup_expired(self: SandboxEnvironment) -> int;
-    def logs(self: SandboxEnvironment, sandbox_id: str, offset: int = 0) -> dict;
+    def stop(sandbox_id: str) -> None;
+    def status(sandbox_id: str) -> SandboxStatus;
+    def destroy(sandbox_id: str) -> None;
+    def list_sandboxes(user_id: str) -> list[SandboxInfo];
+    def cleanup_expired() -> int;
+    def logs(sandbox_id: str, offset: int = 0) -> dict;
     def write_file(
-        self: SandboxEnvironment, sandbox_id: str, path: str, content: str
+        sandbox_id: str, path: str, content: str
     ) -> dict;
 
-    def read_file(self: SandboxEnvironment, sandbox_id: str, path: str) -> dict;
-    def delete_file(self: SandboxEnvironment, sandbox_id: str, path: str) -> dict;
-    def list_files(self: SandboxEnvironment, sandbox_id: str, path: str = ".") -> dict;
+    def read_file(sandbox_id: str, path: str) -> dict;
+    def delete_file(sandbox_id: str, path: str) -> dict;
+    def list_files(sandbox_id: str, path: str = ".") -> dict;
     def exec_command(
-        self: SandboxEnvironment, sandbox_id: str, command: str, timeout: int = 30
+        sandbox_id: str, command: str, timeout: int = 30
     ) -> dict;
 }
