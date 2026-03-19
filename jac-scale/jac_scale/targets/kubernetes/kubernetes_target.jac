@@ -240,11 +240,28 @@ obj KubernetesTarget(DeploymentTarget) {
         # Install requirements
         commands.append('jac install');
 
-        # Pre-compile jac-scale sandbox modules so lazy imports have bytecode at runtime
-        commands.append("JAC_SCALE_DIR=$(python3 -c 'import jac_scale; print(jac_scale.__path__[0])') && jac check $JAC_SCALE_DIR/factories/sandbox_factory.jac > /dev/null 2>&1 && jac check $JAC_SCALE_DIR/providers/sandbox/local_sandbox.jac > /dev/null 2>&1 || true");
+        # Pre-compile jac-scale sandbox modules by running them through the Jac import system
+        # jac check doesn't populate the bytecode cache — only jac_import does
+        commands.append("python3 -c 'from jaclang import JacRuntimeInterface as Jac; Jac.jac_import(\"jac_scale.factories.sandbox_factory\")' > /dev/null 2>&1 || true");
+
+        # Detect client target from jac.toml (e.g. pwa)
+        client_flag = "";
+        try {
+            import tomllib;
+            import from pathlib { Path as _Path }
+            toml_path = _Path(app_config.code_folder) / "jac.toml";
+            if toml_path.exists() {
+                toml_data = tomllib.loads(toml_path.read_text(encoding='utf-8'));
+                if toml_data.get("plugins", {}).get("client", {}).get("pwa") {
+                    client_flag = " --client pwa";
+                }
+            }
+        } except Exception {
+            x = None;  # fall back to default web target
+        }
 
         # Start the application
-        commands.append(f"jac start {app_config.file_name}");
+        commands.append(f"jac start {app_config.file_name}{client_flag}");
 
         # Join all commands
         full_command = ' && '.join(commands);
