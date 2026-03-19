@@ -168,8 +168,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _get_pod_name(self: KubernetesSandbox, sandbox_id: str) -> str {
-        rec = self._registry.get(sandbox_id);
-        return str(rec.get("pod_name", sandbox_id)) if rec else sandbox_id;
+        rec: Any = self._registry.get(sandbox_id);
+        if rec {
+            rec_d: dict = dict(rec);
+            return str(rec_d.get("pod_name", sandbox_id));
+        }
+        return sandbox_id;
     }
 
     def _generate_id(self: KubernetesSandbox, user_id: str, project_id: str) -> str {
@@ -714,8 +718,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
         ready = False;
 
         # Warm pods have a different pod name than sandbox_id
-        rec = self._registry.get(sandbox_id);
-        pod_name = str(rec.get("pod_name", sandbox_id)) if rec else sandbox_id;
+        rec: Any = self._registry.get(sandbox_id);
+        pod_name = sandbox_id;
+        if rec {
+            rec_d_init: dict = dict(rec);
+            pod_name = str(rec_d_init.get("pod_name", sandbox_id));
+        }
 
         while time.time() - start_time < 120 {
             try {
@@ -756,13 +764,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
 
         self._lock.acquire();
         try {
-            rec = self._registry.get(sandbox_id);
-            if rec {
-                if ready {
-                    rec["status"] = SandboxState.RUNNING;
-                } else {
-                    rec["status"] = SandboxState.ERROR;
-                }
+            rec_inner: Any = self._registry.get(sandbox_id);
+            if rec_inner {
+                rec_inner["status"] = SandboxState.RUNNING if ready else SandboxState.ERROR;
             }
         } finally {
             self._lock.release();
@@ -796,8 +800,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
         try {
             user_count = 0;
             for (sid, rec) in self._registry.items() {
-                if str(rec.get("user_id", "")) == user_id
-                and rec.get("status") not in [SandboxState.STOPPED, SandboxState.ERROR] {
+                rec_d: dict = dict(rec);
+                if str(rec_d.get("user_id", "")) == user_id
+                and rec_d.get("status") not in [SandboxState.STOPPED, SandboxState.ERROR] {
                     user_count += 1;
                 }
             }
@@ -984,8 +989,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
         core_v1 = client.CoreV1Api();
 
         # Find actual pod name (warm pods have different names)
-        rec = self._registry.get(sandbox_id);
-        pod_name = str(rec.get("pod_name", sandbox_id)) if rec else sandbox_id;
+        rec: Any = self._registry.get(sandbox_id);
+        pod_name = sandbox_id;
+        if rec {
+            rec_d: dict = dict(rec);
+            pod_name = str(rec_d.get("pod_name", sandbox_id));
+        }
 
         # Delete pod
         try {
@@ -1002,7 +1011,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
             }
         }
         # Delete configmap (skip for warm pods — no configmap)
-        if not (rec and rec.get("warm_start")) {
+        rec_cleanup: dict = dict(rec) if rec else {};
+        if not (rec and rec_cleanup.get("warm_start")) {
             try {
                 core_v1.delete_namespaced_config_map(f"{sandbox_id}-code", namespace);
             } except ApiException {
@@ -1020,10 +1030,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
 
     def stop(self: KubernetesSandbox, sandbox_id: str) -> None {
         self._init_k8s();
-        rec = self._registry.get(sandbox_id);
-        namespace = str(rec.get("namespace", self.config.namespace))
-            if rec
-            else self.config.namespace;
+        rec: Any = self._registry.get(sandbox_id);
+        namespace = self.config.namespace;
+        if rec {
+            rec_d: dict = dict(rec);
+            namespace = str(rec_d.get("namespace", self.config.namespace));
+        }
         self._cleanup_k8s_resources(sandbox_id, namespace);
         self._lock.acquire();
         try {
@@ -1036,10 +1048,11 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def status(self: KubernetesSandbox, sandbox_id: str) -> SandboxStatus {
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return SandboxStatus(state=SandboxState.STOPPED, sandbox_id=sandbox_id);
         }
+        rec_d: dict = dict(rec);
         # Check actual pod status
         try {
             self._init_k8s();
@@ -1047,11 +1060,11 @@ obj KubernetesSandbox(SandboxEnvironment) {
             core_v1 = client.CoreV1Api();
             pod_name = self._get_pod_name(sandbox_id);
             pod = core_v1.read_namespaced_pod_status(
-                pod_name, str(rec.get("namespace", self.config.namespace))
+                pod_name, str(rec_d.get("namespace", self.config.namespace))
             );
             phase = str(pod.status.phase);
             if phase == "Running" {
-                state = SandboxState.RUNNING;
+                state: Any = SandboxState.RUNNING;
             } elif phase == "Pending" {
                 state = SandboxState.STARTING;
             } elif phase in ["Failed", "Unknown"] {
@@ -1060,9 +1073,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 state = SandboxState.STOPPED;
             }
         } except Exception {
-            state = rec.get("status", SandboxState.STOPPED);
+            state = rec_d.get("status", SandboxState.STOPPED);
         }
-        created_at = float(rec.get("created_at", time.time()));
+        created_at = float(rec_d.get("created_at", time.time()));
         uptime = time.time() - created_at
             if state == SandboxState.RUNNING
             else 0.0;
@@ -1070,8 +1083,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
             state=state,
             sandbox_id=sandbox_id,
             uptime_seconds=uptime,
-            url=str(rec.get("url", "")),
-            port=int(rec.get("port", 0))
+            url=str(rec_d.get("url", "")),
+            port=int(rec_d.get("port", 0))
         );
     }
 
@@ -1088,15 +1101,17 @@ obj KubernetesSandbox(SandboxEnvironment) {
     def list_sandboxes(self: KubernetesSandbox, user_id: str) -> list[SandboxInfo] {
         results: list[SandboxInfo] = [];
         for (sid, rec) in self._registry.items() {
-            if str(rec.get("user_id", "")) == user_id {
+            rec_d: dict = dict(rec);
+            if str(rec_d.get("user_id", "")) == user_id {
+                state_val: Any = rec_d.get("status", SandboxState.STOPPED);
                 results.append(
                     SandboxInfo(
                         sandbox_id=sid,
-                        user_id=str(rec.get("user_id", "")),
-                        project_id=str(rec.get("project_id", "")),
-                        state=rec.get("status", SandboxState.STOPPED),
-                        url=str(rec.get("url", "")),
-                        created_at=float(rec.get("created_at", 0.0))
+                        user_id=str(rec_d.get("user_id", "")),
+                        project_id=str(rec_d.get("project_id", "")),
+                        state=state_val,
+                        url=str(rec_d.get("url", "")),
+                        created_at=float(rec_d.get("created_at", 0.0))
                     )
                 );
             }
@@ -1134,7 +1149,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
             return pod_name;
         }
         for (sid, rec) in self._registry.items() {
-            if str(rec.get("pod_name", "")) == pod_name {
+            rec_d: dict = dict(rec);
+            if str(rec_d.get("pod_name", "")) == pod_name {
                 return sid;
             }
         }
@@ -1215,7 +1231,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
             stale_keys = [
                 sid
                 for (sid, rec) in self._registry.items()
-                if str(rec.get("pod_name", sid)) not in live_pod_names
+                if str(dict(rec).get("pod_name", sid)) not in live_pod_names
             ];
             for key in stale_keys {
                 self._registry.pop(key, None);
@@ -1237,15 +1253,16 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def logs(self: KubernetesSandbox, sandbox_id: str, offset: int = 0) -> dict {
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
         }
+        rec_d: dict = dict(rec);
         try {
             self._init_k8s();
             import from kubernetes { client }
             core_v1 = client.CoreV1Api();
-            namespace = str(rec.get("namespace", self.config.namespace));
+            namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
             log_content = str(core_v1.read_namespaced_pod_log(
                 pod_name, namespace, container="sandbox"
@@ -1271,16 +1288,17 @@ obj KubernetesSandbox(SandboxEnvironment) {
         } except ValueError as e {
             return {"success": False, "error": str(e)};
         }
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
         }
+        rec_d: dict = dict(rec);
         try {
             self._init_k8s();
             import from kubernetes { client }
             import from kubernetes.stream { stream }
             core_v1 = client.CoreV1Api();
-            namespace = str(rec.get("namespace", self.config.namespace));
+            namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
 
             # Ensure parent directory exists
@@ -1326,16 +1344,17 @@ obj KubernetesSandbox(SandboxEnvironment) {
         } except ValueError as e {
             return {"success": False, "error": str(e)};
         }
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
         }
+        rec_d: dict = dict(rec);
         try {
             self._init_k8s();
             import from kubernetes { client }
             import from kubernetes.stream { stream }
             core_v1 = client.CoreV1Api();
-            namespace = str(rec.get("namespace", self.config.namespace));
+            namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
             result = stream(
                 core_v1.connect_get_namespaced_pod_exec,
@@ -1360,16 +1379,17 @@ obj KubernetesSandbox(SandboxEnvironment) {
         } except ValueError as e {
             return {"success": False, "error": str(e)};
         }
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
         }
+        rec_d: dict = dict(rec);
         try {
             self._init_k8s();
             import from kubernetes { client }
             import from kubernetes.stream { stream }
             core_v1 = client.CoreV1Api();
-            namespace = str(rec.get("namespace", self.config.namespace));
+            namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
             stream(
                 core_v1.connect_get_namespaced_pod_exec,
@@ -1394,16 +1414,17 @@ obj KubernetesSandbox(SandboxEnvironment) {
         } except ValueError as e {
             return {"success": False, "error": str(e)};
         }
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
         }
+        rec_d: dict = dict(rec);
         try {
             self._init_k8s();
             import from kubernetes { client }
             import from kubernetes.stream { stream }
             core_v1 = client.CoreV1Api();
-            namespace = str(rec.get("namespace", self.config.namespace));
+            namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
             result = stream(
                 core_v1.connect_get_namespaced_pod_exec,
@@ -1448,16 +1469,17 @@ obj KubernetesSandbox(SandboxEnvironment) {
     def exec_command(
         self: KubernetesSandbox, sandbox_id: str, command: str, timeout: int = 30
     ) -> dict {
-        rec = self._registry.get(sandbox_id);
+        rec: Any = self._registry.get(sandbox_id);
         if not rec {
             return {"success": False, "error": "Sandbox not found"};
         }
+        rec_d: dict = dict(rec);
         try {
             self._init_k8s();
             import from kubernetes { client }
             import from kubernetes.stream { stream }
             core_v1 = client.CoreV1Api();
-            namespace = str(rec.get("namespace", self.config.namespace));
+            namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
             result = stream(
                 core_v1.connect_get_namespaced_pod_exec,
@@ -1481,7 +1503,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         self: KubernetesSandbox, user_id: str, project_id: str
     ) -> (str | None) {
         for (sid, rec) in self._registry.items() {
-            if str(rec.get("user_id", "")) == user_id and str(rec.get("project_id", "")) == project_id {
+            rec_d: dict = dict(rec);
+            if str(rec_d.get("user_id", "")) == user_id and str(rec_d.get("project_id", "")) == project_id {
                 return sid;
             }
         }
