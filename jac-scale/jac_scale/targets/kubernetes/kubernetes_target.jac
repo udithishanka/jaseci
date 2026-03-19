@@ -244,24 +244,8 @@ obj KubernetesTarget(DeploymentTarget) {
         # jac check doesn't populate the bytecode cache — only jac_import does
         commands.append("python3 -c 'from jaclang import JacRuntimeInterface as Jac; Jac.jac_import(\"jac_scale.factories.sandbox_factory\")' > /dev/null 2>&1 || true");
 
-        # Detect client target from jac.toml (e.g. pwa)
-        client_flag = "";
-        try {
-            import tomllib;
-            import from pathlib { Path as _Path }
-            toml_path = _Path(app_config.code_folder) / "jac.toml";
-            if toml_path.exists() {
-                toml_data = tomllib.loads(toml_path.read_text(encoding='utf-8'));
-                if toml_data.get("plugins", {}).get("client", {}).get("pwa") {
-                    client_flag = " --client pwa";
-                }
-            }
-        } except Exception {
-            x = None;  # fall back to default web target
-        }
-
         # Start the application
-        commands.append(f"jac start {app_config.file_name}{client_flag}");
+        commands.append(f"jac start {app_config.file_name}");
 
         # Join all commands
         full_command = ' && '.join(commands);
