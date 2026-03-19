@@ -96,7 +96,7 @@ obj DockerSandbox(SandboxEnvironment) {
                 container = self._get_client().containers.get(
                     self._container_name(sandbox_id)
                 );
-                if container.status != "running" {
+                if str(container.status) != "running" {
                     break;
                 }
             } except Exception {
@@ -135,7 +135,7 @@ obj DockerSandbox(SandboxEnvironment) {
         try {
             user_count = 0;
             for (sid, rec) in self._registry.items() {
-                if rec.get("user_id") == user_id
+                if str(rec.get("user_id", "")) == user_id
                 and rec.get("status") != SandboxState.STOPPED {
                     user_count += 1;
                 }
@@ -212,9 +212,10 @@ obj DockerSandbox(SandboxEnvironment) {
             container.start();
             container.reload();
 
-            port_bindings = container.attrs.get("NetworkSettings", {}).get("Ports", {});
+            network_settings: Any = container.attrs.get("NetworkSettings", {});
+            port_bindings: Any = network_settings.get("Ports", {});
             mapped_port = 0;
-            binding = port_bindings.get(f"{_INTERNAL_PORT}/tcp");
+            binding: Any = port_bindings.get(f"{_INTERNAL_PORT}/tcp");
             if binding and len(binding) > 0 {
                 mapped_port = int(binding[0].get("HostPort", 0));
             }
@@ -270,7 +271,7 @@ obj DockerSandbox(SandboxEnvironment) {
             return;
         }
         try {
-            container = client.containers.get(rec["container_name"]);
+            container = client.containers.get(str(rec["container_name"]));
             container.stop(timeout=10);
             container.remove(force=True);
         } except Exception {
@@ -293,8 +294,8 @@ obj DockerSandbox(SandboxEnvironment) {
             return SandboxStatus(state=SandboxState.STOPPED, sandbox_id=sandbox_id);
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
-            container_status = container.status;
+            container = self._get_client().containers.get(str(rec["container_name"]));
+            container_status = str(container.status);
             if container_status == "running" {
                 state = rec.get("status", SandboxState.RUNNING);
             } elif container_status == "exited" {
@@ -305,15 +306,16 @@ obj DockerSandbox(SandboxEnvironment) {
         } except Exception {
             state = SandboxState.STOPPED;
         }
-        uptime = time.time() - rec.get("created_at", time.time())
+        created_at = float(rec.get("created_at", time.time()));
+        uptime = time.time() - created_at
             if state == SandboxState.RUNNING
             else 0.0;
         return SandboxStatus(
             state=state,
             sandbox_id=sandbox_id,
             uptime_seconds=uptime,
-            url=rec.get("url", ""),
-            port=rec.get("port", 0)
+            url=str(rec.get("url", "")),
+            port=int(rec.get("port", 0))
         );
     }
 
@@ -330,15 +332,15 @@ obj DockerSandbox(SandboxEnvironment) {
     def list_sandboxes(self: DockerSandbox, user_id: str) -> list[SandboxInfo] {
         results: list[SandboxInfo] = [];
         for (sid, rec) in self._registry.items() {
-            if rec.get("user_id") == user_id {
+            if str(rec.get("user_id", "")) == user_id {
                 results.append(
                     SandboxInfo(
                         sandbox_id=sid,
-                        user_id=rec.get("user_id", ""),
-                        project_id=rec.get("project_id", ""),
+                        user_id=str(rec.get("user_id", "")),
+                        project_id=str(rec.get("project_id", "")),
                         state=rec.get("status", SandboxState.STOPPED),
-                        url=rec.get("url", ""),
-                        created_at=rec.get("created_at", 0.0)
+                        url=str(rec.get("url", "")),
+                        created_at=float(rec.get("created_at", 0.0))
                     )
                 );
             }
@@ -350,7 +352,7 @@ obj DockerSandbox(SandboxEnvironment) {
         now = time.time();
         expired: list[str] = [];
         for (sid, rec) in self._registry.items() {
-            created = rec.get("created_at", now);
+            created = float(rec.get("created_at", now));
             if now - created > self.config.ttl_seconds {
                 expired.append(sid);
             }
@@ -367,9 +369,9 @@ obj DockerSandbox(SandboxEnvironment) {
             return {"success": False, "error": "Sandbox not found"};
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
-            log_bytes = container.logs(stdout=True, stderr=True, tail=500);
-            content = log_bytes.decode("utf-8", errors="replace");
+            container = self._get_client().containers.get(str(rec["container_name"]));
+            log_bytes: Any = container.logs(stdout=True, stderr=True, tail=500);
+            content = str(log_bytes.decode("utf-8", errors="replace"));
             if offset > 0 and offset < len(content) {
                 content = content[offset:];
             }
@@ -393,7 +395,7 @@ obj DockerSandbox(SandboxEnvironment) {
             return {"success": False, "error": "Sandbox not found"};
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
+            container = self._get_client().containers.get(str(rec["container_name"]));
             buf = io.BytesIO();
             content_bytes = content.encode("utf-8");
             with tarfile.open(fileobj=buf, mode="w") as tar {
@@ -420,13 +422,13 @@ obj DockerSandbox(SandboxEnvironment) {
             return {"success": False, "error": "Sandbox not found"};
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
+            container = self._get_client().containers.get(str(rec["container_name"]));
             (exit_code, output) = container.exec_run(f"cat /app/{path}", demux=True);
             if exit_code != 0 {
-                stderr = output[1].decode("utf-8") if output[1] else "File not found";
+                stderr = str(output[1].decode("utf-8")) if output[1] else "File not found";
                 return {"success": False, "error": stderr};
             }
-            file_content = output[0].decode("utf-8") if output[0] else "";
+            file_content = str(output[0].decode("utf-8")) if output[0] else "";
             return {"success": True, "path": path, "content": file_content};
         } except Exception as e {
             return {"success": False, "error": str(e)};
@@ -444,10 +446,10 @@ obj DockerSandbox(SandboxEnvironment) {
             return {"success": False, "error": "Sandbox not found"};
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
+            container = self._get_client().containers.get(str(rec["container_name"]));
             (exit_code, output) = container.exec_run(f"rm -rf /app/{path}", demux=True);
             if exit_code != 0 {
-                stderr = output[1].decode("utf-8") if output[1] else "Delete failed";
+                stderr = str(output[1].decode("utf-8")) if output[1] else "Delete failed";
                 return {"success": False, "error": stderr};
             }
             return {"success": True, "path": path};
@@ -467,7 +469,7 @@ obj DockerSandbox(SandboxEnvironment) {
             return {"success": False, "error": "Sandbox not found"};
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
+            container = self._get_client().containers.get(str(rec["container_name"]));
             (exit_code, output) = container.exec_run(
                 f"find /app/{path} -type f -not -path '*/node_modules/*' -not -path '*/.jac/*' -not -path '*/__pycache__/*' -not -path '*/dist/*' -not -path '*/.git/*'",
                 demux=True
@@ -475,11 +477,11 @@ obj DockerSandbox(SandboxEnvironment) {
             if exit_code != 0 {
                 return {"success": False, "error": "Failed to list files"};
             }
-            raw = output[0].decode("utf-8") if output[0] else "";
+            raw = str(output[0].decode("utf-8")) if output[0] else "";
             files = [
-                os.path.relpath(f.strip(), "/app")
+                os.path.relpath(str(f).strip(), "/app")
                 for f in raw.strip().split("\n")
-                if f.strip()
+                if str(f).strip()
             ];
             files.sort();
             return {"success": True, "files": files};
@@ -496,12 +498,12 @@ obj DockerSandbox(SandboxEnvironment) {
             return {"success": False, "error": "Sandbox not found"};
         }
         try {
-            container = self._get_client().containers.get(rec["container_name"]);
+            container = self._get_client().containers.get(str(rec["container_name"]));
             (exit_code, output) = container.exec_run(
                 f"bash -c '{command}'", workdir="/app", demux=True
             );
-            stdout = output[0].decode("utf-8") if output[0] else "";
-            stderr = output[1].decode("utf-8") if output[1] else "";
+            stdout = str(output[0].decode("utf-8")) if output[0] else "";
+            stderr = str(output[1].decode("utf-8")) if output[1] else "";
             return {
                 "success": True,
                 "exit_code": exit_code,
@@ -514,7 +516,7 @@ obj DockerSandbox(SandboxEnvironment) {
     }
 
     def _parse_memory(self: DockerSandbox, mem_str: str) -> int {
-        mem_str = mem_str.strip().upper();
+        mem_str = str(mem_str).strip().upper();
         if mem_str.endswith("GI") {
             return int(float(mem_str[:-2]) * 1073741824);
         } elif mem_str.endswith("MI") {
@@ -532,7 +534,7 @@ obj DockerSandbox(SandboxEnvironment) {
     }
 
     def _parse_cpu(self: DockerSandbox, cpu_str: str) -> int {
-        cpu_str = cpu_str.strip().lower();
+        cpu_str = str(cpu_str).strip().lower();
         if cpu_str.endswith("m") {
             millicores = int(cpu_str[:-1]);
             return millicores * 1000000;
@@ -544,7 +546,7 @@ obj DockerSandbox(SandboxEnvironment) {
         self: DockerSandbox, user_id: str, project_id: str
     ) -> (str | None) {
         for (sid, rec) in self._registry.items() {
-            if rec.get("user_id") == user_id and rec.get("project_id") == project_id {
+            if str(rec.get("user_id", "")) == user_id and str(rec.get("project_id", "")) == project_id {
                 return sid;
             }
         }
