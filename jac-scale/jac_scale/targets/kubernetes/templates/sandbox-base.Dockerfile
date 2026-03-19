@@ -10,7 +10,7 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
 # Install Jac ecosystem
-RUN pip install --no-cache-dir jaclang jac-scale jac-client
+RUN pip install --no-cache-dir jaclang jac-scale jac-client byllm watchdog
 
 # Pre-warm: ensure jac CLI is available
 RUN jac --version
