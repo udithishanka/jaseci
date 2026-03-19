@@ -240,9 +240,8 @@ obj KubernetesTarget(DeploymentTarget) {
         # Install requirements
         commands.append('jac install');
 
-        # Pre-compile jac-scale sandbox modules by running them through the Jac import system
-        # jac check doesn't populate the bytecode cache — only jac_import does
-        commands.append("python3 -c 'from jaclang import JacRuntimeInterface as Jac; Jac.jac_import(\"jac_scale.factories.sandbox_factory\")' > /dev/null 2>&1 || true");
+        # Pre-compile jac-scale sandbox modules via jac run (populates bytecode cache)
+        commands.append("printf 'import from jac_scale.factories.sandbox_factory { SandboxFactory }\\nimport from jac_scale.providers.sandbox.local_sandbox { LocalSandbox }\\n' > /tmp/_precompile.jac && jac run /tmp/_precompile.jac > /dev/null 2>&1 || true");
 
         # Start the application
         commands.append(f"jac start {app_config.file_name}");
