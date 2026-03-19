@@ -180,7 +180,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
         short = str(uuid.uuid4())[:8];
         # K8s names must be lowercase, alphanumeric, max 63 chars
         safe_user = str(user_id[:20]).lower().replace("_", "-");
-        safe_proj = str(project_id[:10]).lower().replace("_", "-") if project_id else "def";
+        safe_proj = str(project_id[:10]).lower().replace("_", "-")
+            if project_id
+            else "def";
         return f"jac-sbx-{safe_user}-{safe_proj}-{short}";
     }
 
@@ -743,9 +745,11 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     }
                     # Even if not marked ready, if Running, check logs
                     try {
-                        log_content = str(core_v1.read_namespaced_pod_log(
-                            pod_name, namespace, container="sandbox", tail_lines=50
-                        ));
+                        log_content = str(
+                            core_v1.read_namespaced_pod_log(
+                                pod_name, namespace, container="sandbox", tail_lines=50
+                            )
+                        );
                         if "Server ready" in log_content {
                             ready = True;
                             break;
@@ -766,7 +770,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
         try {
             rec_inner: Any = self._registry.get(sandbox_id);
             if rec_inner {
-                rec_inner["status"] = SandboxState.RUNNING if ready else SandboxState.ERROR;
+                rec_inner["status"] = SandboxState.RUNNING
+                    if ready
+                    else SandboxState.ERROR;
             }
         } finally {
             self._lock.release();
@@ -802,7 +808,10 @@ obj KubernetesSandbox(SandboxEnvironment) {
             for (sid, rec) in self._registry.items() {
                 rec_d: dict = dict(rec);
                 if str(rec_d.get("user_id", "")) == user_id
-                and rec_d.get("status") not in [SandboxState.STOPPED, SandboxState.ERROR] {
+                and rec_d.get("status") not in [
+                    SandboxState.STOPPED,
+                    SandboxState.ERROR
+                ] {
                     user_count += 1;
                 }
             }
@@ -1076,9 +1085,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
             state = rec_d.get("status", SandboxState.STOPPED);
         }
         created_at = float(rec_d.get("created_at", time.time()));
-        uptime = time.time() - created_at
-            if state == SandboxState.RUNNING
-            else 0.0;
+        uptime = time.time() - created_at if state == SandboxState.RUNNING else 0.0;
         return SandboxStatus(
             state=state,
             sandbox_id=sandbox_id,
@@ -1264,9 +1271,11 @@ obj KubernetesSandbox(SandboxEnvironment) {
             core_v1 = client.CoreV1Api();
             namespace = str(rec_d.get("namespace", self.config.namespace));
             pod_name = self._get_pod_name(sandbox_id);
-            log_content = str(core_v1.read_namespaced_pod_log(
-                pod_name, namespace, container="sandbox"
-            ));
+            log_content = str(
+                core_v1.read_namespaced_pod_log(
+                    pod_name, namespace, container="sandbox"
+                )
+            );
             if offset > 0 {
                 if offset >= len(log_content) {
                     return {"success": True, "content": "", "offset": offset};
@@ -1504,7 +1513,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
     ) -> (str | None) {
         for (sid, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
-            if str(rec_d.get("user_id", "")) == user_id and str(rec_d.get("project_id", "")) == project_id {
+            if str(rec_d.get("user_id", "")) == user_id
+            and str(rec_d.get("project_id", "")) == project_id {
                 return sid;
             }
         }

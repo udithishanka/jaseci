@@ -426,9 +426,7 @@ obj LocalSandbox(SandboxEnvironment) {
                     state = SandboxState.STOPPED;
                 }
                 created_at = float(rec_d.get("created_at", time.time()));
-                uptime = time.time() - created_at
-                    if alive
-                    else 0.0;
+                uptime = time.time() - created_at if alive else 0.0;
                 port_val = int(rec_d.get("port", 0));
                 url = f"http://localhost:{port_val}" if alive else "";
                 return SandboxStatus(
@@ -508,9 +506,12 @@ obj LocalSandbox(SandboxEnvironment) {
         for (key, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
             if str(rec_d.get("sandbox_id", "")) == sandbox_id {
-                log_path = str(rec_d.get(
-                    "log_path", os.path.join(str(rec_d.get("dir", "")), ".jac-preview.log")
-                ));
+                log_path = str(
+                    rec_d.get(
+                        "log_path",
+                        os.path.join(str(rec_d.get("dir", "")), ".jac-preview.log")
+                    )
+                );
                 if not os.path.exists(log_path) {
                     return {"success": True, "content": "", "offset": 0};
                 }

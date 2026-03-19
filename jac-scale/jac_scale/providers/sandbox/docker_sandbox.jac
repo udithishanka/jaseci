@@ -306,9 +306,7 @@ obj DockerSandbox(SandboxEnvironment) {
             state = SandboxState.STOPPED;
         }
         created_at = float(rec_d.get("created_at", time.time()));
-        uptime = time.time() - created_at
-            if state == SandboxState.RUNNING
-            else 0.0;
+        uptime = time.time() - created_at if state == SandboxState.RUNNING else 0.0;
         return SandboxStatus(
             state=state,
             sandbox_id=sandbox_id,
@@ -430,7 +428,9 @@ obj DockerSandbox(SandboxEnvironment) {
             container = self._get_client().containers.get(str(rec_d["container_name"]));
             (exit_code, output) = container.exec_run(f"cat /app/{path}", demux=True);
             if exit_code != 0 {
-                stderr = str(output[1].decode("utf-8")) if output[1] else "File not found";
+                stderr = str(output[1].decode("utf-8"))
+                    if output[1]
+                    else "File not found";
                 return {"success": False, "error": stderr};
             }
             file_content = str(output[0].decode("utf-8")) if output[0] else "";
@@ -455,7 +455,9 @@ obj DockerSandbox(SandboxEnvironment) {
             container = self._get_client().containers.get(str(rec_d["container_name"]));
             (exit_code, output) = container.exec_run(f"rm -rf /app/{path}", demux=True);
             if exit_code != 0 {
-                stderr = str(output[1].decode("utf-8")) if output[1] else "Delete failed";
+                stderr = str(output[1].decode("utf-8"))
+                    if output[1]
+                    else "Delete failed";
                 return {"success": False, "error": stderr};
             }
             return {"success": True, "path": path};
@@ -555,7 +557,8 @@ obj DockerSandbox(SandboxEnvironment) {
     ) -> (str | None) {
         for (sid, rec) in self._registry.items() {
             rec_d: dict = dict(rec);
-            if str(rec_d.get("user_id", "")) == user_id and str(rec_d.get("project_id", "")) == project_id {
+            if str(rec_d.get("user_id", "")) == user_id
+            and str(rec_d.get("project_id", "")) == project_id {
                 return sid;
             }
         }

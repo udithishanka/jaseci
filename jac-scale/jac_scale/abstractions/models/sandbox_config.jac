@@ -29,9 +29,9 @@ obj SandboxConfig {
             memory_limit=str(config.get("memory_limit", "512Mi")),
             base_image=str(config.get("base_image", "python:3.12-slim")),
             storage_limit=str(config.get("storage_limit", "256Mi")),
-            domain_template=str(config.get(
-                "domain_template", "{sandbox_id}.preview.example.com"
-            )),
+            domain_template=str(
+                config.get("domain_template", "{sandbox_id}.preview.example.com")
+            ),
             security_context_enabled=bool(config.get("security_context", True)),
             network_isolation=bool(config.get("network_isolation", True)),
             ingress_class=str(config.get("ingress_class", "nginx")),
