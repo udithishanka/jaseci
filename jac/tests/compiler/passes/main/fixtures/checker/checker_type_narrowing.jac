@@ -551,3 +551,40 @@ def test_error_or_no_persist(x: Dog | None) -> str {
     discard = (not x or x.bark());
     return x.bark();  # <-- Error: x is still Dog | None here
 }
+
+# =========================================================================
+# 19. Ternary (IfElseExpr) type narrowing
+#     In `X if COND else Y`, when evaluating X, COND was true;
+#     when evaluating Y, COND was false. The type checker should apply
+#     inverse narrowing in the else branch.
+# =========================================================================
+
+# 19a. `x is None` in ternary: else branch narrows x to Dog (excludes None)
+def test_ternary_is_none_else(x: Dog | None) -> Dog {
+    result: Dog = Dog(name="default") if (x is None) else x;  # <-- Ok: x narrowed to Dog in else branch
+    return result;
+}
+
+# 19b. `x is not None` in ternary: true branch narrows x to Dog
+def test_ternary_is_not_none(x: Dog | None) -> Dog {
+    result: Dog = x if (x is not None) else Dog(name="default");  # <-- Ok: x narrowed to Dog in true branch
+    return result;
+}
+
+# 19c. Truthiness negation in ternary: `not x` false means x is truthy (not None)
+def test_ternary_not_x_else(x: Dog | None) -> Dog {
+    result: Dog = Dog(name="default") if (not x) else x;  # <-- Ok: x narrowed to Dog in else branch
+    return result;
+}
+
+# 19d. isinstance in ternary else branch (already worked via isinstance_info path)
+def test_ternary_isinstance_else(animal: Dog | Cat) -> str {
+    result: Cat = Cat(name="c") if isinstance(animal, Dog) else animal;  # <-- Ok: animal narrowed to Cat
+    return result.meow();
+}
+
+# E12. Ternary narrowing error — true branch has None type, cannot assign to Dog
+def test_error_ternary_true_branch_none(x: Dog | None) -> Dog {
+    result: Dog = x if (x is None) else Dog(name="d");  # <-- Error: x is NoneType in true branch
+    return result;
+}

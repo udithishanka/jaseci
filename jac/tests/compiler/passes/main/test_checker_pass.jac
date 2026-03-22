@@ -1408,7 +1408,7 @@ test "type_narrowing" {
     );
     TypeCheckPass(ir_in=mod, prog=program);
 
-    assert len(program.errors_had) == 13 , f"Expected exactly 13 type errors, but got " + f"{len(
+    assert len(program.errors_had) == 14 , f"Expected exactly 14 type errors, but got " + f"{len(
         program.errors_had
     )}:\n" + "\n---\n".join(err.pretty_print() for err in program.errors_had);
 
@@ -1464,6 +1464,10 @@ test "type_narrowing" {
         """
         return x.bark();  # <-- Error: x is still Dog | None here
         ^^^^^^^^^^^^^^^^
+        """,
+        """
+        result: Dog = x if (x is None) else Dog(name="d");  # <-- Error: x is NoneType in true branch
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
         """
     ];
 

@@ -1346,24 +1346,11 @@ impl TypeEvaluator._get_type_of_expression_core(
             self._in_ternary_expr_depth -= 1;
             self.pop_narrowing_scope();
 
-            # Evaluate false branch with inverse narrowing
+            # Evaluate false branch with inverse narrowing.
+            # process_negated_condition handles all condition types uniformly:
+            # isinstance, is None / is not None, truthiness (not x), and OR chains.
             self.push_narrowing_scope();
-            if isinstance_info {
-                (narrowing_key, narrowed_type) = isinstance_info;
-                original_type = self.get_type_of_symbol(
-                    self._find_symbol_by_key(narrowing_key, expr.condition)
-                )
-                    if self._find_symbol_by_key(narrowing_key, expr.condition)
-                    else None;
-                if original_type {
-                    excluded_type = self.exclude_type_from_union(
-                        original_type, narrowed_type
-                    );
-                    if excluded_type is not original_type {
-                        self.add_scope_narrowing(narrowing_key, excluded_type);
-                    }
-                }
-            }
+            self.process_negated_condition(expr.condition);
             self._in_ternary_expr_depth += 1;
             false_type = self.get_type_of_expression(expr.else_value);
             self._in_ternary_expr_depth -= 1;
