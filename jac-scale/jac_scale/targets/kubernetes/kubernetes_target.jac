@@ -43,8 +43,7 @@ obj KubernetesTarget(DeploymentTarget) {
         logger: (Logger | None) = None,
         k8s_config: KubernetesConfig by postinit,
         env_list: list = [],
-        secrets: dict[str, str] = {},
-        sandbox_config: dict = {};
+        secrets: dict[str, str] = {};
 
     def postinit {
         self.k8s_config = self.config;
@@ -1219,193 +1218,6 @@ obj KubernetesTarget(DeploymentTarget) {
         return repository_name;
     }
 
-    """Deploy sandbox proxy when proxy_mode is enabled in sandbox config.
-
-    Creates RBAC, Deployment, Service, and Ingress for the sandbox proxy
-    in the sandbox namespace. The proxy watches sandbox pods and routes
-    incoming requests by sandbox_id extracted from the hostname.
-    Idempotent — safe to call on every deployment.
-    """
-    def _deploy_sandbox_proxy(
-        apps_v1: Any,
-        core_v1: Any,
-        networking_v1: Any,
-        rbac_v1: Any
-    ) -> None {
-        if not self.sandbox_config.get('enabled') {
-            return;
-        }
-        if not self.sandbox_config.get('proxy_mode') {
-            return;
-        }
-        sandbox_ns = str(self.sandbox_config.get('namespace', 'jac-sandboxes'));
-        base_image = str(self.sandbox_config.get('base_image', 'python:3.12-slim'));
-        domain_template = str(
-            self.sandbox_config.get('domain_template', '{sandbox_id}.preview.example.com')
-        );
-        ingress_annotations: dict = dict(
-            self.sandbox_config.get('ingress_annotations', {})
-        );
-        ingress_class = str(self.sandbox_config.get('ingress_class', 'nginx'));
-
-        import re;
-        wildcard_host = re.sub(r'\{[^}]+\}', '*', domain_template);
-
-        if self.logger {
-            self.logger.info(
-                f"Deploying sandbox proxy to '{sandbox_ns}' (host: {wildcard_host})"
-            );
-        }
-
-        ensure_namespace_exists(sandbox_ns);
-
-        # RBAC: ServiceAccount, Role, RoleBinding
-        sa_body = {
-            'apiVersion': 'v1', 'kind': 'ServiceAccount',
-            'metadata': {'name': 'sandbox-proxy', 'namespace': sandbox_ns}
-        };
-        role_body = {
-            'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'Role',
-            'metadata': {'name': 'sandbox-proxy-reader', 'namespace': sandbox_ns},
-            'rules': [{'apiGroups': [''], 'resources': ['pods'], 'verbs': ['get', 'list', 'watch']}]
-        };
-        rb_body = {
-            'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'RoleBinding',
-            'metadata': {'name': 'sandbox-proxy-reader-binding', 'namespace': sandbox_ns},
-            'subjects': [{'kind': 'ServiceAccount', 'name': 'sandbox-proxy', 'namespace': sandbox_ns}],
-            'roleRef': {'kind': 'Role', 'name': 'sandbox-proxy-reader', 'apiGroup': 'rbac.authorization.k8s.io'}
-        };
-        try {
-            core_v1.read_namespaced_service_account(name='sandbox-proxy', namespace=sandbox_ns);
-        } except ApiException as e {
-            if e.status == 404 {
-                core_v1.create_namespaced_service_account(namespace=sandbox_ns, body=sa_body);
-            }
-        }
-        try {
-            rbac_v1.read_namespaced_role(name='sandbox-proxy-reader', namespace=sandbox_ns);
-        } except ApiException as e {
-            if e.status == 404 {
-                rbac_v1.create_namespaced_role(namespace=sandbox_ns, body=role_body);
-            }
-        }
-        try {
-            rbac_v1.read_namespaced_role_binding(name='sandbox-proxy-reader-binding', namespace=sandbox_ns);
-        } except ApiException as e {
-            if e.status == 404 {
-                rbac_v1.create_namespaced_role_binding(namespace=sandbox_ns, body=rb_body);
-            }
-        }
-
-        # Find the proxy script path from the installed jac_scale package
-        import os;
-        import jac_scale as _jac_scale_mod;
-        proxy_script_path = os.path.join(
-            os.path.dirname(_jac_scale_mod.__file__),
-            'providers', 'proxy', 'sandbox_proxy.jac'
-        );
-        run_cmd = f"jac run {proxy_script_path}";
-
-        # Deployment
-        proxy_deployment = {
-            'apiVersion': 'apps/v1', 'kind': 'Deployment',
-            'metadata': {'name': 'sandbox-proxy', 'namespace': sandbox_ns, 'labels': {'app': 'sandbox-proxy'}},
-            'spec': {
-                'replicas': 2,
-                'selector': {'matchLabels': {'app': 'sandbox-proxy'}},
-                'template': {
-                    'metadata': {'labels': {'app': 'sandbox-proxy'}},
-                    'spec': {
-                        'serviceAccountName': 'sandbox-proxy',
-                        'containers': [{
-                            'name': 'proxy',
-                            'image': base_image,
-                            'command': ['/bin/sh', '-c', run_cmd],
-                            'ports': [{'containerPort': 8080}],
-                            'env': [
-                                {'name': 'SANDBOX_NAMESPACE', 'value': sandbox_ns},
-                                {'name': 'SANDBOX_LABEL', 'value': 'jac-sandbox=true'},
-                                {'name': 'INTERNAL_PORT', 'value': '8000'}
-                            ],
-                            'resources': {
-                                'requests': {'cpu': '50m', 'memory': '128Mi'},
-                                'limits': {'cpu': '500m', 'memory': '256Mi'}
-                            },
-                            'readinessProbe': {
-                                'httpGet': {'path': '/_proxy/health', 'port': 8080},
-                                'initialDelaySeconds': 10, 'periodSeconds': 10
-                            },
-                            'livenessProbe': {
-                                'httpGet': {'path': '/_proxy/health', 'port': 8080},
-                                'initialDelaySeconds': 15, 'periodSeconds': 30
-                            }
-                        }]
-                    }
-                }
-            }
-        };
-        delete_if_exists(
-            apps_v1.delete_namespaced_deployment, 'sandbox-proxy', sandbox_ns, 'Deployment'
-        );
-        apps_v1.create_namespaced_deployment(namespace=sandbox_ns, body=proxy_deployment);
-
-        # Service
-        svc_body = {
-            'apiVersion': 'v1', 'kind': 'Service',
-            'metadata': {'name': 'sandbox-proxy', 'namespace': sandbox_ns, 'labels': {'app': 'sandbox-proxy'}},
-            'spec': {
-                'type': 'ClusterIP',
-                'selector': {'app': 'sandbox-proxy'},
-                'ports': [{'port': 8080, 'targetPort': 8080, 'protocol': 'TCP'}]
-            }
-        };
-        try {
-            core_v1.read_namespaced_service(name='sandbox-proxy', namespace=sandbox_ns);
-        } except ApiException as e {
-            if e.status == 404 {
-                core_v1.create_namespaced_service(namespace=sandbox_ns, body=svc_body);
-            }
-        }
-
-        # Ingress (only if ingress_annotations provided, indicating cloud ingress support)
-        if ingress_annotations {
-            ingress_annotations['alb.ingress.kubernetes.io/healthcheck-path'] = '/_proxy/health';
-            ingress_body = {
-                'apiVersion': 'networking.k8s.io/v1', 'kind': 'Ingress',
-                'metadata': {
-                    'name': 'sandbox-proxy-wildcard',
-                    'namespace': sandbox_ns,
-                    'annotations': ingress_annotations
-                },
-                'spec': {
-                    'ingressClassName': ingress_class,
-                    'rules': [{
-                        'host': wildcard_host,
-                        'http': {'paths': [{
-                            'path': '/',
-                            'pathType': 'Prefix',
-                            'backend': {'service': {'name': 'sandbox-proxy', 'port': {'number': 8080}}}
-                        }]}
-                    }]
-                }
-            };
-            try {
-                networking_v1.read_namespaced_ingress(name='sandbox-proxy-wildcard', namespace=sandbox_ns);
-                networking_v1.replace_namespaced_ingress(
-                    name='sandbox-proxy-wildcard', namespace=sandbox_ns, body=ingress_body
-                );
-            } except ApiException as e {
-                if e.status == 404 {
-                    networking_v1.create_namespaced_ingress(namespace=sandbox_ns, body=ingress_body);
-                }
-            }
-        }
-
-        if self.logger {
-            self.logger.info(f"Sandbox proxy deployed successfully in '{sandbox_ns}'");
-        }
-    }
-
     def deploy(app_config: AppConfig) -> DeploymentResult {
         # 1. Initialize and validate
         app_name = app_config.app_name or self.k8s_config.app_name;
@@ -1640,18 +1452,7 @@ obj KubernetesTarget(DeploymentTarget) {
             );
             details["deploy_ingress"] = "Successful";
 
-            # 16. Deploy sandbox proxy if proxy_mode is enabled
-            try {
-                self._deploy_sandbox_proxy(apps_v1, core_v1, networking_v1, rbac_v1);
-                details["deploy_sandbox_proxy"] = "Successful";
-            } except Exception as proxy_err {
-                details["deploy_sandbox_proxy"] = f"Warning: {proxy_err}";
-                if self.logger {
-                    self.logger.warning(f"Sandbox proxy deployment failed (non-fatal): {proxy_err}");
-                }
-            }
-
-            # 18. Wait for deployment and get service URL
+            # 16. Wait for deployment and get service URL
             deployment_details = self._wait_for_deployment(
                 app_name, namespace, health_check_path, cluster_env
             );

@@ -76,8 +76,6 @@ def _scale_pre_hook(context: HookContext) -> None {
         base_file_path = os.path.basename(filename);
         # Resolve secrets from [plugins.scale.secrets] config
         deployment_target.secrets = scale_config.get_secrets_config();
-        # Pass sandbox config so proxy can be auto-deployed when proxy_mode=true
-        deployment_target.sandbox_config = scale_config.get_sandbox_config();
         # Handle image registry if build is requested
         if build {
             image_registry = ImageRegistryFactory.create(registry, target_config);

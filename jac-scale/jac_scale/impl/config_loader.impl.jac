@@ -204,12 +204,6 @@ impl JacScaleConfig.get_webhook_config(self: JacScaleConfig) -> dict[str, Any] {
     };
 }
 
-"""Get sandbox configuration from [plugins.scale.sandbox] section."""
-impl JacScaleConfig.get_sandbox_config(self: JacScaleConfig) -> dict[str, Any] {
-    config = self.load();
-    return config.get('sandbox', {});
-}
-
 """Get secrets from [plugins.scale.secrets] section.
 
 Values using ${ENV_VAR} syntax are auto-resolved by core's interpolate_env_vars.
