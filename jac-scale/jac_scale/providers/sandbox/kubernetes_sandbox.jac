@@ -1242,6 +1242,13 @@ obj KubernetesSandbox(SandboxEnvironment) {
         if cleaned > 0 and self.logger {
             self.logger.info(f"Cleanup: removed {cleaned} stale sandboxes/pods");
         }
+
+        # Replenish warm pool if pods were cleaned up and pool size dropped below target
+        if self.config.warm_pool_size > 0 and cleaned > 0 {
+            replenish = Thread(target=self._ensure_warm_pool, daemon=True);
+            replenish.start();
+        }
+
         return cleaned;
     }
 
