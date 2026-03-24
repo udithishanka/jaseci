@@ -29,6 +29,7 @@ with entry {
 import from jaclang.compiler.type_system { operations }
 import from jaclang.compiler.type_system { type_utils }
 import from jaclang.compiler.type_system { properties }
+import from jaclang.compiler.type_system { enum_utils }
 import from jaclang.compiler.type_system.types { TypeBase }
 
 import from jaclang.jac0core.diagnostics {
@@ -121,6 +122,17 @@ obj PrefetchedTypes {
         node_class: TypeBase | None = None,
         walker_class: TypeBase | None = None,
         jsx_element_class: TypeBase | None = None,
+        # Fixed-width numeric types
+        i8_class: TypeBase | None = None,
+        u8_class: TypeBase | None = None,
+        i16_class: TypeBase | None = None,
+        u16_class: TypeBase | None = None,
+        i32_class: TypeBase | None = None,
+        u32_class: TypeBase | None = None,
+        i64_class: TypeBase | None = None,
+        u64_class: TypeBase | None = None,
+        f32_class: TypeBase | None = None,
+        f64_class: TypeBase | None = None,
         # Prefetched enum base class
         enum_class: TypeBase | None = None,
         set_class: TypeBase | None = None;
@@ -173,7 +185,18 @@ obj TypeEvaluator {
     def _try_resolve_forward_ref(expr: uni.String) -> TypeBase | None;
     def get_type_of_module(node_: uni.ModulePath) -> types.TypeBase;
     def get_type_of_module_item(node_: uni.ModuleItem) -> types.TypeBase;
+    def _resolve_star_import_symbol(
+        mod: uni.Module, name: str, visited: set[int] | None = None
+    ) -> uni.Symbol | None;
+
     def _extract_type_params(node_: uni.Archetype) -> list[types.TypeVarType];
+    def _collect_typevars_from_base(
+        base_class: uni.AtomTrailer,
+        outer_names: set[str],
+        seen_names: set[str],
+        type_params: list[types.TypeVarType]
+    ) -> None;
+
     def get_type_of_class(node_: uni.Archetype) -> types.ClassType;
     def get_type_of_enum(node_: uni.Enum) -> types.ClassType;
     def get_type_of_ability(node_: uni.Ability) -> TypeBase;
@@ -251,6 +274,14 @@ obj TypeEvaluator {
     def _is_expr_self(expr: uni.Expr) -> bool;
     def _is_expr_super(expr: uni.Expr) -> bool;
     def _get_enclosing_function(nd: uni.UniNode) -> uni.Ability | None;
+    def _get_enclosing_return_scope(
+        nd: uni.UniNode
+    ) -> uni.Ability | uni.LambdaExpr | None;
+
+    def _get_declared_return_type(
+        scope: uni.Ability | uni.LambdaExpr
+    ) -> TypeBase | None;
+
     def _get_enclosing_method(nd: uni.UniNode) -> uni.Ability | None;
     def _get_enclosing_class(nd: uni.UniNode) -> uni.Archetype | None;
     def _get_type_of_self(node_: uni.SpecialVarRef) -> TypeBase;
@@ -341,7 +372,7 @@ obj TypeEvaluator {
     # -------------------------------------------------------------------------
     def assign_type_to_type_var(
         param_type: TypeBase, arg_type: TypeBase, bindings: dict[str, TypeBase]
-    ) -> None;
+    ) -> bool;
 
     def infer_type_args(
         caller_type: types.ClassType, expr: uni.FuncCall
@@ -407,6 +438,7 @@ obj TypeEvaluator {
     def get_narrowing_key(expr: uni.Expr) -> str | None;
     def _find_symbol_by_key(key: str, condition: uni.Expr) -> uni.Symbol | None;
     def process_condition(condition: uni.Expr) -> None;
+    def process_negated_condition(condition: uni.Expr) -> None;
     # --- CFG-based narrowing (backward traversal) ---
     def get_narrowed_type(symbol: uni.Symbol, at_node: uni.UniNode) -> TypeBase | None;
     def _compute_narrowed_at(
@@ -426,6 +458,10 @@ obj TypeEvaluator {
         symbol: uni.Symbol
     ) -> TypeBase | None;
 
+    def _refine_isinstance_type(
+        narrowing_key: str, isinstance_type: TypeBase, condition: uni.Expr
+    ) -> TypeBase;
+
     def _filter_union_for_isinstance(
         base_type: TypeBase, target_type: TypeBase
     ) -> TypeBase | None;
@@ -436,4 +472,5 @@ obj TypeEvaluator {
     def _get_type_from_match_pattern(pattern: uni.MatchPattern) -> TypeBase | None;
     def _union_contains_none(union_type: TypeBase) -> bool;
     def _extract_isinstance_info(condition: uni.Expr) -> tuple[str, TypeBase] | None;
+    def _is_ellipsis_only_body(body: list[uni.CodeBlockStmt]) -> bool;
 }
