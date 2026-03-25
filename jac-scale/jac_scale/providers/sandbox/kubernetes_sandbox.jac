@@ -344,7 +344,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 name="code-configmap",
                 config_map=client.V1ConfigMapVolumeSource(name=cm_name)
             ),
-            client.V1Volume(name="app-data", empty_dir=client.V1EmptyDirVolumeSource(size_limit=self.config.app_storage_limit)),
+            client.V1Volume(
+                name="app-data",
+                empty_dir=client.V1EmptyDirVolumeSource(
+                    size_limit=self.config.app_storage_limit
+                )
+            ),
             client.V1Volume(
                 name="tmp-scratch",
                 empty_dir=client.V1EmptyDirVolumeSource(
@@ -447,7 +452,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
         );
 
         volumes = [
-            client.V1Volume(name="app-data", empty_dir=client.V1EmptyDirVolumeSource(size_limit=self.config.app_storage_limit)),
+            client.V1Volume(
+                name="app-data",
+                empty_dir=client.V1EmptyDirVolumeSource(
+                    size_limit=self.config.app_storage_limit
+                )
+            ),
             client.V1Volume(
                 name="tmp-scratch",
                 empty_dir=client.V1EmptyDirVolumeSource(
