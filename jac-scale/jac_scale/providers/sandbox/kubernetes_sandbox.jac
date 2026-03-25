@@ -302,7 +302,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 "  target=$(echo \"$f\" | sed 's/--/\\//g'); "
                 "  mkdir -p \"/app/$(dirname \"$target\")\"; "
                 "  cp \"$f\" \"/app/$target\"; "
-                "done && echo 'Code copied to /app'"
+                "done && chown -R 1000:1000 /app && echo 'Code copied to /app'"
             ],
             volume_mounts=[
                 client.V1VolumeMount(
