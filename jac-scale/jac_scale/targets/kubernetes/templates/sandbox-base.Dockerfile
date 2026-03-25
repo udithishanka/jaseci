@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir jaclang jac-scale jac-client watchdog
 # Pre-warm: ensure jac CLI is available
 RUN jac --version
 
-# Ensure /app is writable by non-root user (security_context runs as uid 1000)
+# Create non-root user for security_context (uid 1000)
+RUN groupadd -g 1000 jac && useradd -u 1000 -g jac -m -s /bin/bash jac
 RUN mkdir -p /app && chown 1000:1000 /app
 
 WORKDIR /app
