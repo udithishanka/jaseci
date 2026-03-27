@@ -203,6 +203,7 @@ obj KubernetesTarget(DeploymentTarget) {
             commands.append('pip install -e ./jac-scale');
             commands.append('pip install -e ./jac-client');
             commands.append('pip install -e ./jac-byllm');
+            commands.append('pip install mcp');
             commands.append('cd ..');
         } else {
             packages = config.plugin_versions or {};
@@ -232,6 +233,7 @@ obj KubernetesTarget(DeploymentTarget) {
                     commands.append(f'pip install byllm=={byllm_v}');
                 }
             }
+            commands.append('pip install mcp');
         }
 
         # Change to app directory (project is already copied there via volume mount)
