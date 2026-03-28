@@ -1199,12 +1199,23 @@ impl EsastGenPass.exit_func_call(nd: uni.FuncCall) -> None {
             _obj_type = None;
         }
         self._ensure_emitters();
-        if (
-            isinstance(_obj_type, jtypes.ClassType)
-            and _obj_type.shared
-            and _obj_type.shared.class_name in self._primitive_type_names
-        ) {
-            _type_name = _obj_type.shared.class_name;
+        _type_name = "";
+        if isinstance(_obj_type, jtypes.ClassType) and _obj_type.shared {
+            # Direct match (e.g. str, list, dict).
+            if _obj_type.shared.class_name in self._primitive_type_names {
+                _type_name = _obj_type.shared.class_name;
+            } else {
+                # Walk the MRO to catch subtypes like LiteralString → str.
+                for _base in _obj_type.shared.mro {
+                    if _base.shared
+                    and _base.shared.class_name in self._primitive_type_names {
+                        _type_name = _base.shared.class_name;
+                        break;
+                    }
+                }
+            }
+        }
+        if _type_name {
             _emitter = self._primitive_emitters.get(_type_name);
             _method_name = callee.property.name;
             _emit_fn_name = "emit_" + _method_name;
