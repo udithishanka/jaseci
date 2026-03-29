@@ -1084,8 +1084,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
             } else {
                 state = SandboxState.STOPPED;
             }
-        } except Exception {
-            state = rec_d.get("status", SandboxState.STOPPED);
+        } except Exception as e {
+            print(f"[sandbox-status] Pod query failed for {sandbox_id}: {e}");
+            state = SandboxState.STOPPED;
         }
         created_at = float(rec_d.get("created_at", time.time()));
         uptime = time.time() - created_at if state == SandboxState.RUNNING else 0.0;
