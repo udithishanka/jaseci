@@ -36,7 +36,7 @@ scale_plugin_config = "jac_scale.plugin_config:JacScalePluginConfig"
 include = ["jac_scale*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.jac", "*.impl/*.jac", "*.cl/*.jac"]
+"*" = ["*.jac", "*.impl/*.jac", "*.cl/*.jac", "*.toml", "*.css"]
 jac_scale = ["_precompiled/**/*.jir", "_precompiled/manifest.json", "templates/*.html", "providers/**/*.template"]
 
 [build-system]
