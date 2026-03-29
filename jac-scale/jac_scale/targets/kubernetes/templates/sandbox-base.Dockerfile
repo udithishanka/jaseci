@@ -14,11 +14,20 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y -qq nodejs > /dev/null 2>&1 && \
     rm -rf /var/lib/apt/lists/*
 
-# Install agent-browser CLI globally + system deps + Chrome (as root)
+# Install Chrome system dependencies (agent-browser --with-deps is unreliable)
+RUN apt-get update -qq && \
+    apt-get install -y -qq \
+    libglib2.0-0 libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libxkbcommon0 libasound2t64 libgbm1 libcairo2 libpango-1.0-0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libatspi2.0-0 \
+    fonts-liberation xdg-utils > /dev/null 2>&1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install agent-browser CLI globally + Chrome binary (as root)
 # Chrome binary lands in /root/.agent-browser/ — sandbox pods run as root
 # when security_context is disabled in jac.toml
 RUN npm install -g agent-browser && \
-    agent-browser install --with-deps
+    agent-browser install
 
 # Create non-root user for security_context (uid 1000)
 RUN groupadd -g 1000 jac && useradd -u 1000 -g jac -m -s /bin/bash jac
