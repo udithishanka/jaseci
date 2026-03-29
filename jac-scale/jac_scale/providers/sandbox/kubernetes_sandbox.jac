@@ -16,6 +16,7 @@ import from jac_scale.abstractions.models.sandbox_status {
     SandboxInfo
 }
 import from jac_scale.abstractions.logger { Logger }
+import from jaclang.cli.console { console }
 import from jac_scale.factories.ingress_factory { IngressFactory }
 
 glob _SANDBOX_LABEL: str = "jac-sandbox",
@@ -1085,7 +1086,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 state = SandboxState.STOPPED;
             }
         } except Exception as e {
-            print(f"[sandbox-status] Pod query failed for {sandbox_id}: {e}");
+            console.print(f"[sandbox-status] Pod query failed for {sandbox_id}: {e}");
             state = SandboxState.STOPPED;
         }
         created_at = float(rec_d.get("created_at", time.time()));
