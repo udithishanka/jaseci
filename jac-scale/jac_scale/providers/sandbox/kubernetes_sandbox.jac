@@ -319,7 +319,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
             command=[
                 "bash",
                 "-c",
-                f"cd /app && jac install 2>/dev/null; "
+                f"cd /app && pip install --upgrade --quiet jac-client 2>/dev/null; "
+                f"jac install 2>/dev/null; "
                 f"jac start main.jac -p {_INTERNAL_PORT} --dev"
             ],
             ports=[client.V1ContainerPort(container_port=_INTERNAL_PORT)],
@@ -434,7 +435,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 "bash",
                 "-c",
                 "while [ ! -f /app/.jac-start ]; do sleep 0.5; done; "
-                f"cd /app && jac install 2>/dev/null; "
+                f"cd /app && pip install --upgrade --quiet jac-client 2>/dev/null; "
+                f"jac install 2>/dev/null; "
                 f"jac start main.jac -p {_INTERNAL_PORT} --dev"
             ],
             ports=[client.V1ContainerPort(container_port=_INTERNAL_PORT)],
