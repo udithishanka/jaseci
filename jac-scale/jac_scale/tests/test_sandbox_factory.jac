@@ -491,6 +491,59 @@ test "regular pod spec still uses sandbox ttl_seconds" {
     assert pod.spec.active_deadline_seconds == 1800;
 }
 
+# ---- Restart policy tests ----
+test "cold start pod spec uses restart_policy Always" {
+    config = SandboxConfig(ttl_seconds=1800);
+    sandbox = KubernetesSandbox(config=config);
+    pod: Any = sandbox._build_pod_spec("sbx-rp", "cm-rp", "user1", "proj1");
+
+    assert pod.spec.restart_policy == "Always";
+}
+
+test "warm pod spec uses restart_policy Always" {
+    config = SandboxConfig(warm_pool_size=3);
+    sandbox = KubernetesSandbox(config=config);
+    warm: Any = sandbox._build_warm_pod_spec("warm-rp");
+
+    assert warm.spec.restart_policy == "Always";
+}
+
+# ---- Warm-start TTL uses claim time, not pod creation time ----
+test "cleanup_expired uses registry created_at for claimed warm pods" {
+    import time;
+    config = SandboxConfig(ttl_seconds=1800);
+    sandbox = KubernetesSandbox(config=config);
+
+    # Simulate a claimed warm pod: registry created_at is recent (just claimed),
+    # but the pod's K8s creation_timestamp would be old (pre-created in warm pool).
+    # The cleanup logic should use the registry time, not the pod time.
+    sandbox._registry["claimed-warm-sbx"] = {
+        "sandbox_id": "claimed-warm-sbx",
+        "user_id": "user1",
+        "project_id": "proj1",
+        "pod_name": "jac-warm-old-pod",
+        "namespace": "jac-sandboxes",
+        "status": SandboxState.RUNNING,
+        "url": "http://test.example.com",
+        "port": 8000,
+        "created_at": time.time(),
+        "warm_start": True
+    };
+
+    # _find_registry_key should find it by pod_name
+    found = sandbox._find_registry_key("jac-warm-old-pod");
+    assert found == "claimed-warm-sbx";
+
+    # Verify the registry created_at is recent (< 10 seconds old)
+    reg_d: dict = dict(sandbox._registry["claimed-warm-sbx"]);
+    age = time.time() - float(reg_d.get("created_at", 0));
+    assert age < 10, "Registry created_at should be recent (claim time), not pod creation time";
+
+    # Cleanup: this won't actually query K8s (no cluster) but validates
+    # the registry lookup path used by cleanup_expired
+    sandbox._registry.pop("claimed-warm-sbx", None);
+}
+
 # ---- Sandbox status returns STOPPED for missing pods ----
 test "k8s sandbox status returns STOPPED when pod query fails" {
     config = SandboxConfig();

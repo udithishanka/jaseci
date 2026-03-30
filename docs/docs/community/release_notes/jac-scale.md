@@ -4,6 +4,9 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-scale 0.2.12 (Unreleased)
 
+- **Fix: Warm-started sandbox pods killed immediately by cleanup loop**: `cleanup_expired()` used the pod's K8s `creation_timestamp` to calculate age for TTL expiry. For warm-started sandboxes, the pod was pre-created in the warm pool (often 30+ minutes before being claimed), so it appeared expired the moment it started serving. Now uses the registry's `created_at` (set at claim time) for pods with `jac-sandbox-pool=active`, so TTL counts from when the sandbox actually started, not when the warm pod was pre-created.
+- **Fix: Sandbox pod restart policy changed to Always**: Cold-start and warm-pool pod specs now use `restart_policy="Always"` instead of `"Never"`, so if the `jac start --dev` process exits unexpectedly (e.g. uncaught exception during HMR recompilation), K8s restarts the container automatically instead of permanently killing the pod.
+
 ## jac-scale 0.2.11 (Latest Release)
 
 - **Fix: Sandbox status returns stale RUNNING for dead pods**: `KubernetesSandbox.status()` was returning the cached registry state (often `RUNNING`) when `read_namespaced_pod_status()` threw an exception (pod deleted or unreachable). This caused callers to believe the sandbox was still alive, preventing recovery. Now returns `STOPPED` when the pod query fails so dead pods are detected immediately.
