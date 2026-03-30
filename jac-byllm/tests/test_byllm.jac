@@ -941,15 +941,17 @@ test "model pool basic init and dispatch" {
     assert "basic_success" in stdout_value;
 }
 
-"""Test ModelPool fallback order and dispatch."""
-test "model pool fallback order" {
+"""Test ModelPool fallback strategy: unique aliases and fallback chain."""
+test "model pool fallback chain" {
     captured_output = io.StringIO();
     sys.stdout = captured_output;
     jac_import("model_pool_fallback", base_path=FIXTURE_DIR + "/");
     sys.stdout = sys.__stdout__;
     stdout_value = captured_output.getvalue();
-    assert "order_values:[0, 1, 2]" in stdout_value;
-    assert "model_count:3" in stdout_value;
+    assert "alias:pool-primary" in stdout_value;
+    assert "deploy_count:3" in stdout_value;
+    assert "has_fallbacks:True" in stdout_value;
+    assert "primary_in_fallbacks:True" in stdout_value;
     assert "fallback_success" in stdout_value;
 }
 

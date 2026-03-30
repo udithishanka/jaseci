@@ -1,14 +1,14 @@
-"""Test ModelPool fallback: verify router is initialized with correct fallback order.
+"""Test ModelPool fallback strategy: unique aliases + fallback chain.
 
-Checks that model_list entries have the correct order values for
-priority-based fallback, and that a successful dispatch works.
+Verifies the Router is configured with pool-primary and pool-fallback-N
+aliases, and that the fallbacks list chains them correctly.
 """
 import from byllm.lib { MockLLM, ModelPool }
 
 glob m1 = MockLLM(model_name="gpt-3.5-turbo", config={"outputs": []});
 glob m2 = MockLLM(model_name="gpt-4", config={"outputs": []});
 glob m3 = MockLLM(model_name="gpt-4o", config={"outputs": []});
-glob pool = ModelPool(models=[m1, m2, m3], strategy="simple-shuffle");
+glob pool = ModelPool(models=[m1, m2, m3], strategy="fallback");
 
 def get_answer(question: str) -> str by pool();
 
@@ -29,10 +29,13 @@ def mock_completion(**_kwargs: object) -> dict {
 
 with entry {
     ml = pool._router.model_list;
-    orders = [m["litellm_params"]["order"] for m in ml];
-    print(f"order_values:{orders}");
-    print(f"model_count:{len(ml)}");
-    print(f"models:{[m['litellm_params']['model'] for m in ml]}");
+    aliases = [m["model_name"] for m in ml];
+    fb_list = pool._router.fallbacks;
+    print(f"alias:{pool.model_name}");
+    print(f"deploy_count:{len(ml)}");
+    print(f"aliases:{aliases}");
+    print(f"has_fallbacks:{len(fb_list) > 0}");
+    print(f"primary_in_fallbacks:{'pool-primary' in fb_list[0]}");
 
     pool._router.completion = mock_completion;
     result = get_answer("test question");
