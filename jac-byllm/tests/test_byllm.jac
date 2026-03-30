@@ -928,6 +928,42 @@ test "exception logging works with debug enabled" {
     }
 }
 
+"""Test ModelPool basic initialization and dispatch via mocked router."""
+test "model pool basic init and dispatch" {
+    captured_output = io.StringIO();
+    sys.stdout = captured_output;
+    jac_import("model_pool_basic", base_path=FIXTURE_DIR + "/");
+    sys.stdout = sys.__stdout__;
+    stdout_value = captured_output.getvalue();
+    assert "alias:pool-model" in stdout_value;
+    assert "deploy_count:3" in stdout_value;
+    assert "all_share_alias:True" in stdout_value;
+    assert "basic_success" in stdout_value;
+}
+
+"""Test ModelPool fallback order and dispatch."""
+test "model pool fallback order" {
+    captured_output = io.StringIO();
+    sys.stdout = captured_output;
+    jac_import("model_pool_fallback", base_path=FIXTURE_DIR + "/");
+    sys.stdout = sys.__stdout__;
+    stdout_value = captured_output.getvalue();
+    assert "order_values:[0, 1, 2]" in stdout_value;
+    assert "model_count:3" in stdout_value;
+    assert "fallback_success" in stdout_value;
+}
+
+"""Test ModelPool exception propagation when all models fail."""
+test "model pool all fail" {
+    captured_output = io.StringIO();
+    sys.stdout = captured_output;
+    jac_import("model_pool_all_fail", base_path=FIXTURE_DIR + "/");
+    sys.stdout = sys.__stdout__;
+    stdout_value = captured_output.getvalue();
+    assert "EXPECTED_ERROR:" in stdout_value;
+    assert "UNEXPECTED" not in stdout_value;
+}
+
 test "all exception types log and propagate regardless of debug" {
     # Test all three exception types with debug disabled — verify both raise and log
     log_output = io.StringIO();

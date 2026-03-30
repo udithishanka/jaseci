@@ -98,6 +98,25 @@ obj MockLLM(BaseLLM) {
     override def dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None];
 }
 
+"""Pool of LLM models with fallback and load-balancing via LiteLLM Router.
+
+Wraps litellm.Router in-process. On failure, the Router retries and falls
+back to the next model automatically. All routing strategies use the sync
+router.completion() path — no asyncio hacks needed.
+"""
+obj ModelPool(BaseLLM) {
+    has model_name: str = "pool-model",
+        models: list[BaseLLM] = [],
+        strategy: str = "simple-shuffle",
+        num_retries: int = 1,
+        timeout: float = 60.0,
+        _router: object = None;
+
+    def postinit -> None;
+    override def model_call_no_stream(params: dict) -> dict;
+    override def model_call_with_stream(params: dict) -> Generator[str, None, None];
+}
+
 """Primary LLM connector that abstracts LiteLLM functionality.
 
 Provides a unified interface for interacting with various language models
