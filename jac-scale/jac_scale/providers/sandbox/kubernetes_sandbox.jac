@@ -374,7 +374,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 init_containers=[init_container],
                 containers=[main_container],
                 volumes=volumes,
-                restart_policy="Never",
+                restart_policy="Always",
                 active_deadline_seconds=self.config.ttl_seconds,
                 termination_grace_period_seconds=10,
                 automount_service_account_token=False
@@ -477,7 +477,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
             spec=client.V1PodSpec(
                 containers=[main_container],
                 volumes=volumes,
-                restart_policy="Never",
+                restart_policy="Always",
                 active_deadline_seconds=warm_ttl,
                 termination_grace_period_seconds=10,
                 automount_service_account_token=False
