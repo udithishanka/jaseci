@@ -1208,14 +1208,30 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 }
             }
 
-            created: Any = pod.metadata.creation_timestamp;
-            if created {
-                age = now - created.replace(tzinfo=timezone.utc).timestamp();
-                ttl = self.config.warm_pool_ttl
-                    if (is_warm and self.config.warm_pool_ttl > 0)
-                    else self.config.ttl_seconds;
-                is_expired = age > ttl;
+            # For claimed warm pods (pool=active), use the registry's
+            # created_at (claim time) instead of the pod's K8s creation
+            # timestamp. The pod was pre-created in the warm pool and may
+            # be much older than the active sandbox session.
+            is_claimed_warm = pod.metadata.labels.get("jac-sandbox-pool") == "active"
+                if pod.metadata.labels
+                else False;
+            registry_key_tmp = self._find_registry_key(pod_name);
+            reg_rec = self._registry.get(registry_key_tmp) if registry_key_tmp else None;
+            if is_claimed_warm and reg_rec {
+                reg_d: dict = dict(reg_rec);
+                age = now - float(reg_d.get("created_at", now));
+            } else {
+                created: Any = pod.metadata.creation_timestamp;
+                if created {
+                    age = now - created.replace(tzinfo=timezone.utc).timestamp();
+                } else {
+                    age = 0.0;
+                }
             }
+            ttl = self.config.warm_pool_ttl
+                if (is_warm and self.config.warm_pool_ttl > 0)
+                else self.config.ttl_seconds;
+            is_expired = age > ttl;
             if is_terminal or is_expired {
                 pods_to_delete.append(pod_name);
             } else {
