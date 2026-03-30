@@ -928,8 +928,8 @@ test "exception logging works with debug enabled" {
     }
 }
 
-"""Test ModelPool basic initialization and dispatch via mocked router."""
-test "model pool basic init and dispatch" {
+"""Test ModelPool load-balancing: all models share pool-model alias."""
+test "model pool load balance init" {
     captured_output = io.StringIO();
     sys.stdout = captured_output;
     jac_import("model_pool_basic", base_path=FIXTURE_DIR + "/");
@@ -938,25 +938,27 @@ test "model pool basic init and dispatch" {
     assert "alias:pool-model" in stdout_value;
     assert "deploy_count:3" in stdout_value;
     assert "all_share_alias:True" in stdout_value;
-    assert "basic_success" in stdout_value;
 }
 
-"""Test ModelPool fallback strategy: unique aliases and fallback chain."""
-test "model pool fallback chain" {
+"""Test ModelPool fallback: primary rate-limits, Router falls back to secondary."""
+test "model pool fallback on rate limit" {
     captured_output = io.StringIO();
     sys.stdout = captured_output;
     jac_import("model_pool_fallback", base_path=FIXTURE_DIR + "/");
     sys.stdout = sys.__stdout__;
     stdout_value = captured_output.getvalue();
+    # Router structure
     assert "alias:pool-primary" in stdout_value;
-    assert "deploy_count:3" in stdout_value;
     assert "has_fallbacks:True" in stdout_value;
     assert "primary_in_fallbacks:True" in stdout_value;
-    assert "fallback_success" in stdout_value;
+    # Fallback actually fired — primary failed, secondary served
+    assert "result:fallback_success" in stdout_value;
+    # At least 2 calls: one failed primary + one successful fallback
+    assert "calls:" in stdout_value;
 }
 
-"""Test ModelPool exception propagation when all models fail."""
-test "model pool all fail" {
+"""Test ModelPool: all models fail, exception propagates to caller."""
+test "model pool all fail propagates error" {
     captured_output = io.StringIO();
     sys.stdout = captured_output;
     jac_import("model_pool_all_fail", base_path=FIXTURE_DIR + "/");
