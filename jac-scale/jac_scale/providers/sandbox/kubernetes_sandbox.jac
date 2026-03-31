@@ -1569,16 +1569,9 @@ obj KubernetesSandbox(SandboxEnvironment) {
     # SandboxInstance graph nodes in MongoDB.
     # ================================================================
 
+    """Create K8s resources for a sandbox with automatic rollback on failure.
+    Stateless v2 — caller manages state externally."""
     def create_with_rollback(sandbox_id: str, user_id: str, project_id: str, code_path: str) -> SandboxResult {
-        """Create K8s resources for a sandbox with automatic rollback on failure.
-
-        Unlike create(), this method:
-        - Takes sandbox_id as a parameter (caller generates deterministic ID)
-        - Does NOT update _registry (caller manages state)
-        - Does NOT enforce max_per_user (caller handles this)
-        - Does NOT start cleanup loop or warm pool (reconciler handles this)
-        - DOES rollback partial resources on failure
-        """
         try {
             self._init_k8s();
             self._ensure_namespace();
@@ -1643,11 +1636,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
+    """Stateless K8s resource cleanup — does NOT touch _registry."""
     def cleanup_resources(sandbox_id: str, pod_name: str = "", warm_start: bool = False) -> None {
-        """Stateless K8s resource cleanup — does NOT touch _registry.
-
-        Called by the reconciler when desired_state transitions to stopped/destroyed.
-        """
         self._init_k8s();
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -1689,11 +1679,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
+    """Stateless pod status query — returns K8s pod status directly from API."""
     def query_pod_status(sandbox_id: str) -> SandboxStatus {
-        """Stateless pod status query — does NOT touch _registry.
-
-        Returns current K8s pod status directly from the API.
-        """
         self._init_k8s();
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -1733,8 +1720,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
+    """List all sandbox pods in the namespace. Used by reconciler for drift detection."""
     def list_all_sandbox_pods -> list[dict] {
-        """List all sandbox pods in the namespace. Used by reconciler for drift detection."""
         self._init_k8s();
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
@@ -1756,8 +1743,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return result;
     }
 
+    """Count warm pool pods via K8s label selector."""
     def count_warm_pods -> int {
-        """Count warm pool pods via K8s label selector."""
         self._init_k8s();
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
@@ -1766,13 +1753,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return len(pods.items);
     }
 
+    """Claim a warm pod via atomic K8s label patch. Returns pod_name or None."""
     def claim_warm_pod_v2(sandbox_id: str, user_id: str, project_id: str) -> (str | None) {
-        """Claim a warm pod via atomic K8s label patch. Returns pod_name or None.
-
-        This replaces the in-memory _warm_pool list approach. K8s serializes
-        patches per-resource, so only one caller can successfully relabel
-        a warm pod to active.
-        """
         self._init_k8s();
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
@@ -1811,8 +1793,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return None;
     }
 
+    """Delete a K8s resource, ignoring not-found errors."""
     def _delete_resource_safe(rtype: str, rname: str, namespace: str) -> None {
-        """Delete a K8s resource, ignoring not-found errors."""
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
         core_v1 = client.CoreV1Api();
