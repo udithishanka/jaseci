@@ -1560,5 +1560,278 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
         return None;
     }
+
+    # ================================================================
+    # Stateless API (v2) — used by jac-builder's sandbox_reconciler.
+    #
+    # These methods have NO internal state: no _registry, no _lock,
+    # no _warm_pool. The caller (jac-builder) manages state via
+    # SandboxInstance graph nodes in MongoDB.
+    # ================================================================
+
+    def create_with_rollback(sandbox_id: str, user_id: str, project_id: str, code_path: str) -> SandboxResult {
+        """Create K8s resources for a sandbox with automatic rollback on failure.
+
+        Unlike create(), this method:
+        - Takes sandbox_id as a parameter (caller generates deterministic ID)
+        - Does NOT update _registry (caller manages state)
+        - Does NOT enforce max_per_user (caller handles this)
+        - Does NOT start cleanup loop or warm pool (reconciler handles this)
+        - DOES rollback partial resources on failure
+        """
+        try {
+            self._init_k8s();
+            self._ensure_namespace();
+            self._ensure_rbac();
+        } except Exception as e {
+            return SandboxResult(success=False, message=f"K8s init failed: {str(e)}");
+        }
+
+        import from kubernetes { client }
+        import from kubernetes.client.exceptions { ApiException }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
+        created_resources: list = [];
+
+        try {
+            # 1. Create ConfigMap
+            cm_name = self._create_configmap(sandbox_id, code_path, namespace);
+            created_resources.append(("configmap", cm_name));
+
+            # 2. Create Pod
+            pod_spec = self._build_pod_spec(sandbox_id, cm_name, user_id, project_id);
+            core_v1.create_namespaced_pod(namespace, pod_spec);
+            created_resources.append(("pod", sandbox_id));
+
+            # 3. Create Service (skip in proxy mode)
+            svc_name = "";
+            if not self.config.proxy_mode {
+                svc_name = self._create_service(sandbox_id, namespace);
+                created_resources.append(("service", svc_name));
+            }
+
+            # 4. Create Ingress route
+            ingress = self._get_ingress_provider();
+            url = ingress.create_route(
+                sandbox_id,
+                svc_name,
+                _INTERNAL_PORT,
+                namespace,
+                {
+                    "domain_template": self.config.domain_template,
+                    "ingress_class": self.config.ingress_class,
+                    "tls_enabled": self.config.tls_enabled,
+                    "tls_issuer": self.config.tls_issuer,
+                    "ingress_annotations": self.config.ingress_annotations
+                }
+            );
+            created_resources.append(("ingress", sandbox_id));
+
+            return SandboxResult(
+                success=True,
+                sandbox_id=sandbox_id,
+                url=url,
+                port=_INTERNAL_PORT,
+                message="cold-starting"
+            );
+        } except Exception as e {
+            # Rollback in reverse order
+            for (rtype, rname) in reversed(created_resources) {
+                self._delete_resource_safe(rtype, rname, namespace);
+            }
+            return SandboxResult(success=False, message=str(e));
+        }
+    }
+
+    def cleanup_resources(sandbox_id: str, pod_name: str = "", warm_start: bool = False) -> None {
+        """Stateless K8s resource cleanup — does NOT touch _registry.
+
+        Called by the reconciler when desired_state transitions to stopped/destroyed.
+        """
+        self._init_k8s();
+        import from kubernetes { client }
+        import from kubernetes.client.exceptions { ApiException }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
+        actual_pod = pod_name or sandbox_id;
+
+        # Delete pod
+        try {
+            core_v1.delete_namespaced_pod(actual_pod, namespace);
+        } except ApiException {
+            x = 0;
+        }
+
+        # Delete service
+        if not self.config.proxy_mode {
+            try {
+                core_v1.delete_namespaced_service(f"{sandbox_id}-svc", namespace);
+            } except ApiException {
+                x = 0;
+            }
+        }
+
+        # Delete configmap (skip for warm-started pods)
+        if not warm_start {
+            try {
+                core_v1.delete_namespaced_config_map(f"{sandbox_id}-code", namespace);
+            } except ApiException {
+                x = 0;
+            }
+        }
+
+        # Delete ingress route
+        try {
+            ingress = self._get_ingress_provider();
+            ingress.delete_route(sandbox_id, namespace);
+        } except Exception {
+            x = 0;
+        }
+    }
+
+    def query_pod_status(sandbox_id: str) -> SandboxStatus {
+        """Stateless pod status query — does NOT touch _registry.
+
+        Returns current K8s pod status directly from the API.
+        """
+        self._init_k8s();
+        import from kubernetes { client }
+        import from kubernetes.client.exceptions { ApiException }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
+
+        try {
+            pod = core_v1.read_namespaced_pod_status(sandbox_id, namespace);
+            phase = str(pod.status.phase);
+            if phase == "Running" {
+                ready = True;
+                if pod.status.container_statuses {
+                    for cs in pod.status.container_statuses {
+                        if not cs.ready {
+                            ready = False;
+                            break;
+                        }
+                    }
+                }
+                if ready {
+                    return SandboxStatus(state=SandboxState.RUNNING, sandbox_id=sandbox_id);
+                }
+                return SandboxStatus(state=SandboxState.STARTING, sandbox_id=sandbox_id);
+            } elif phase == "Pending" {
+                return SandboxStatus(state=SandboxState.PENDING, sandbox_id=sandbox_id);
+            } else {
+                return SandboxStatus(state=SandboxState.ERROR, sandbox_id=sandbox_id,
+                    message=f"Pod phase: {phase}");
+            }
+        } except ApiException as e {
+            if e.status == 404 {
+                return SandboxStatus(state=SandboxState.STOPPED, sandbox_id=sandbox_id,
+                    message="Pod not found");
+            }
+            return SandboxStatus(state=SandboxState.ERROR, sandbox_id=sandbox_id,
+                message=str(e));
+        }
+    }
+
+    def list_all_sandbox_pods -> list[dict] {
+        """List all sandbox pods in the namespace. Used by reconciler for drift detection."""
+        self._init_k8s();
+        import from kubernetes { client }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
+        pods = core_v1.list_namespaced_pod(namespace, label_selector=f"{_SANDBOX_LABEL}=true");
+        result: list[dict] = [];
+        for pod in pods.items {
+            labels = pod.metadata.labels or {};
+            result.append({
+                "name": pod.metadata.name,
+                "sandbox_id": labels.get("jac-sandbox-id", pod.metadata.name),
+                "user_id": labels.get("jac-sandbox-user", ""),
+                "project_id": labels.get("jac-sandbox-project", ""),
+                "phase": str(pod.status.phase) if pod.status else "Unknown",
+                "pool": labels.get("jac-sandbox-pool", ""),
+                "created_at": pod.metadata.creation_timestamp.timestamp() if pod.metadata.creation_timestamp else 0
+            });
+        }
+        return result;
+    }
+
+    def count_warm_pods -> int {
+        """Count warm pool pods via K8s label selector."""
+        self._init_k8s();
+        import from kubernetes { client }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
+        pods = core_v1.list_namespaced_pod(namespace, label_selector="jac-sandbox-pool=warm");
+        return len(pods.items);
+    }
+
+    def claim_warm_pod_v2(sandbox_id: str, user_id: str, project_id: str) -> (str | None) {
+        """Claim a warm pod via atomic K8s label patch. Returns pod_name or None.
+
+        This replaces the in-memory _warm_pool list approach. K8s serializes
+        patches per-resource, so only one caller can successfully relabel
+        a warm pod to active.
+        """
+        self._init_k8s();
+        import from kubernetes { client }
+        import from kubernetes.client.exceptions { ApiException }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
+
+        # List warm pods
+        warm_pods = core_v1.list_namespaced_pod(namespace, label_selector="jac-sandbox-pool=warm");
+        for pod in warm_pods.items {
+            pod_name = pod.metadata.name;
+            if str(pod.status.phase) not in ("Pending", "Running") {
+                continue;
+            }
+            # Attempt atomic relabel: warm → active
+            try {
+                body = {
+                    "metadata": {
+                        "labels": {
+                            "jac-sandbox-pool": "active",
+                            "jac-sandbox-id": sandbox_id,
+                            "jac-sandbox-user": user_id[:63],
+                            "jac-sandbox-project": project_id[:63]
+                        }
+                    }
+                };
+                core_v1.patch_namespaced_pod(pod_name, namespace, body);
+                return pod_name;
+            } except ApiException as e {
+                if e.status == 409 {
+                    # Conflict — another caller claimed this pod
+                    continue;
+                }
+                continue;
+            }
+        }
+        return None;
+    }
+
+    def _delete_resource_safe(rtype: str, rname: str, namespace: str) -> None {
+        """Delete a K8s resource, ignoring not-found errors."""
+        import from kubernetes { client }
+        import from kubernetes.client.exceptions { ApiException }
+        core_v1 = client.CoreV1Api();
+        try {
+            if rtype == "pod" {
+                core_v1.delete_namespaced_pod(rname, namespace);
+            } elif rtype == "service" {
+                core_v1.delete_namespaced_service(rname, namespace);
+            } elif rtype == "configmap" {
+                core_v1.delete_namespaced_config_map(rname, namespace);
+            } elif rtype == "ingress" {
+                ingress = self._get_ingress_provider();
+                ingress.delete_route(rname, namespace);
+            }
+        } except ApiException {
+            x = 0;
+        } except Exception {
+            x = 0;
+        }
+    }
 }
 # 1MB

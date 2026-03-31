@@ -30,6 +30,7 @@ obj SandboxEnvironment {
     has config: SandboxConfig,
         logger: (Logger | None) = None;
 
+    # --- Legacy API (v1) — maintains internal registry ---
     def create(user_id: str, project_id: str, code_path: str) -> SandboxResult;
     def stop(sandbox_id: str) -> None;
     def status(sandbox_id: str) -> SandboxStatus;
@@ -42,4 +43,14 @@ obj SandboxEnvironment {
     def delete_file(sandbox_id: str, path: str) -> dict;
     def list_files(sandbox_id: str, path: str = ".") -> dict;
     def exec_command(sandbox_id: str, command: str, timeout: int = 30) -> dict;
+
+    # --- Stateless API (v2) — caller manages state externally ---
+    # These methods perform K8s operations without touching internal registry.
+    # Used by jac-builder's sandbox_reconciler for graph-based state management.
+    def create_with_rollback(sandbox_id: str, user_id: str, project_id: str, code_path: str) -> SandboxResult;
+    def cleanup_resources(sandbox_id: str, pod_name: str = "", warm_start: bool = False) -> None;
+    def query_pod_status(sandbox_id: str) -> SandboxStatus;
+    def list_all_sandbox_pods -> list[dict];
+    def count_warm_pods -> int;
+    def claim_warm_pod_v2(sandbox_id: str, user_id: str, project_id: str) -> (str | None);
 }
