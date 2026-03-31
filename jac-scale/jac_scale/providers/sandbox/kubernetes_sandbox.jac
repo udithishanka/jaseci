@@ -1212,14 +1212,23 @@ obj KubernetesSandbox(SandboxEnvironment) {
             # created_at (claim time) instead of the pod's K8s creation
             # timestamp. The pod was pre-created in the warm pool and may
             # be much older than the active sandbox session.
+            # In multi-pod deployments, the registry only exists on the pod
+            # that created the sandbox — other pods must NOT delete it.
             is_claimed_warm = pod.metadata.labels.get("jac-sandbox-pool") == "active"
                 if pod.metadata.labels
                 else False;
-            registry_key_tmp = self._find_registry_key(pod_name);
-            reg_rec = self._registry.get(registry_key_tmp) if registry_key_tmp else None;
-            if is_claimed_warm and reg_rec {
-                reg_d: dict = dict(reg_rec);
-                age = now - float(reg_d.get("created_at", now));
+            if is_claimed_warm {
+                registry_key_tmp = self._find_registry_key(pod_name);
+                reg_rec = self._registry.get(registry_key_tmp) if registry_key_tmp else None;
+                if reg_rec {
+                    # This pod created the sandbox — use claim time for TTL
+                    reg_d: dict = dict(reg_rec);
+                    age = now - float(reg_d.get("created_at", now));
+                } else {
+                    # Another pod created this sandbox — skip it, don't delete
+                    live_pod_names.add(pod_name);
+                    continue;
+                }
             } else {
                 created: Any = pod.metadata.creation_timestamp;
                 if created {
