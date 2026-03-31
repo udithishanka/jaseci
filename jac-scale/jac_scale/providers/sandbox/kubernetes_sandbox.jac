@@ -678,6 +678,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     "sh",
                     "-c",
                     "base64 -d /tmp/code.b64 > /tmp/code.tar.gz && "
+                    "rm -rf /app/* && "
                     "tar xzf /tmp/code.tar.gz -C /app && "
                     "rm -f /tmp/code.b64 /tmp/code.tar.gz"
                 ],
