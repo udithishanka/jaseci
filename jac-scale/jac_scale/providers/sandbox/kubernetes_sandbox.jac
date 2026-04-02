@@ -660,11 +660,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     "pkill -9 -f 'jac start' 2>/dev/null || true; "
                     "pkill -9 -f 'node.*vite' 2>/dev/null || true; "
                     "pkill -9 -f 'bun' 2>/dev/null || true; "
-                    "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do "
-                    "  if ! ss -tlnp 2>/dev/null | grep -q ':8000 ' && "
-                    "     ! ss -tlnp 2>/dev/null | grep -q ':8001 '; then break; fi; "
-                    "  sleep 0.25; "
-                    "done; "
                     "rm -rf /app/* /app/.* /tmp/* /tmp/.* 2>/dev/null || true"
                 ],
                 stderr=True,
