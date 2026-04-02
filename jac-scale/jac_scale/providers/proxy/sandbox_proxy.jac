@@ -46,7 +46,12 @@ async def watch_pods -> None {
                 pod = event["object"];
                 pod_ip = pod.status.pod_ip if pod.status else None;
                 labels = pod.metadata.labels or {};
-                sandbox_id = labels.get("jac-sandbox-id", pod.metadata.name);
+                sandbox_id = labels.get("jac-sandbox-id", "");
+                if not sandbox_id {
+                    # Warm pool pod (no sandbox-id label) — not routable, skip.
+                    # Also handle DELETED for pods that were warm when deleted.
+                    continue;
+                }
 
                 if etype == "DELETED" {
                     if routes.pop(sandbox_id, None) {
