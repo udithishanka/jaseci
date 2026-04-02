@@ -19,4 +19,14 @@ RUN jac --version
 RUN groupadd -g 1000 jac && useradd -u 1000 -g jac -m -s /bin/bash jac
 RUN mkdir -p /app && chown 1000:1000 /app
 
+# Pre-build admin dashboard while still root (site-packages is root-owned,
+# so jac build cannot create .jac/ artifacts there when running as non-root)
+RUN mkdir -p /tmp/admin_build && \
+    cp -r /usr/local/lib/python3.12/site-packages/jac_scale/admin/ui/* /tmp/admin_build/ && \
+    cd /tmp/admin_build && jac build main.jac && \
+    mkdir -p /app/.jac/admin && \
+    cp -r /tmp/admin_build/.jac/client/dist/* /app/.jac/admin/ && \
+    rm -rf /tmp/admin_build && \
+    chown -R 1000:1000 /app/.jac
+
 WORKDIR /app
