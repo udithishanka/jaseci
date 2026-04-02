@@ -486,8 +486,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _ensure_warm_pool -> None {
-        """Ensure the warm pool has enough idle pods. Stateless — queries K8s
-        directly, no local pool list. Safe for multi-pod horizontal scaling."""
         if self.config.warm_pool_size <= 0 {
             return;
         }
@@ -525,9 +523,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _claim_warm_pod(sandbox_id: str, user_id: str, project_id: str) -> (str | None) {
-        """Claim a warm pod from the K8s pool. Fully stateless — no local pool
-        list, queries K8s directly. Iterates candidates so if one is taken by
-        another instance, we try the next. Safe for multi-pod horizontal scaling."""
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         namespace = self.config.namespace;
