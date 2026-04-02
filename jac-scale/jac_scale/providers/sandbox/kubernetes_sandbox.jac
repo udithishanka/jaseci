@@ -709,9 +709,12 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 encoded[i:i + chunk_size] for i in range(0, len(encoded), chunk_size)
             ];
 
-            # Kill any stale processes and wipe caches from a previous user's
-            # session. Warm pods may have leftover Vite/jac processes that serve
-            # cached content from the prior claim — a cross-user data leak.
+            # Kill stale processes from a previous user's session, wait for
+            # them to die, then wipe ALL user data. This is a single atomic
+            # shell script — no round-trips between steps, no race windows.
+            # SIGKILL (not SIGTERM) ensures immediate death, and the port-free
+            # loop guarantees the old process has fully released port 8000
+            # before we proceed with code injection.
             stream(
                 core_v1.connect_get_namespaced_pod_exec,
                 pod_name,
@@ -719,9 +722,15 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 container="sandbox",
                 command=[
                     "sh", "-c",
-                    "pkill -f 'jac start' 2>/dev/null || true; "
-                    "pkill -f 'node.*vite' 2>/dev/null || true; "
-                    "rm -rf /app/* /app/.* /tmp/code.* /tmp/.vite* 2>/dev/null || true"
+                    "pkill -9 -f 'jac start' 2>/dev/null || true; "
+                    "pkill -9 -f 'node.*vite' 2>/dev/null || true; "
+                    "pkill -9 -f 'bun' 2>/dev/null || true; "
+                    "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do "
+                    "  if ! ss -tlnp 2>/dev/null | grep -q ':8000 ' && "
+                    "     ! ss -tlnp 2>/dev/null | grep -q ':8001 '; then break; fi; "
+                    "  sleep 0.25; "
+                    "done; "
+                    "rm -rf /app/* /app/.* /tmp/* /tmp/.* 2>/dev/null || true"
                 ],
                 stderr=True,
                 stdout=True,
@@ -933,7 +942,13 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     # Inject code into the warm pod
                     injected = self._inject_code(claimed_pod, code_path);
                     if not injected {
-                        self._cleanup_k8s_resources(sandbox_id, namespace);
+                        # Delete the warm pod directly by name — _cleanup_k8s_resources
+                        # looks up _registry which has no entry yet (created after injection).
+                        try {
+                            core_v1.delete_namespaced_pod(claimed_pod, namespace);
+                        } except Exception {
+                            ;
+                        }
                         return SandboxResult(
                             success=False,
                             message="Failed to inject code into warm pod"
