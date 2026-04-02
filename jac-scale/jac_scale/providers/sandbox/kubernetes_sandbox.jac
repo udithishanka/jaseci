@@ -29,7 +29,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
         _k8s_initialized: bool = False,
         _rbac_provisioned: bool = False,
         _ingress_provider: Any = None,
-        _warm_pool: list = [],
         _pool_initialized: bool = False,
         _cleanup_started: bool = False;
 
@@ -487,6 +486,8 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _ensure_warm_pool -> None {
+        """Ensure the warm pool has enough idle pods. Stateless — queries K8s
+        directly, no local pool list. Safe for multi-pod horizontal scaling."""
         if self.config.warm_pool_size <= 0 {
             return;
         }
@@ -495,65 +496,22 @@ obj KubernetesSandbox(SandboxEnvironment) {
             core_v1 = client.CoreV1Api();
             namespace = self.config.namespace;
 
-            # List existing warm pods
             existing = core_v1.list_namespaced_pod(
                 namespace,
                 label_selector=f"{_SANDBOX_LABEL}=true,jac-sandbox-pool=warm"
             );
-            # Build set of pods that are ACTUALLY still warm (fresh K8s read).
-            # K8s list API may return stale labels, and our local _warm_pool
-            # may contain pods claimed by other jac-builder instances.
-            verified_warm: list = [];
+            warm_count = 0;
             for p in existing.items {
-                pn = p.metadata.name;
-                # CRITICAL: Fresh individual read to bypass stale list cache.
-                # Another jac-builder pod may have claimed this warm pod (patched
-                # labels to pool=active + sandbox-id). Without this fresh check,
-                # we'd re-add it to our local pool → duplicate claim → cross-user leak.
-                try {
-                    fresh_pod = core_v1.read_namespaced_pod(pn, namespace);
-                    fresh_labels = fresh_pod.metadata.labels or {};
-                    if fresh_labels.get("jac-sandbox-pool") != "warm" or fresh_labels.get("jac-sandbox-id") {
-                        continue;
-                    }
-                    if fresh_pod.status.phase not in ["Pending", "Running"] {
-                        continue;
-                    }
-                } except Exception {
-                    continue;
+                if p.status.phase in ["Pending", "Running"] {
+                    warm_count += 1;
                 }
-                verified_warm.append(pn);
             }
 
-            # Rebuild local pool: remove claimed pods, add newly discovered ones
-            warm_count = len(verified_warm);
-            verified_set = set(verified_warm);
-            self._lock.acquire();
-            try {
-                # Remove pods that are no longer warm (claimed by another instance)
-                self._warm_pool = [p for p in self._warm_pool if p in verified_set];
-                # Add any newly discovered warm pods
-                for pn in verified_warm {
-                    if pn not in self._warm_pool {
-                        self._warm_pool.append(pn);
-                    }
-                }
-            } finally {
-                self._lock.release();
-            }
-
-            # Create pods to reach target size
             needed = self.config.warm_pool_size - warm_count;
             for i in range(needed) {
                 pod_name = f"jac-warm-{str(uuid.uuid4())[:8]}";
                 pod_spec = self._build_warm_pod_spec(pod_name);
                 core_v1.create_namespaced_pod(namespace, pod_spec);
-                self._lock.acquire();
-                try {
-                    self._warm_pool.append(pod_name);
-                } finally {
-                    self._lock.release();
-                }
                 if self.logger {
                     self.logger.info(f"Created warm pool pod: {pod_name}");
                 }
@@ -567,90 +525,72 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _claim_warm_pod(sandbox_id: str, user_id: str, project_id: str) -> (str | None) {
-        self._lock.acquire();
-        try {
-            if not self._warm_pool {
-                return None;
-            }
-            pod_name = self._warm_pool.pop(0);
-        } finally {
-            self._lock.release();
-        }
+        """Claim a warm pod from the K8s pool. Fully stateless — no local pool
+        list, queries K8s directly. Iterates candidates so if one is taken by
+        another instance, we try the next. Safe for multi-pod horizontal scaling."""
+        import from kubernetes { client }
+        core_v1 = client.CoreV1Api();
+        namespace = self.config.namespace;
 
         try {
-            import from kubernetes { client }
-            core_v1 = client.CoreV1Api();
-            namespace = self.config.namespace;
-
-            # Verify pod is still running AND still warm (not claimed by another pod).
-            # In multi-pod deployments, another jac-builder instance may have
-            # claimed this pod between our pool pop and this K8s read.
-            pod = core_v1.read_namespaced_pod_status(pod_name, namespace);
-            if pod.status.phase not in ["Pending", "Running"] {
-                return None;
-            }
-            pod_labels = pod.metadata.labels or {};
-            if pod_labels.get("jac-sandbox-pool") != "warm" or pod_labels.get("jac-sandbox-id") {
-                if self.logger {
-                    self.logger.warn(
-                        f"Warm pod {pod_name} already claimed by another instance "
-                        f"(pool={pod_labels.get('jac-sandbox-pool')}, "
-                        f"sid={pod_labels.get('jac-sandbox-id')})"
-                    );
-                }
-                return None;
-            }
-
-            # Relabel pod from warm → active
-            body = {
-                "metadata": {
-                    "labels": {
-                        _SANDBOX_LABEL: "true",
-                        "jac-sandbox-id": sandbox_id,
-                        "jac-sandbox-pool": "active",
-                        "jac-sandbox-user": user_id,
-                        "jac-sandbox-project": project_id
-                    }
-                }
-            };
-            core_v1.patch_namespaced_pod(pod_name, namespace, body);
-
-            # Verify our claim succeeded — another pod may have patched
-            # the same warm pod simultaneously, overwriting our labels.
-            verified = core_v1.read_namespaced_pod(pod_name, namespace);
-            actual_sid = (verified.metadata.labels or {}).get("jac-sandbox-id", "");
-            if actual_sid != sandbox_id {
-                if self.logger {
-                    self.logger.warn(
-                        f"Warm pod {pod_name} claimed by another instance "
-                        f"(expected {sandbox_id}, got {actual_sid})"
-                    );
-                }
-                return None;
-            }
-            return pod_name;
+            warm_pods = core_v1.list_namespaced_pod(
+                namespace,
+                label_selector=f"{_SANDBOX_LABEL}=true,jac-sandbox-pool=warm"
+            );
         } except Exception as e {
             if self.logger {
-                self.logger.warn(f"Failed to claim warm pod {pod_name}: {str(e)}");
-            }
-            # Return pod to pool if it's still warm in K8s
-            try {
-                pod_check = core_v1.read_namespaced_pod(pod_name, namespace);
-                if (pod_check.metadata.labels or {}).get("jac-sandbox-pool") == "warm" {
-                    self._lock.acquire();
-                    try {
-                        if pod_name not in self._warm_pool {
-                            self._warm_pool.append(pod_name);
-                        }
-                    } finally {
-                        self._lock.release();
-                    }
-                }
-            } except Exception {
-                x = 0;
+                self.logger.warn(f"Failed to list warm pods: {e}");
             }
             return None;
         }
+
+        for candidate in warm_pods.items {
+            pod_name = candidate.metadata.name;
+            try {
+                # Fresh read to bypass stale list cache
+                pod = core_v1.read_namespaced_pod(pod_name, namespace);
+                if pod.status.phase not in ["Pending", "Running"] {
+                    continue;
+                }
+                pod_labels = pod.metadata.labels or {};
+                if pod_labels.get("jac-sandbox-pool") != "warm" or pod_labels.get("jac-sandbox-id") {
+                    continue;
+                }
+
+                # Patch labels: warm → active with our sandbox_id
+                body = {
+                    "metadata": {
+                        "labels": {
+                            _SANDBOX_LABEL: "true",
+                            "jac-sandbox-id": sandbox_id,
+                            "jac-sandbox-pool": "active",
+                            "jac-sandbox-user": user_id,
+                            "jac-sandbox-project": project_id
+                        }
+                    }
+                };
+                core_v1.patch_namespaced_pod(pod_name, namespace, body);
+
+                # Verify our claim stuck — another pod may have patched simultaneously
+                verified = core_v1.read_namespaced_pod(pod_name, namespace);
+                actual_sid = (verified.metadata.labels or {}).get("jac-sandbox-id", "");
+                if actual_sid != sandbox_id {
+                    if self.logger {
+                        self.logger.warn(
+                            f"Warm pod {pod_name} claimed by another instance (got {actual_sid})"
+                        );
+                    }
+                    continue;
+                }
+                return pod_name;
+            } except Exception as e {
+                if self.logger {
+                    self.logger.warn(f"Failed to claim warm pod {pod_name}: {e}");
+                }
+                continue;
+            }
+        }
+        return None;
     }
 
     def _inject_code(pod_name: str, code_path: str) -> bool {
@@ -1370,14 +1310,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     ;
                 }
             }
-            self._lock.acquire();
-            try {
-                if pod_name in self._warm_pool {
-                    self._warm_pool.remove(pod_name);
-                }
-            } finally {
-                self._lock.release();
-            }
             cleaned += 1;
         }
 
@@ -1393,11 +1325,6 @@ obj KubernetesSandbox(SandboxEnvironment) {
                 self._registry.pop(key, None);
                 cleaned += 1;
             }
-            self._warm_pool = [
-                p
-                for p in self._warm_pool
-                if p in live_pod_names
-            ];
         } finally {
             self._lock.release();
         }
