@@ -706,7 +706,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     "sh",
                     "-c",
                     "base64 -d /tmp/code.b64 > /tmp/code.tar.gz && "
-                    "find /app -mindepth 1 -not -path '/app/.jac/admin*' -delete 2>/dev/null || true && "
+                    "rm -rf /app/* && "
                     "tar xzf /tmp/code.tar.gz -C /app && "
                     "rm -f /tmp/code.b64 /tmp/code.tar.gz"
                 ],
