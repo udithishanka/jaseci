@@ -1179,31 +1179,20 @@ impl JacAPIServerAdmin.build_admin_client(force: bool = False) -> bool {
         logger.debug("Admin client already built");
         return True;
     }
-    # Get admin UI source directory (may be in read-only site-packages)
+    # Get admin UI source directory
     import from jac_scale.admin { admin_portal }
-    import shutil;
-    import tempfile;
     admin_dir = Path(admin_portal.__file__).parent;
-    ui_src = admin_dir / "ui";
-    if not (ui_src / "main.jac").exists() {
-        logger.error(f"Admin UI source not found at {ui_src}");
+    ui_dir = admin_dir / "ui";
+    if not (ui_dir / "main.jac").exists() {
+        logger.error(f"Admin UI source not found at {ui_dir}");
         return False;
     }
     logger.info("Building admin client...");
     try {
-        # Copy source to a writable location so jac build can create
-        # .jac/ artifacts (site-packages is read-only for non-root users)
-        import os;
-        build_root = Path(os.getcwd()) / ".jac" / "admin_build";
-        if build_root.exists() {
-            shutil.rmtree(build_root);
-        }
-        shutil.copytree(ui_src, build_root);
-
-        # Run jac build in the writable copy
+        # Run jac build in the UI directory
         result = subprocess.run(
             ["jac", "build", "main.jac"],
-            cwd=str(build_root),
+            cwd=str(ui_dir),
             capture_output=True,
             text=True,
             timeout=300
@@ -1215,8 +1204,9 @@ impl JacAPIServerAdmin.build_admin_client(force: bool = False) -> bool {
         }
 
         # Copy built files to .jac/admin
-        ui_dist = build_root / ".jac" / "client" / "dist";
+        ui_dist = ui_dir / ".jac" / "client" / "dist";
         if ui_dist.exists() {
+            import shutil;
             dist_dir.mkdir(parents=True, exist_ok=True);
             for item in ui_dist.iterdir() {
                 dest = dist_dir / item.name;
@@ -1230,9 +1220,6 @@ impl JacAPIServerAdmin.build_admin_client(force: bool = False) -> bool {
                 }
             }
         }
-
-        # Clean up the build copy
-        shutil.rmtree(build_root, ignore_errors=True);
 
         logger.info("Admin client built successfully");
         return True;
