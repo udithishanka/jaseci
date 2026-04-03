@@ -660,8 +660,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                     "pkill -9 -f 'jac start' 2>/dev/null || true; "
                     "pkill -9 -f 'node.*vite' 2>/dev/null || true; "
                     "pkill -9 -f 'bun' 2>/dev/null || true; "
-                    "find /app -mindepth 1 -not -path '/app/.jac/admin*' -delete 2>/dev/null || true; "
-                    "rm -rf /tmp/* /tmp/.* 2>/dev/null || true"
+                    "rm -rf /app/* /app/.* /tmp/* /tmp/.* 2>/dev/null || true"
                 ],
                 stderr=True,
                 stdout=True,

@@ -9,24 +9,37 @@ RUN apt-get update -qq && \
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
 ENV PATH="/usr/local/bin:$PATH"
 
-# Install Jac ecosystem
-RUN pip install --no-cache-dir jaclang jac-scale jac-client watchdog
+# Install Node.js (agent-browser CLI requires node runtime)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y -qq nodejs > /dev/null 2>&1 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Pre-warm: ensure jac CLI is available
-RUN jac --version
+# Install Chrome system dependencies (agent-browser --with-deps is unreliable)
+RUN apt-get update -qq && \
+    apt-get install -y -qq \
+    libglib2.0-0 libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libxkbcommon0 libasound2t64 libgbm1 libcairo2 libpango-1.0-0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libatspi2.0-0 \
+    fonts-liberation xdg-utils > /dev/null 2>&1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install agent-browser CLI globally (as root)
+RUN npm install -g agent-browser
 
 # Create non-root user for security_context (uid 1000)
 RUN groupadd -g 1000 jac && useradd -u 1000 -g jac -m -s /bin/bash jac
 RUN mkdir -p /app && chown 1000:1000 /app
 
-# Pre-build admin dashboard while still root (site-packages is root-owned,
-# so jac build cannot create .jac/ artifacts there when running as non-root)
-RUN mkdir -p /tmp/admin_build && \
-    cp -r /usr/local/lib/python3.12/site-packages/jac_scale/admin/ui/* /tmp/admin_build/ && \
-    cd /tmp/admin_build && jac build main.jac && \
-    mkdir -p /app/.jac/admin && \
-    cp -r /tmp/admin_build/.jac/client/dist/* /app/.jac/admin/ && \
-    rm -rf /tmp/admin_build && \
-    chown -R 1000:1000 /app/.jac
+# Install Chrome binary as jac user so it lands in /home/jac/.agent-browser/
+# This allows agent-browser to work when pod runs as non-root (uid 1000)
+USER jac
+RUN agent-browser install
+USER root
+
+# Install Jac ecosystem
+RUN pip install --no-cache-dir jaclang jac-scale jac-client byllm watchdog
+
+# Pre-warm: ensure jac CLI is available
+RUN jac --version
 
 WORKDIR /app
