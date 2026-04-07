@@ -114,6 +114,20 @@ test "validate resource limits rejects invalid quantity" {
     assert raised , "Expected ValueError for invalid quantity";
 }
 
+test "validate resource limits accepts valid ephemeral storage" {
+    validate_resource_limits("250m", "500m", "256Mi", "512Mi", "10Gi", "20Gi");
+}
+
+test "validate resource limits rejects lower ephemeral storage limit" {
+    raised = False;
+    try {
+        validate_resource_limits(None, None, None, None, "20Gi", "10Gi");
+    } except ValueError {
+        raised = True;
+    }
+    assert raised , "Expected ValueError for lower ephemeral storage limit";
+}
+
 # --- load_env_variables ---
 test "load env variables reads env file" {
     tmp = Path(mkdtemp());
