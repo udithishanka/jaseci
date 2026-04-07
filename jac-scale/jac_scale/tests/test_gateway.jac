@@ -1,5 +1,8 @@
 """Tests for microservices MicroserviceGateway."""
 
+import os;
+import tempfile;
+import from pathlib { Path }
 import from jac_scale.microservices.service_registry {
     ServiceRegistry,
     ServiceEntry,
@@ -79,7 +82,7 @@ test "resolve no query string omits question mark" {
 }
 
 # =============================================================================
-# Setup creates app
+# Setup
 # =============================================================================
 
 test "setup creates fastapi app" {
@@ -91,7 +94,7 @@ test "setup creates fastapi app" {
 }
 
 # =============================================================================
-# Health endpoint via TestClient
+# Routing via TestClient
 # =============================================================================
 
 test "health endpoint returns service summary" {
@@ -166,4 +169,161 @@ test "empty registry returns 404" {
     client = TestClient(gw.app);
     resp = client.get("/api/anything/walker/test");
     assert resp.status_code == 404;
+}
+
+# =============================================================================
+# Static file serving
+# =============================================================================
+
+test "serve static returns file with correct mime type" {
+    tmp = tempfile.mkdtemp();
+    assets_dir = Path(tmp) / "assets";
+    assets_dir.mkdir();
+    js_file = assets_dir / "app.js";
+    js_file.write_text("console.log('hello');");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_static("assets/app.js");
+    assert resp is not None;
+    assert "javascript" in resp.media_type;
+    assert b"hello" in resp.body;
+
+    # Cleanup
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve static returns none for missing file" {
+    tmp = tempfile.mkdtemp();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_static("nonexistent.js");
+    assert resp is None;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve static blocks path traversal" {
+    tmp = tempfile.mkdtemp();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_static("../../etc/passwd");
+    assert resp is None;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve static css file returns text content type" {
+    tmp = tempfile.mkdtemp();
+    css_file = Path(tmp) / "style.css";
+    css_file.write_text("body { color: red; }");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_static("style.css");
+    assert resp is not None;
+    assert resp.media_type == "text/css";
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+# =============================================================================
+# SPA fallback
+# =============================================================================
+
+test "spa fallback serves index.html" {
+    tmp = tempfile.mkdtemp();
+    index = Path(tmp) / "index.html";
+    index.write_text("<html><body>SPA</body></html>");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_spa_fallback();
+    assert resp is not None;
+    assert b"SPA" in resp.body;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "spa fallback returns none when no index.html" {
+    tmp = tempfile.mkdtemp();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_spa_fallback();
+    assert resp is None;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+# =============================================================================
+# Static + SPA via TestClient (integration)
+# =============================================================================
+
+test "gateway serves static files for unmatched paths" {
+    tmp = tempfile.mkdtemp();
+    assets_dir = Path(tmp) / "assets";
+    assets_dir.mkdir();
+    (assets_dir / "app.js").write_text("var x = 1;");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/assets/app.js");
+    assert resp.status_code == 200;
+    assert "var x = 1" in resp.text;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "gateway serves spa fallback for html navigation" {
+    tmp = tempfile.mkdtemp();
+    (Path(tmp) / "index.html").write_text("<html>SPA App</html>");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/dashboard", headers={"Accept": "text/html"});
+    assert resp.status_code == 200;
+    assert "SPA App" in resp.text;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "gateway returns 404 for missing static and no spa" {
+    tmp = tempfile.mkdtemp();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/nonexistent.js");
+    assert resp.status_code == 404;
+
+    import shutil;
+    shutil.rmtree(tmp);
 }
