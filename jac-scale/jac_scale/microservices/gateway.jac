@@ -18,7 +18,8 @@ obj MicroserviceGateway {
         app: FastAPI | None = None,
         port: int = 8000,
         host: str = "0.0.0.0",
-        client_dist_dir: str = ".jac/client/dist";
+        client_dist_dir: str = ".jac/client/dist",
+        admin_dist_dir: str = ".jac/admin";
 
     """Create the FastAPI app and register routes."""
     def setup -> FastAPI;
@@ -31,6 +32,12 @@ obj MicroserviceGateway {
 
     """Serve index.html for SPA fallback. Returns None if no index.html exists."""
     def serve_spa_fallback -> Response | None;
+
+    """Bootstrap admin UI — copy pre-built bundle to admin_dist_dir if needed."""
+    def bootstrap_admin -> None;
+
+    """Serve an admin asset by path. Returns None if not found."""
+    def serve_admin_asset(asset_path: str) -> Response | None;
 
     """Start the gateway server (blocking)."""
     def start -> None;

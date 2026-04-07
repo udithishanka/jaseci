@@ -327,3 +327,114 @@ test "gateway returns 404 for missing static and no spa" {
     import shutil;
     shutil.rmtree(tmp);
 }
+
+# =============================================================================
+# Admin UI serving
+# =============================================================================
+
+test "serve admin asset returns index.html for root" {
+    tmp = tempfile.mkdtemp();
+    admin_dir = Path(tmp) / "admin";
+    admin_dir.mkdir();
+    (admin_dir / "index.html").write_text("<html>Admin Portal</html>");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, admin_dist_dir=str(admin_dir));
+
+    resp = gw.serve_admin_asset("");
+    assert resp is not None;
+    assert b"Admin Portal" in resp.body;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve admin asset returns static file" {
+    tmp = tempfile.mkdtemp();
+    admin_dir = Path(tmp) / "admin";
+    assets = admin_dir / "assets";
+    assets.mkdir(parents=True);
+    (assets / "admin.js").write_text("var admin = true;");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, admin_dist_dir=str(admin_dir));
+
+    resp = gw.serve_admin_asset("assets/admin.js");
+    assert resp is not None;
+    assert b"admin" in resp.body;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve admin asset spa fallback for unknown route" {
+    tmp = tempfile.mkdtemp();
+    admin_dir = Path(tmp) / "admin";
+    admin_dir.mkdir();
+    (admin_dir / "index.html").write_text("<html>Admin SPA</html>");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, admin_dist_dir=str(admin_dir));
+
+    resp = gw.serve_admin_asset("users/list");
+    assert resp is not None;
+    assert b"Admin SPA" in resp.body;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve admin asset blocks path traversal" {
+    tmp = tempfile.mkdtemp();
+    admin_dir = Path(tmp) / "admin";
+    admin_dir.mkdir();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, admin_dist_dir=str(admin_dir));
+
+    resp = gw.serve_admin_asset("../../etc/passwd");
+    assert resp is None;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "admin redirect via testclient" {
+    tmp = tempfile.mkdtemp();
+    admin_dir = Path(tmp) / "admin";
+    admin_dir.mkdir();
+    (admin_dir / "index.html").write_text("<html>Admin</html>");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, admin_dist_dir=str(admin_dir));
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app, follow_redirects=False);
+    resp = client.get("/admin");
+    assert resp.status_code == 302;
+    assert resp.headers["location"] == "/admin/";
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "admin index served at /admin/" {
+    tmp = tempfile.mkdtemp();
+    admin_dir = Path(tmp) / "admin";
+    admin_dir.mkdir();
+    (admin_dir / "index.html").write_text("<html>Admin Dashboard</html>");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, admin_dist_dir=str(admin_dir));
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/admin/");
+    assert resp.status_code == 200;
+    assert "Admin Dashboard" in resp.text;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}

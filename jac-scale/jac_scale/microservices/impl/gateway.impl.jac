@@ -1,5 +1,7 @@
 """Implementation of MicroserviceGateway methods."""
 
+import shutil;
+
 """Build the target URL by stripping prefix and forwarding the rest."""
 impl MicroserviceGateway.resolve_target_url
 (service_entry: ServiceEntry, path: str, query: str) -> str {
@@ -56,10 +58,95 @@ impl MicroserviceGateway.serve_spa_fallback
     return None;
 }
 
+"""Bootstrap admin UI — copy pre-built bundle to admin_dist_dir if needed."""
+impl MicroserviceGateway.bootstrap_admin
+-> None {
+    admin_dist = Path(self.admin_dist_dir);
+    index_file = admin_dist / "index.html";
+
+    # Already deployed
+    if index_file.exists() {
+        return;
+    }
+
+    # Find pre-built bundle from the installed package
+    try {
+        import from jac_scale.admin { admin_portal }
+        admin_pkg_dir = Path(admin_portal.__file__).parent;
+        bundled_dist = admin_pkg_dir / "_dist";
+
+        if bundled_dist.exists() and (bundled_dist / "index.html").exists() {
+            logger.info("Deploying pre-built admin UI to gateway");
+            admin_dist.mkdir(parents=True, exist_ok=True);
+            for item in bundled_dist.iterdir() {
+                dest = admin_dist / item.name;
+                if item.is_dir() {
+                    if dest.exists() {
+                        shutil.rmtree(dest);
+                    }
+                    shutil.copytree(item, dest);
+                } else {
+                    shutil.copy2(item, dest);
+                }
+            }
+        } else {
+            logger.debug("No pre-built admin UI found in package");
+        }
+    } except (ImportError, ModuleNotFoundError) {
+        logger.debug("Admin module not available, skipping admin UI bootstrap");
+    }
+}
+
+"""Serve an admin asset by path. Returns None if not found."""
+impl MicroserviceGateway.serve_admin_asset
+(asset_path: str) -> Response | None {
+    admin_dist = Path(self.admin_dist_dir);
+
+    # Determine target file
+    if not asset_path or asset_path == "/" {
+        target = admin_dist / "index.html";
+    } else {
+        target = admin_dist / asset_path;
+    }
+
+    # Path traversal protection
+    try {
+        resolved = target.resolve();
+        dist_resolved = admin_dist.resolve();
+        if not str(resolved).startswith(str(dist_resolved)) {
+            return None;
+        }
+    } except OSError {
+        return None;
+    }
+
+    if not target.is_file() {
+        # SPA fallback for admin — serve index.html for non-file paths
+        index = admin_dist / "index.html";
+        if index.is_file() {
+            return HTMLResponse(content=index.read_text(encoding="utf-8"));
+        }
+        return None;
+    }
+
+    (content_type, _) = mimetypes.guess_type(str(target));
+    if content_type is None {
+        content_type = "application/octet-stream";
+    }
+
+    if content_type.startswith("text/") or content_type in ("application/javascript", "application/json") {
+        return Response(content=target.read_text(encoding="utf-8"), media_type=content_type);
+    }
+    return Response(content=target.read_bytes(), media_type=content_type);
+}
+
 """Create the FastAPI app and register routes."""
 impl MicroserviceGateway.setup -> FastAPI {
     self.app = FastAPI(title="Jac Microservice Gateway");
     gw_ref = self;
+
+    # Bootstrap admin UI on setup
+    self.bootstrap_admin();
 
     @self.app.middleware("http")
     async def proxy_middleware(request: Request, call_next: object) -> Response {
@@ -74,6 +161,19 @@ impl MicroserviceGateway.setup -> FastAPI {
                     "services": gw_ref.registry.health_summary()
                 }
             );
+        }
+
+        # Admin UI — /admin and /admin/*
+        if path == "/admin" {
+            import from fastapi.responses { RedirectResponse }
+            return RedirectResponse(url="/admin/", status_code=302);
+        }
+        if path.startswith("/admin/") {
+            admin_path: str = path[7:];  # strip "/admin/"
+            admin_resp = gw_ref.serve_admin_asset(admin_path);
+            if admin_resp {
+                return admin_resp;
+            }
         }
 
         # 1. Try API proxy (if path matches a service prefix)
