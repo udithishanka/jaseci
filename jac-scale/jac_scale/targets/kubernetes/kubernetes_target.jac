@@ -86,6 +86,9 @@ obj KubernetesTarget(DeploymentTarget) {
         if self.k8s_config.memory_request {
             resource_requests['memory'] = self.k8s_config.memory_request;
         }
+        if self.k8s_config.ephemeral_storage_request {
+            resource_requests['ephemeral-storage'] = self.k8s_config.ephemeral_storage_request;
+        }
 
         resource_limits: dict[(str, str)] = {};
         if self.k8s_config.cpu_limit {
@@ -93,6 +96,9 @@ obj KubernetesTarget(DeploymentTarget) {
         }
         if self.k8s_config.memory_limit {
             resource_limits['memory'] = self.k8s_config.memory_limit;
+        }
+        if self.k8s_config.ephemeral_storage_limit {
+            resource_limits['ephemeral-storage'] = self.k8s_config.ephemeral_storage_limit;
         }
 
         resources: dict[(str, dict)] = {};
@@ -1242,7 +1248,9 @@ obj KubernetesTarget(DeploymentTarget) {
                 self.k8s_config.cpu_request,
                 self.k8s_config.cpu_limit,
                 self.k8s_config.memory_request,
-                self.k8s_config.memory_limit
+                self.k8s_config.memory_limit,
+                self.k8s_config.ephemeral_storage_request,
+                self.k8s_config.ephemeral_storage_limit
             );
             details["validate_resource_limits"] = "Successful";
             # 2. Initialize Kubernetes clients

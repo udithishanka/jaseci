@@ -59,7 +59,9 @@ impl validate_resource_limits(
     cpu_request: (str | None),
     cpu_limit: (str | None),
     memory_request: (str | None),
-    memory_limit: (str | None)
+    memory_limit: (str | None),
+    ephemeral_storage_request: (str | None) = None,
+    ephemeral_storage_limit: (str | None) = None
 ) -> None {
     if (cpu_request and cpu_limit) {
         try {
@@ -84,6 +86,19 @@ impl validate_resource_limits(
         if (memory_limit_value < memory_request_value) {
             raise ValueError(
                 f"K8s_MEMORY_LIMIT ({memory_limit}) must not be lower than K8s_MEMORY_REQUEST ({memory_request})."
+            );
+        }
+    }
+    if (ephemeral_storage_request and ephemeral_storage_limit) {
+        try {
+            eph_request_value = parse_memory_quantity(ephemeral_storage_request);
+            eph_limit_value = parse_memory_quantity(ephemeral_storage_limit);
+        } except ValueError as exc {
+            raise ValueError(f"Invalid ephemeral-storage quantity: {exc}");
+        }
+        if (eph_limit_value < eph_request_value) {
+            raise ValueError(
+                f"EPHEMERAL_STORAGE_LIMIT ({ephemeral_storage_limit}) must not be lower than EPHEMERAL_STORAGE_REQUEST ({ephemeral_storage_request})."
             );
         }
     }

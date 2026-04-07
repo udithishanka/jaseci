@@ -40,7 +40,9 @@ def validate_resource_limits(
     cpu_request: (str | None),
     cpu_limit: (str | None),
     memory_request: (str | None),
-    memory_limit: (str | None)
+    memory_limit: (str | None),
+    ephemeral_storage_request: (str | None) = None,
+    ephemeral_storage_limit: (str | None) = None
 ) -> None;
 
 def load_env_variables(code_folder: str) -> list;
