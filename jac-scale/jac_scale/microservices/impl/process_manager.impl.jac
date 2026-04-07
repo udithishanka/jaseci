@@ -1,13 +1,5 @@
 """Implementation of ServiceProcessManager methods."""
 
-import subprocess;
-import logging;
-import from urllib.request { urlopen, Request }
-import from urllib.error { URLError }
-import from jac_scale.microservices.service_registry { ServiceStatus }
-
-glob logger = logging.getLogger(__name__);
-
 """Assign a port to a service (auto-assign if port=0)."""
 impl ServiceProcessManager._assign_port
 (service_entry: ServiceEntry) -> int {
@@ -118,7 +110,7 @@ impl ServiceProcessManager.check_health
     }
 
     try {
-        req = Request(f"{entry.url}/health", method="GET");
+        req = URLRequest(f"{entry.url}/health", method="GET");
         resp = urlopen(req, timeout=self._health_check_timeout);
         return getattr(resp, "status", 0) == 200;
     } except URLError {

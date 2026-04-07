@@ -2,6 +2,8 @@
 
 import subprocess;
 import logging;
+import from urllib.request { urlopen, Request as URLRequest }
+import from urllib.error { URLError }
 import from jac_scale.microservices.service_registry {
     ServiceRegistry,
     ServiceEntry,
