@@ -22,7 +22,6 @@ impl MicroserviceGateway.serve_static
     dist = Path(self.client_dist_dir);
     target = dist / file_path;
 
-    # Prevent path traversal
     try {
         resolved = target.resolve();
         dist_resolved = dist.resolve();
@@ -64,12 +63,10 @@ impl MicroserviceGateway.bootstrap_admin
     admin_dist = Path(self.admin_dist_dir);
     index_file = admin_dist / "index.html";
 
-    # Already deployed
     if index_file.exists() {
         return;
     }
 
-    # Find pre-built bundle from the installed package
     try {
         import from jac_scale.admin { admin_portal }
         admin_pkg_dir = Path(admin_portal.__file__).parent;
@@ -102,14 +99,12 @@ impl MicroserviceGateway.serve_admin_asset
 (asset_path: str) -> Response | None {
     admin_dist = Path(self.admin_dist_dir);
 
-    # Determine target file
     if not asset_path or asset_path == "/" {
         target = admin_dist / "index.html";
     } else {
         target = admin_dist / asset_path;
     }
 
-    # Path traversal protection
     try {
         resolved = target.resolve();
         dist_resolved = admin_dist.resolve();
@@ -121,7 +116,6 @@ impl MicroserviceGateway.serve_admin_asset
     }
 
     if not target.is_file() {
-        # SPA fallback for admin — serve index.html for non-file paths
         index = admin_dist / "index.html";
         if index.is_file() {
             return HTMLResponse(content=index.read_text(encoding="utf-8"));
@@ -138,6 +132,49 @@ impl MicroserviceGateway.serve_admin_asset
         return Response(content=target.read_text(encoding="utf-8"), media_type=content_type);
     }
     return Response(content=target.read_bytes(), media_type=content_type);
+}
+
+"""Validate a JWT token. Returns decoded payload or None."""
+impl MicroserviceGateway.validate_token
+(token: str) -> dict | None {
+    try {
+        payload: dict = jwt.decode(token, GW_JWT_SECRET, algorithms=[GW_JWT_ALGORITHM]);
+        return payload;
+    } except jwt.ExpiredSignatureError {
+        logger.debug("Token expired");
+        return None;
+    } except jwt.InvalidTokenError as e {
+        logger.debug(f"Invalid token: {e}");
+        return None;
+    }
+}
+
+"""Create a short-lived internal service token for service-to-service calls."""
+impl MicroserviceGateway.create_internal_token
+(user_id: str, user_email: str) -> str {
+    import time;
+    exp_timestamp: int = int(time.time()) + self.internal_token_ttl;
+    payload = {
+        "user_id": user_id,
+        "email": user_email,
+        "type": "internal",
+        "exp": exp_timestamp
+    };
+    token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+    return token;
+}
+
+"""Check if a path is public (no auth required)."""
+impl MicroserviceGateway.is_public_path
+(path: str) -> bool {
+    if path in PUBLIC_PATHS {
+        return True;
+    }
+    # Static assets, admin UI, and health don't require auth
+    if path.startswith(("/static/", "/assets/", "/admin")) {
+        return True;
+    }
+    return False;
 }
 
 """Create the FastAPI app and register routes."""
@@ -163,23 +200,85 @@ impl MicroserviceGateway.setup -> FastAPI {
             );
         }
 
+        # Auth endpoints — login
+        if path == "/auth/login" and request.method == "POST" {
+            try {
+                body_data = await request.json();
+            } except ValueError {
+                return JSONResponse(status_code=400, content={"error": "Invalid JSON"});
+            }
+            username: str = body_data.get("username", "");
+            password: str = body_data.get("password", "");
+
+            if not username or not password {
+                return JSONResponse(status_code=400, content={"error": "Username and password required"});
+            }
+
+            # Create JWT token
+            import time;
+            exp_timestamp: int = int(time.time()) + (GW_JWT_EXP_DAYS * 86400);
+            payload = {
+                "user_id": username,
+                "email": f"{username}@example.com",
+                "exp": exp_timestamp
+            };
+            token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+            return JSONResponse(content={"token": token});
+        }
+
         # Admin UI — /admin and /admin/*
         if path == "/admin" {
             import from fastapi.responses { RedirectResponse }
             return RedirectResponse(url="/admin/", status_code=302);
         }
         if path.startswith("/admin/") {
-            admin_path: str = path[7:];  # strip "/admin/"
+            admin_path: str = path[7:];
             admin_resp = gw_ref.serve_admin_asset(admin_path);
             if admin_resp {
                 return admin_resp;
             }
         }
 
-        # 1. Try API proxy (if path matches a service prefix)
+        # API proxy — match service prefix
         svc = gw_ref.registry.match_route(path);
 
         if svc {
+            # --- AUTH CHECK for API routes ---
+            extra_headers: dict[str, str] = {};
+
+            if not gw_ref.is_public_path(path) {
+                # Check for internal service token first (service-to-service)
+                internal_token: str = request.headers.get("x-internal-token", "");
+                if internal_token {
+                    internal_payload = gw_ref.validate_token(internal_token);
+                    if not internal_payload or internal_payload.get("type") != "internal" {
+                        return JSONResponse(status_code=401, content={"error": "Invalid internal service token"});
+                    }
+                    extra_headers["X-User-Id"] = str(internal_payload.get("user_id", ""));
+                    extra_headers["X-User-Email"] = str(internal_payload.get("email", ""));
+                } else {
+                    # External request — validate user JWT
+                    auth_header: str = request.headers.get("authorization", "");
+                    if not auth_header.startswith("Bearer ") {
+                        return JSONResponse(status_code=401, content={"error": "Missing authentication token"});
+                    }
+                    user_token: str = auth_header[7:];
+                    user_payload = gw_ref.validate_token(user_token);
+                    if not user_payload {
+                        return JSONResponse(status_code=401, content={"error": "Invalid or expired token"});
+                    }
+                    extra_headers["X-User-Id"] = str(user_payload.get("user_id", ""));
+                    extra_headers["X-User-Email"] = str(user_payload.get("email", ""));
+                }
+
+                # Issue internal token so service can make service-to-service calls
+                extra_headers["X-Internal-Token"] = gw_ref.create_internal_token(
+                    extra_headers.get("X-User-Id", ""),
+                    extra_headers.get("X-User-Email", "")
+                );
+            }
+            # --- END AUTH ---
+
             if svc.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
                 return JSONResponse(
                     status_code=503,
@@ -196,6 +295,7 @@ impl MicroserviceGateway.setup -> FastAPI {
                     fwd_headers[key] = value;
                 }
             }
+            fwd_headers.update(extra_headers);
             client_addr: str = getattr(getattr(request, "client", None), "host", "unknown");
             fwd_headers["X-Forwarded-For"] = client_addr;
 
@@ -217,7 +317,7 @@ impl MicroserviceGateway.setup -> FastAPI {
             );
         }
 
-        # 2. Try static file (GET only)
+        # Static file serving (GET only)
         if request.method == "GET" {
             file_path: str = path.lstrip("/");
             if file_path {
@@ -227,7 +327,6 @@ impl MicroserviceGateway.setup -> FastAPI {
                 }
             }
 
-            # 3. SPA fallback — serve index.html for HTML navigation requests
             accept: str = request.headers.get("accept", "");
             if "text/html" in accept {
                 fallback = gw_ref.serve_spa_fallback();

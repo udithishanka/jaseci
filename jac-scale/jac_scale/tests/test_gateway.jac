@@ -1,6 +1,8 @@
 """Tests for microservices MicroserviceGateway."""
 
 import os;
+import jwt;
+import time;
 import tempfile;
 import from pathlib { Path }
 import from jac_scale.microservices.service_registry {
@@ -9,7 +11,9 @@ import from jac_scale.microservices.service_registry {
     ServiceStatus
 }
 import from jac_scale.microservices.gateway {
-    MicroserviceGateway
+    MicroserviceGateway,
+    GW_JWT_SECRET,
+    GW_JWT_ALGORITHM
 }
 
 # =============================================================================
@@ -130,7 +134,7 @@ test "unmatched path returns 404" {
     assert resp.status_code == 404;
 }
 
-test "unhealthy service returns 503" {
+test "unhealthy service returns 503 with valid token" {
     reg = ServiceRegistry();
     reg.register(ServiceEntry(
         name="orders", file="orders.jac", prefix="/api/orders",
@@ -139,13 +143,16 @@ test "unhealthy service returns 503" {
     gw = MicroserviceGateway(registry=reg);
     gw.setup();
 
+    valid_payload = {"user_id": "alice", "exp": int(time.time()) + 3600};
+    valid_token: str = jwt.encode(valid_payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+
     import from fastapi.testclient { TestClient }
     client = TestClient(gw.app);
-    resp = client.get("/api/orders/walker/list");
+    resp = client.get("/api/orders/walker/list", headers={"Authorization": f"Bearer {valid_token}"});
     assert resp.status_code == 503;
 }
 
-test "stopped service returns 503" {
+test "stopped service returns 503 with valid token" {
     reg = ServiceRegistry();
     reg.register(ServiceEntry(
         name="orders", file="orders.jac", prefix="/api/orders",
@@ -154,9 +161,12 @@ test "stopped service returns 503" {
     gw = MicroserviceGateway(registry=reg);
     gw.setup();
 
+    valid_payload = {"user_id": "alice", "exp": int(time.time()) + 3600};
+    valid_token: str = jwt.encode(valid_payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+
     import from fastapi.testclient { TestClient }
     client = TestClient(gw.app);
-    resp = client.get("/api/orders/walker/list");
+    resp = client.get("/api/orders/walker/list", headers={"Authorization": f"Bearer {valid_token}"});
     assert resp.status_code == 503;
 }
 
@@ -437,4 +447,161 @@ test "admin index served at /admin/" {
 
     import shutil;
     shutil.rmtree(tmp);
+}
+
+# =============================================================================
+# JWT Auth
+# =============================================================================
+
+test "validate_token returns payload for valid token" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    payload = {"user_id": "alice", "email": "alice@test.com", "exp": int(time.time()) + 3600};
+    token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+
+    result = gw.validate_token(token);
+    assert result is not None;
+    assert result["user_id"] == "alice";
+    assert result["email"] == "alice@test.com";
+}
+
+test "validate_token returns none for expired token" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    payload = {"user_id": "alice", "exp": int(time.time()) - 3600};
+    token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+
+    assert gw.validate_token(token) is None;
+}
+
+test "validate_token returns none for invalid token" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    assert gw.validate_token("garbage.token.here") is None;
+}
+
+test "create_internal_token is valid and short-lived" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, internal_token_ttl=30);
+
+    token = gw.create_internal_token("alice", "alice@test.com");
+    payload = gw.validate_token(token);
+
+    assert payload is not None;
+    assert payload["user_id"] == "alice";
+    assert payload["email"] == "alice@test.com";
+    assert payload["type"] == "internal";
+}
+
+test "is_public_path identifies public paths" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    assert gw.is_public_path("/health");
+    assert gw.is_public_path("/auth/login");
+    assert gw.is_public_path("/auth/register");
+    assert gw.is_public_path("/admin/");
+    assert gw.is_public_path("/static/app.js");
+    assert gw.is_public_path("/assets/style.css");
+    assert not gw.is_public_path("/api/orders/walker/list");
+}
+
+# =============================================================================
+# Auth via TestClient
+# =============================================================================
+
+test "login endpoint returns valid jwt" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.post("/auth/login", json={"username": "testuser", "password": "testpass"});
+    assert resp.status_code == 200;
+    token = resp.json()["token"];
+
+    decoded = jwt.decode(token, GW_JWT_SECRET, algorithms=[GW_JWT_ALGORITHM]);
+    assert decoded["user_id"] == "testuser";
+}
+
+test "login endpoint rejects missing credentials" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.post("/auth/login", json={"username": ""});
+    assert resp.status_code == 400;
+}
+
+test "api request without token returns 401" {
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.get("/api/orders/walker/list");
+    assert resp.status_code == 401;
+    assert "Missing" in resp.json()["error"];
+}
+
+test "api request with invalid token returns 401" {
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.get("/api/orders/walker/list", headers={"Authorization": "Bearer invalidtoken"});
+    assert resp.status_code == 401;
+    assert "Invalid" in resp.json()["error"];
+}
+
+test "api request with expired token returns 401" {
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    expired_payload = {"user_id": "alice", "exp": int(time.time()) - 3600};
+    expired_token: str = jwt.encode(expired_payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.get("/api/orders/walker/list", headers={"Authorization": f"Bearer {expired_token}"});
+    assert resp.status_code == 401;
+}
+
+test "health endpoint does not require auth" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.get("/health");
+    assert resp.status_code == 200;
 }
