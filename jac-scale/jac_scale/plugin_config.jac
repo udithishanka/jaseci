@@ -272,6 +272,55 @@ class JacScalePluginConfig {
                         }
                     }
                 },
+                "microservices": {
+                    "type": "dict",
+                    "default": {},
+                    "description": "Microservice mode — run declared Jac files as independent service processes behind an API gateway",
+                    "nested": {
+                        "enabled": {
+                            "type": "bool",
+                            "default": False,
+                            "description": "Enable microservice mode (off by default). Use `jac setup microservice` to configure."
+                        },
+                        "gateway_port": {
+                            "type": "int",
+                            "default": 8000,
+                            "description": "Gateway port (external-facing)"
+                        },
+                        "gateway_host": {
+                            "type": "string",
+                            "default": "0.0.0.0",
+                            "description": "Gateway host"
+                        },
+                        "services": {
+                            "type": "dict",
+                            "default": {},
+                            "description": "Service declarations — each key is a service name with file, prefix, port, env, replicas"
+                        },
+                        "client": {
+                            "type": "dict",
+                            "default": {},
+                            "description": "Client UI build settings (optional)",
+                            "nested": {
+                                "entry": {
+                                    "type": "string",
+                                    "default": "",
+                                    "description": "jac-client entry point (e.g., client/main.jac)"
+                                },
+                                "dist_dir": {
+                                    "type": "string",
+                                    "default": ".jac/client/dist",
+                                    "description": "Build output directory for static assets"
+                                },
+                                "base_route": {
+                                    "type": "string",
+                                    "default": "/",
+                                    "description": "SPA base route"
+                                }
+                            }
+                        }
+                    }
+                },
                 "monitoring": {
                     "type": "dict",
                     "default": {},

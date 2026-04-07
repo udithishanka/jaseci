@@ -110,7 +110,18 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'system_user_password': 'system_secret',
             'collection': 'scheduled_jobs'
         },
-        'telemetry': {'max_traces': 1000}
+        'telemetry': {'max_traces': 1000},
+        'microservices': {
+            'enabled': False,
+            'gateway_port': 8000,
+            'gateway_host': '0.0.0.0',
+            'services': {},
+            'client': {
+                'entry': '',
+                'dist_dir': '.jac/client/dist',
+                'base_route': '/'
+            }
+        }
     };
 }
 
@@ -318,6 +329,24 @@ impl JacScaleConfig.get_scheduler_config(self: JacScaleConfig) -> dict[str, Any]
         'system_user_password': os.environ.get('SYSTEM_USER_PASSWORD')
         or scheduler_config.get('system_user_password', 'system_secret'),
         'collection': scheduler_config.get('collection', 'scheduled_jobs')
+    };
+}
+
+"""Get microservices configuration from jac.toml."""
+impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, Any] {
+    config = self.load();
+    ms_config = config.get('microservices', {});
+    client_config = ms_config.get('client', {});
+    return {
+        'enabled': ms_config.get('enabled', False),
+        'gateway_port': int(ms_config.get('gateway_port', 8000)),
+        'gateway_host': ms_config.get('gateway_host', '0.0.0.0'),
+        'services': ms_config.get('services', {}),
+        'client': {
+            'entry': client_config.get('entry', ''),
+            'dist_dir': client_config.get('dist_dir', '.jac/client/dist'),
+            'base_route': client_config.get('base_route', '/')
+        }
     };
 }
 

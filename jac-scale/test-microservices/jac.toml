@@ -1,0 +1,17 @@
+[plugins.scale.microservices]
+enabled = true
+gateway_port = 8000
+gateway_host = "0.0.0.0"
+
+[plugins.scale.microservices.services.orders]
+file = "services/orders.jac"
+prefix = "/api/orders"
+
+[plugins.scale.microservices.services.payments]
+file = "services/payments.jac"
+prefix = "/api/payments"
+
+[plugins.scale.microservices.client]
+entry = "client/main.jac"
+dist_dir = ".jac/client/dist"
+base_route = "/"
