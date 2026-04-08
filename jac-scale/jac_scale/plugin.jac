@@ -525,6 +525,127 @@ class JacCmd {
             }
             return 0;
         }
+
+        @registry.command(
+            name="scale",
+            help="Manage microservice deployments — status, stop, restart, logs",
+            args=[
+                Arg.create(
+                    "action", kind=ArgKind.POSITIONAL,
+                    help="Action: status, stop, restart, logs, destroy"
+                ),
+                Arg.create(
+                    "service_name", kind=ArgKind.POSITIONAL, default="",
+                    help="Service name (required for stop, restart, logs)"
+                ),
+                Arg.create(
+                    "lines", typ=int, default=50,
+                    help="Number of log lines to show (for 'logs' action)"
+                ),
+            ],
+            examples=[
+                ("jac scale status", "Show status of all microservices"),
+                ("jac scale stop orders", "Stop the orders service"),
+                ("jac scale restart cart", "Restart the cart service"),
+                ("jac scale logs products", "Show logs for products service"),
+                ("jac scale destroy", "Stop all services"),
+            ],
+            group="microservices",
+            priority=CommandPriority.PLUGIN,
+            source="jac-scale"
+        )
+        def scale_cmd(
+            action: str,
+            service_name: str = "",
+            lines: int = 50
+        ) -> int {
+            import from jac_scale.microservices.orchestrator { build_registry }
+            import from jac_scale.microservices.local_deployer { LocalDeployer }
+
+            scale_config = get_scale_config();
+            ms_config = scale_config.get_microservices_config();
+
+            if not ms_config.get("enabled", False) {
+                console.print("[bold red]Microservice mode is not enabled in jac.toml[/bold red]");
+                return 1;
+            }
+
+            services_config = ms_config.get("services", {});
+            if not services_config {
+                console.print("[bold red]No services configured[/bold red]");
+                return 1;
+            }
+
+            registry = build_registry(services_config);
+            deployer = LocalDeployer(registry=registry, target="local");
+
+            if action == "status" {
+                svc_status = deployer.status();
+                console.print();
+                console.print("[bold cyan]  Microservice Status[/bold cyan]");
+                console.print();
+                for (name, info) in svc_status.items() {
+                    status_str = info.get("status", "unknown");
+                    running = info.get("running", False);
+                    port = info.get("port", 0);
+                    pid = info.get("pid");
+                    prefix = info.get("prefix", "");
+                    if running {
+                        console.print(
+                            f"  [green]●[/green] {name:12s} {prefix:20s} port={port} pid={pid}"
+                        );
+                    } else {
+                        console.print(
+                            f"  [red]○[/red] {name:12s} {prefix:20s} (not running)"
+                        );
+                    }
+                }
+                console.print();
+
+            } elif action == "stop" {
+                if not service_name {
+                    console.print("[bold red]Service name required: jac scale stop <name>[/bold red]");
+                    return 1;
+                }
+                if deployer.stop_service(service_name) {
+                    console.print(f"[green]Stopped {service_name}[/green]");
+                } else {
+                    console.print(f"[red]Failed to stop {service_name}[/red]");
+                    return 1;
+                }
+
+            } elif action == "restart" {
+                if not service_name {
+                    console.print("[bold red]Service name required: jac scale restart <name>[/bold red]");
+                    return 1;
+                }
+                if deployer.restart_service(service_name) {
+                    console.print(f"[green]Restarted {service_name}[/green]");
+                } else {
+                    console.print(f"[red]Failed to restart {service_name}[/red]");
+                    return 1;
+                }
+
+            } elif action == "logs" {
+                if not service_name {
+                    console.print("[bold red]Service name required: jac scale logs <name>[/bold red]");
+                    return 1;
+                }
+                log_output = deployer.get_logs(service_name, lines);
+                console.print(log_output);
+
+            } elif action == "destroy" {
+                deployer.destroy_all();
+                console.print("[green]All services stopped[/green]");
+
+            } else {
+                console.print(f"[bold red]Unknown action:[/bold red] '{action}'");
+                console.print("Actions: status, stop, restart, logs, destroy");
+                return 1;
+            }
+
+            return 0;
+        }
     }
 }
 

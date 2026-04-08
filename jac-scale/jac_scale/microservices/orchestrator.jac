@@ -6,6 +6,7 @@ import logging;
 import from typing { Any }
 import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceEntry, ServiceStatus }
 import from jac_scale.microservices.process_manager { ServiceProcessManager }
+import from jac_scale.microservices.local_deployer { LocalDeployer }
 import from jac_scale.microservices.gateway { MicroserviceGateway }
 import from jac_scale.config_loader { get_scale_config }
 
@@ -85,12 +86,13 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
     registry = build_registry(services_config);
     logger.info(f"Registry: {len(registry.entries)} services");
 
-    # 2. Start service subprocesses
-    pm = ServiceProcessManager(registry=registry);
-    pm.start_all();
+    # 2. Start services via deployer
+    deployer = LocalDeployer(registry=registry);
+    deployer.deploy_all();
+    pm = deployer._ensure_pm();
 
     # Register cleanup on exit
-    atexit.register(pm.stop_all);
+    atexit.register(deployer.destroy_all);
 
     # 3. Wait for services to become healthy
     logger.info("Waiting for services to start...");
@@ -157,5 +159,5 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
     gateway.start();
 
     # 6. Cleanup (runs when gateway shuts down)
-    pm.stop_all();
+    deployer.destroy_all();
 }
