@@ -1,28 +1,55 @@
-"""Implementations for the Jac Shop frontend."""
+"""Implementations for the Jac Shop frontend.
+
+In microservice mode, the client calls the gateway API directly:
+  /api/products/walker/ListProducts
+  /api/cart/walker/AddToCart
+  /api/orders/walker/PlaceOrder
+"""
+
+impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
+    token = localStorage.getItem("token");
+    options: dict = {
+        "method": "POST",
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + (token or "")
+        }
+    };
+    if body {
+        options["body"] = JSON.stringify(body);
+    }
+    resp = await fetch(f"/api/{service}/walker/{endpoint}", options);
+    return await resp.json();
+}
 
 impl app.fetchProducts -> None {
     loading = True;
-    result = root spawn ListProducts();
-    products = result.reports[0] if result.reports else [];
+    data = await apiCall("products", "ListProducts");
+    products = data.reports[0] if data.reports else [];
     loading = False;
 }
 
 impl app.addToCart(productId: str, name: str, price: float) -> None {
-    root spawn AddToCart(product_id=productId, product_name=name, price=price, qty=1);
+    await apiCall("cart", "AddToCart", {
+        "product_id": productId,
+        "product_name": name,
+        "price": price,
+        "qty": 1
+    });
     fetchCart();
 }
 
 impl app.fetchCart -> None {
-    result = root spawn ViewCart();
-    cart = result.reports[0] if result.reports else {"items": [], "total": 0};
+    data = await apiCall("cart", "ViewCart");
+    cart = data.reports[0] if data.reports else {"items": [], "total": 0};
 }
 
 impl app.placeOrder -> None {
-    cart_data = root spawn ViewCart();
+    cart_data = await apiCall("cart", "ViewCart");
     cart_result = cart_data.reports[0] if cart_data.reports else {"items": []};
     if cart_result.items and cart_result.items.length > 0 {
-        root spawn PlaceOrder(items=cart_result.items);
-        root spawn ClearCart();
+        await apiCall("orders", "PlaceOrder", {"items": cart_result.items});
+        await apiCall("cart", "ClearCart");
         cart = {"items": [], "total": 0, "item_count": 0};
         currentView = "orders";
         fetchOrders();
@@ -30,8 +57,8 @@ impl app.placeOrder -> None {
 }
 
 impl app.fetchOrders -> None {
-    result = root spawn ListOrders();
-    orders = result.reports[0] if result.reports else [];
+    data = await apiCall("orders", "ListOrders");
+    orders = data.reports[0] if data.reports else [];
 }
 
 impl app.handleLogin -> None {

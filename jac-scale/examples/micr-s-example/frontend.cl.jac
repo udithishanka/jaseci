@@ -22,6 +22,11 @@ def:pub app -> any {
 
     can with entry {
         isLoggedIn = jacIsLoggedIn();
+        console.log("Auth check complete, isLoggedIn =", isLoggedIn);
+        if isLoggedIn {
+            console.log("User is logged in, fetching products...");
+            fetchProducts();
+        }
         checkingAuth = False;
     }
 
@@ -31,6 +36,7 @@ def:pub app -> any {
         }
     }
 
+    async def apiCall(service: str, endpoint: str, body: dict = {}) -> any;
     async def fetchProducts -> None;
     async def addToCart(productId: str, name: str, price: float) -> None;
     async def fetchCart -> None;
