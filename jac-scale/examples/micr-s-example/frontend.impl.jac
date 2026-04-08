@@ -7,7 +7,7 @@ In microservice mode, the client calls the gateway API directly:
 """
 
 impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
-    token = localStorage.getItem("token");
+    token = localStorage.getItem("jac_token");
     options: dict = {
         "method": "POST",
         "headers": {
@@ -15,17 +15,15 @@ impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
             "Authorization": "Bearer " + (token or "")
         }
     };
-    if body {
-        options["body"] = JSON.stringify(body);
-    }
+    options["body"] = JSON.stringify(body or {});
     resp = await fetch(f"/api/{service}/walker/{endpoint}", options);
     return await resp.json();
 }
 
 impl app.fetchProducts -> None {
     loading = True;
-    data = await apiCall("products", "ListProducts");
-    products = data.reports[0] if data.reports else [];
+    data = await apiCall("products", "ListProducts", {});
+    products = data.data.reports[0] if data.data and data.data.reports else [];
     loading = False;
 }
 
@@ -40,16 +38,16 @@ impl app.addToCart(productId: str, name: str, price: float) -> None {
 }
 
 impl app.fetchCart -> None {
-    data = await apiCall("cart", "ViewCart");
-    cart = data.reports[0] if data.reports else {"items": [], "total": 0};
+    data = await apiCall("cart", "ViewCart", {});
+    cart = data.data.reports[0] if data.data and data.data.reports else {"items": [], "total": 0};
 }
 
 impl app.placeOrder -> None {
-    cart_data = await apiCall("cart", "ViewCart");
-    cart_result = cart_data.reports[0] if cart_data.reports else {"items": []};
+    cart_data = await apiCall("cart", "ViewCart", {});
+    cart_result = cart_data.data.reports[0] if cart_data.data and cart_data.data.reports else {"items": []};
     if cart_result.items and cart_result.items.length > 0 {
         await apiCall("orders", "PlaceOrder", {"items": cart_result.items});
-        await apiCall("cart", "ClearCart");
+        await apiCall("cart", "ClearCart", {});
         cart = {"items": [], "total": 0, "item_count": 0};
         currentView = "orders";
         fetchOrders();
@@ -57,8 +55,8 @@ impl app.placeOrder -> None {
 }
 
 impl app.fetchOrders -> None {
-    data = await apiCall("orders", "ListOrders");
-    orders = data.reports[0] if data.reports else [];
+    data = await apiCall("orders", "ListOrders", {});
+    orders = data.data.reports[0] if data.data and data.data.reports else [];
 }
 
 impl app.handleLogin -> None {
