@@ -1,7 +1,8 @@
 """Raw HTTP forwarding — plain Python to work around Jac type checker aiohttp limitations."""
 
-import aiohttp
 import logging
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,8 @@ async def raw_forward(
                 resp_headers = {
                     k: v
                     for k, v in resp.headers.items()
-                    if k.lower() not in ("host", "transfer-encoding", "connection", "keep-alive")
+                    if k.lower()
+                    not in ("host", "transfer-encoding", "connection", "keep-alive")
                 }
                 return (resp.status, resp_headers, resp_body)
     except (aiohttp.ClientError, OSError) as e:

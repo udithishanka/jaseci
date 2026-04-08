@@ -20,6 +20,7 @@ my-app/
 ```
 
 **services/products.jac**:
+
 ```jac
 walker ListProducts {
     has items: list = [];
@@ -32,6 +33,7 @@ walker ListProducts {
 ```
 
 **products_app.jac**:
+
 ```jac
 sv {
     import from services.products { Product, ListProducts, GetProduct }

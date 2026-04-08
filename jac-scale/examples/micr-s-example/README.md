@@ -24,6 +24,7 @@ micr-s-example/
 ## Services
 
 ### Products (`/api/products`)
+
 | Endpoint | Description |
 |----------|-------------|
 | `POST /walker/SeedCatalog` | Seed sample products |
@@ -32,6 +33,7 @@ micr-s-example/
 | `POST /walker/SearchProducts` | Search by name |
 
 ### Orders (`/api/orders`)
+
 | Endpoint | Description |
 |----------|-------------|
 | `POST /walker/PlaceOrder` | Place order from cart items |
@@ -40,6 +42,7 @@ micr-s-example/
 | `POST /walker/CancelOrder` | Cancel an order |
 
 ### Cart (`/api/cart`)
+
 | Endpoint | Description |
 |----------|-------------|
 | `POST /walker/AddToCart` | Add product to cart |
@@ -50,12 +53,14 @@ micr-s-example/
 ## Running
 
 ### Monolith mode
+
 ```bash
 jac start main.jac
 # All endpoints on :8000, Swagger at http://localhost:8000/docs
 ```
 
 ### Microservice mode (after Day 9 orchestrator)
+
 ```bash
 jac start main.jac
 # Gateway on :8000
@@ -65,6 +70,7 @@ jac start main.jac
 ```
 
 ### Testing services standalone
+
 ```bash
 # Each service can be tested independently
 jac start services/products_app.jac --port 8001 --no-client

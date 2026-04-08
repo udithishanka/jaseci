@@ -78,6 +78,7 @@ jac scale destroy
 ### How to Extend for K8s (Future)
 
 Create `KubernetesDeployer(ServiceDeployer)` that:
+
 - Uses `KubernetesTarget` for deployment
 - Manages K8s Deployments/Services via kubectl or Python kubernetes client
 - Maps service names to K8s Deployment names
