@@ -171,7 +171,7 @@ impl MicroserviceGateway.is_public_path
         return True;
     }
     # Static assets, admin UI, and health don't require auth
-    if path.startswith(("/static/", "/assets/", "/admin")) {
+    if path.startswith(("/static/", "/assets/", "/admin", "/user/")) {
         return True;
     }
     return False;
@@ -224,6 +224,36 @@ impl MicroserviceGateway.setup -> FastAPI {
             };
             token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
             return JSONResponse(content={"token": token});
+        }
+
+        # Built-in jac-scale routes — forward to first healthy service
+        # /user/*, /cl/*, /walker/*, /function/*, /healthz, /graph, etc.
+        is_builtin = path.startswith(("/user/", "/cl/", "/walker/", "/function/")) or path in ("/user", "/healthz", "/graph");
+        if is_builtin {
+            for (svc_name, svc_entry) in gw_ref.registry.entries.items() {
+                if svc_entry.status in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) and svc_entry.url {
+                    target_url = f"{svc_entry.url}{path}";
+                    query = str(request.url.query);
+                    if query {
+                        target_url = f"{target_url}?{query}";
+                    }
+                    logger.info(f"Auth passthrough: {request.method} {path} -> {target_url}");
+
+                    fwd_headers: dict[str, str] = {};
+                    for (key, value) in request.headers.items() {
+                        if key.lower() not in HOP_BY_HOP_HEADERS {
+                            fwd_headers[key] = value;
+                        }
+                    }
+                    body: bytes = await request.body();
+                    result = await raw_forward(request.method, target_url, fwd_headers, body);
+                    if result is not None {
+                        (sc, rh, rb) = result;
+                        return Response(status_code=sc, headers=rh, content=rb);
+                    }
+                }
+            }
+            return JSONResponse(status_code=503, content={"error": "No healthy service available"});
         }
 
         # Admin UI — /admin and /admin/*

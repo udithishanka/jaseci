@@ -46,6 +46,21 @@ walker ListProducts {
     has items: list = [];
 
     can collect with Root entry {
+        # Auto-seed if catalog is empty
+        global _seeded;
+        if not _seeded and not [-->] {
+            products = [
+                Product(id="prod_1", name="Wireless Headphones", price=49.99, stock=25, description="Bluetooth over-ear headphones with noise cancellation"),
+                Product(id="prod_2", name="USB-C Hub", price=34.99, stock=50, description="7-in-1 USB-C hub with HDMI, USB 3.0, and SD card reader"),
+                Product(id="prod_3", name="Mechanical Keyboard", price=89.99, stock=15, description="RGB mechanical keyboard with Cherry MX switches"),
+                Product(id="prod_4", name="Laptop Stand", price=29.99, stock=40, description="Adjustable aluminum laptop stand"),
+                Product(id="prod_5", name="Webcam HD", price=59.99, stock=30, description="1080p webcam with built-in microphone")
+            ];
+            for p in products {
+                here ++> p;
+            }
+            _seeded = True;
+        }
         visit [-->];
     }
 

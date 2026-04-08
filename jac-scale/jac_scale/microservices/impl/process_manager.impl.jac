@@ -22,14 +22,19 @@ impl ServiceProcessManager.start_service
     entry = self.registry.entries[name];
     port = self._assign_port(entry);
 
-    cmd = ["jac", "start", entry.file, "--port", str(port), "--no-client"];
+    cmd = ["jac", "start", entry.file, "--port", str(port), "--no_client"];
     logger.info(f"Starting {name}: {' '.join(cmd)}");
 
     try {
+        import os;
+        child_env = dict(os.environ);
+        child_env["JAC_MICROSERVICE_CHILD"] = "1";
+
         proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=child_env
         );
         self.processes[name] = proc;
         entry.pid = proc.pid;
@@ -110,7 +115,7 @@ impl ServiceProcessManager.check_health
     }
 
     try {
-        req = URLRequest(f"{entry.url}/health", method="GET");
+        req = URLRequest(f"{entry.url}/healthz", method="GET");
         resp = urlopen(req, timeout=self._health_check_timeout);
         return getattr(resp, "status", 0) == 200;
     } except URLError {

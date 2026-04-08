@@ -21,8 +21,50 @@ import from .user_manager { JacScaleUserManager }
 import from jaclang.runtimelib.server { UserManager }
 import from jaclang.runtimelib.storage { Storage }
 
-"""Pre-hook for jac start command to handle --scale flag."""
+"""Pre-hook for jac start command to handle microservice mode and --scale flag."""
 def _scale_pre_hook(context: HookContext) -> None {
+    # Check for microservice mode first (before --scale)
+    scale_config = get_scale_config();
+    ms_config = scale_config.get_microservices_config();
+
+    if ms_config.get("enabled", False) {
+        # Only trigger orchestrator when running the project entry-point,
+        # not when running a service file directly (avoids recursive spawning)
+        filename = context.get_arg("filename", "");
+        entry_point = scale_config.load().get("project", {}).get("entry-point", "");
+        started_file = os.path.basename(str(filename)) if filename else "";
+
+        # Also check: is the started file one of the declared services?
+        services = ms_config.get("services", {});
+        is_service_file = False;
+        for (svc_name, svc_cfg) in services.items() {
+            svc_file = os.path.basename(str(dict(svc_cfg).get("file", "")));
+            if svc_file and svc_file == started_file {
+                is_service_file = True;
+            }
+        }
+
+        # Only orchestrate if: entry-point matches OR no entry-point set and not a service file
+        should_orchestrate = False;
+        if entry_point and started_file == entry_point {
+            should_orchestrate = True;
+        } elif not entry_point and not is_service_file {
+            should_orchestrate = True;
+        }
+
+        if should_orchestrate {
+            scale_flag = context.get_arg("scale", False);
+            if not scale_flag {
+                import from jac_scale.microservices.orchestrator { start_microservice_mode }
+                start_microservice_mode(ms_config);
+                context.set_data("cancel_execution", True);
+                context.set_data("cancel_return_code", 0);
+                return;
+            }
+            # If --scale is set with microservices enabled, fall through to K8s deploy
+        }
+    }
+
     scale = context.get_arg("scale", False);
     if scale {
         filename = context.get_arg("filename");
