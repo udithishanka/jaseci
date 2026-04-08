@@ -83,14 +83,16 @@ walker ViewCart {
 walker RemoveFromCart {
     """Remove a product from the cart."""
     has product_id: str;
+    has _root_ref: Root | None = None;
 
     can search with Root entry {
+        self._root_ref = here;
         visit [-->];
     }
 
     can remove with CartItem entry {
-        if here.product_id == self.product_id {
-            del here;
+        if here.product_id == self.product_id and self._root_ref {
+            self._root_ref del --> here;
             report {"action": "removed", "product_id": self.product_id};
         }
     }
@@ -98,18 +100,22 @@ walker RemoveFromCart {
 
 walker ClearCart {
     """Remove all items from the cart."""
-    has cleared: int = 0;
+    has _cleared: int = 0;
+    has _items_to_remove: list = [];
 
     can collect with Root entry {
         visit [-->];
     }
 
-    can clear with CartItem entry {
-        del here;
-        self.cleared += 1;
+    can mark with CartItem entry {
+        self._items_to_remove.append(here);
+        self._cleared += 1;
     }
 
     can done with Root exit {
-        report {"action": "cleared", "items_removed": self.cleared};
+        for item in self._items_to_remove {
+            here del --> item;
+        }
+        report {"action": "cleared", "items_removed": self._cleared};
     }
 }
