@@ -33,6 +33,7 @@ def service_call(
     method: str = "POST",
     body: dict[str, Any] | None = None,
     internal_token: str = "",
+    auth_token: str = "",
     gateway_url: str = "",
     timeout: int = 30
 ) -> ServiceResponse {
@@ -44,6 +45,13 @@ def service_call(
     url: str = f"{gateway_url}/api/{service}/{clean_endpoint}";
 
     req_headers: dict[str, str] = {"Content-Type": "application/json"};
+    if auth_token {
+        if auth_token.startswith("Bearer ") {
+            req_headers["Authorization"] = auth_token;
+        } else {
+            req_headers["Authorization"] = f"Bearer {auth_token}";
+        }
+    }
     if internal_token {
         req_headers["X-Internal-Token"] = internal_token;
     }
@@ -55,7 +63,7 @@ def service_call(
             method=method,
             url=url,
             headers=req_headers,
-            json=body,
+            json=body if body is not None else {},
             timeout=timeout
         );
         status_code: int = int(getattr(resp, "status_code", 502));

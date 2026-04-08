@@ -43,15 +43,21 @@ impl app.fetchCart -> None {
 }
 
 impl app.placeOrder -> None {
-    cart_data = await apiCall("cart", "ViewCart", {});
-    cart_result = cart_data.data.reports[0] if cart_data.data and cart_data.data.reports else {"items": []};
-    if cart_result.items and cart_result.items.length > 0 {
-        await apiCall("orders", "PlaceOrder", {"items": cart_result.items});
-        await apiCall("cart", "ClearCart", {});
-        cart = {"items": [], "total": 0, "item_count": 0};
-        currentView = "orders";
-        fetchOrders();
+    # PlaceOrder handles everything server-side:
+    # orders service → calls cart service (ViewCart) → creates order → calls cart service (ClearCart)
+    token = localStorage.getItem("jac_token");
+    result = await apiCall("orders", "PlaceOrder", {"auth_token": "Bearer " + (token or "")});
+    data = result.data if result.data else {};
+    reports = data.reports[0] if data.reports else {};
+
+    if reports.error {
+        console.log("Order error:", reports.error);
+        return;
     }
+
+    cart = {"items": [], "total": 0, "item_count": 0};
+    currentView = "orders";
+    fetchOrders();
 }
 
 impl app.fetchOrders -> None {

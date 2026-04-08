@@ -280,41 +280,10 @@ impl MicroserviceGateway.setup -> FastAPI {
         svc = gw_ref.registry.match_route(path);
 
         if svc {
-            # --- AUTH CHECK for API routes ---
+            # Auth is handled by the services themselves — gateway just passes
+            # the Authorization header through. The service validates the JWT
+            # using the same secret from jac.toml.
             extra_headers: dict[str, str] = {};
-
-            if not gw_ref.is_public_path(path) {
-                # Check for internal service token first (service-to-service)
-                internal_token: str = request.headers.get("x-internal-token", "");
-                if internal_token {
-                    internal_payload = gw_ref.validate_token(internal_token);
-                    if not internal_payload or internal_payload.get("type") != "internal" {
-                        return JSONResponse(status_code=401, content={"error": "Invalid internal service token"});
-                    }
-                    extra_headers["X-User-Id"] = str(internal_payload.get("user_id", ""));
-                    extra_headers["X-User-Email"] = str(internal_payload.get("email", ""));
-                } else {
-                    # External request — validate user JWT
-                    auth_header: str = request.headers.get("authorization", "");
-                    if not auth_header.startswith("Bearer ") {
-                        return JSONResponse(status_code=401, content={"error": "Missing authentication token"});
-                    }
-                    user_token: str = auth_header[7:];
-                    user_payload = gw_ref.validate_token(user_token);
-                    if not user_payload {
-                        return JSONResponse(status_code=401, content={"error": "Invalid or expired token"});
-                    }
-                    extra_headers["X-User-Id"] = str(user_payload.get("user_id", ""));
-                    extra_headers["X-User-Email"] = str(user_payload.get("email", ""));
-                }
-
-                # Issue internal token so service can make service-to-service calls
-                extra_headers["X-Internal-Token"] = gw_ref.create_internal_token(
-                    extra_headers.get("X-User-Id", ""),
-                    extra_headers.get("X-User-Email", "")
-                );
-            }
-            # --- END AUTH ---
 
             if svc.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
                 return JSONResponse(
