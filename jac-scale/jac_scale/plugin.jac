@@ -423,6 +423,66 @@ class JacCmd {
             _print_deployment_status(status_data);
             return 0;
         }
+
+        @registry.command(
+            name="setup",
+            help="Configure microservice mode — select which Jac files become services",
+            args=[
+                Arg.create(
+                    "subcommand", kind=ArgKind.POSITIONAL,
+                    help="Setup type (currently: microservice)"
+                ),
+                Arg.create(
+                    "add", typ=str, default="",
+                    help="Add a service file to existing config"
+                ),
+                Arg.create(
+                    "remove", typ=str, default="",
+                    help="Remove a service by name"
+                ),
+                Arg.create(
+                    "list", typ=bool, default=False,
+                    help="List currently configured services"
+                ),
+            ],
+            examples=[
+                ("jac setup microservice", "Interactive setup — select files, write config"),
+                ("jac setup microservice --list", "Show current microservice config"),
+                ("jac setup microservice --add orders_app.jac", "Add a service"),
+                ("jac setup microservice --remove orders", "Remove a service"),
+            ],
+            group="microservices",
+            priority=CommandPriority.PLUGIN,
+            source="jac-scale"
+        )
+        def setup_cmd(
+            subcommand: str,
+            add: str = "",
+            remove: str = "",
+            list: bool = False
+        ) -> int {
+            if subcommand != "microservice" {
+                console.print(
+                    f"[bold red]Unknown setup type:[/bold red] '{subcommand}'. Use 'microservice'."
+                );
+                return 1;
+            }
+
+            import from jac_scale.microservices.setup {
+                run_setup, add_service, remove_service, list_services
+            }
+
+            if list {
+                list_services(".");
+            } elif add {
+                add_service(".", add);
+            } elif remove {
+                remove_service(".", remove);
+            } else {
+                run_setup(".");
+            }
+            return 0;
+        }
     }
 }
 
