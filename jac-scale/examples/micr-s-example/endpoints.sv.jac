@@ -11,7 +11,7 @@ import from services.products {
 
 # Orders
 import from services.orders {
-    Orders, Order, PlaceOrder, ListOrders, GetOrder, CancelOrder
+    Order, PlaceOrder, ListOrders, GetOrder, CancelOrder
 }
 
 # Cart

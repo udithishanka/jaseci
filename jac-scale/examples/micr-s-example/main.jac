@@ -14,7 +14,7 @@ In monolith mode (microservices.enabled = false):
 sv {
     import from endpoints {
         Products, Product, ListProducts, GetProduct, SearchProducts,
-        Orders, Order, PlaceOrder, ListOrders, GetOrder, CancelOrder,
+        Order, PlaceOrder, ListOrders, GetOrder, CancelOrder,
         Cart, AddToCart, ViewCart, RemoveFromCart, ClearCart
     }
 }
