@@ -83,39 +83,30 @@ walker ViewCart {
 walker RemoveFromCart {
     """Remove a product from the cart."""
     has product_id: str;
-    has _root_ref: Root | None = None;
 
     can search with Root entry {
-        self._root_ref = here;
-        visit [-->];
-    }
-
-    can remove with CartItem entry {
-        if here.product_id == self.product_id and self._root_ref {
-            self._root_ref del --> here;
-            report {"action": "removed", "product_id": self.product_id};
+        for node in [-->] {
+            if isinstance(node, CartItem) and node.product_id == self.product_id {
+                here del --> node;
+                report {"action": "removed", "product_id": self.product_id};
+                disengage;
+            }
         }
     }
 }
 
 walker ClearCart {
     """Remove all items from the cart."""
-    has _cleared: int = 0;
-    has _items_to_remove: list = [];
 
-    can collect with Root entry {
-        visit [-->];
-    }
-
-    can mark with CartItem entry {
-        self._items_to_remove.append(here);
-        self._cleared += 1;
-    }
-
-    can done with Root exit {
-        for item in self._items_to_remove {
-            here del --> item;
+    can clear with Root entry {
+        items = [-->];
+        cleared: int = 0;
+        for node in items {
+            if isinstance(node, CartItem) {
+                here del --> node;
+                cleared += 1;
+            }
         }
-        report {"action": "cleared", "items_removed": self._cleared};
+        report {"action": "cleared", "items_removed": cleared};
     }
 }
