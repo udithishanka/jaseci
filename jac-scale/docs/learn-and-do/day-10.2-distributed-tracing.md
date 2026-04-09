@@ -3,6 +3,7 @@
 ## The Problem
 
 When a request flows through 3 services:
+
 ```
 Client → Gateway → Orders → Cart (via service_call) → back
 ```
@@ -38,6 +39,7 @@ req_headers["X-Trace-Id"] = trace_id or str(uuid.uuid4());
 ### Structured Logging
 
 Each log entry includes the trace ID:
+
 ```json
 {"trace_id": "a1b2c3d4", "service": "orders", "action": "PlaceOrder", "duration_ms": 45}
 {"trace_id": "a1b2c3d4", "service": "cart", "action": "ViewCart", "duration_ms": 12}
@@ -47,6 +49,7 @@ Each log entry includes the trace ID:
 Now you can grep for `a1b2c3d4` and see the full journey.
 
 ## Milestone
+
 - [ ] Gateway generates and propagates X-Trace-Id
 - [ ] service_call forwards trace ID
 - [ ] Gateway logs include trace ID prefix

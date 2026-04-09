@@ -196,6 +196,7 @@ Inter-service: Orders --service_call()--> Gateway --> Cart
 ## Roadmap
 
 ### Done
+
 - Gateway with path-based proxy + static serving + admin UI
 - Service registry, process manager, deployer interface
 - Inter-service communication with token propagation
@@ -203,6 +204,7 @@ Inter-service: Orders --service_call()--> Gateway --> Cart
 - E-commerce example (products, orders, cart)
 
 ### Next (Pre-K8s)
+
 - Complete endpoint passthrough (all 51 jac-scale endpoints)
 - Distributed tracing (X-Trace-Id propagation)
 - Gateway metrics (per-service latency, error rates)
@@ -211,6 +213,7 @@ Inter-service: Orders --service_call()--> Gateway --> Cart
 - Per-service log files + colored gateway output
 
 ### Future (K8s)
+
 - KubernetesDeployer implementing ServiceDeployer interface
 - Per-service K8s Deployments from same Docker image
 - K8s Service DNS for service URLs

@@ -3,6 +3,7 @@
 ## The Problem
 
 Currently:
+
 - Changing a service file requires full restart (`Ctrl+C` + `jac start`)
 - Service logs go to `/dev/null` — can't see what's happening
 - No way to debug a single service without restarting everything
@@ -37,6 +38,7 @@ Prefix proxy logs with service color:
 ### Individual Service Restart
 
 `jac scale restart orders` should:
+
 1. Stop just the orders subprocess
 2. Start a new one on the same port
 3. Wait for health check
@@ -57,6 +59,7 @@ Watching: services/orders.jac
 Uses `watchdog` library (already in jac dev dependencies).
 
 ## Milestone
+
 - [ ] Service logs written to `.jac/logs/{service}.log`
 - [ ] `jac scale logs products` shows service logs
 - [ ] Colored proxy output in gateway terminal

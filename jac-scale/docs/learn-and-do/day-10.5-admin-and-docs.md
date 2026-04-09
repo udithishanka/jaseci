@@ -3,11 +3,13 @@
 ## The Problem
 
 In monolith mode, jac-scale provides:
+
 - Admin dashboard at `/admin/` with user management, graph viz, LLM telemetry
 - Swagger docs at `/docs` showing all walkers
 - Graph visualization at `/graph`
 
 In microservice mode:
+
 - Admin dashboard is served by the gateway (already done)
 - But admin API endpoints (`/admin/users`, `/admin/metrics`) need to route to a service
 - Swagger docs show each service's walkers separately — no unified view
@@ -42,6 +44,7 @@ Each endpoint prefixed with /api/{service}/
 ```
 
 Implementation:
+
 1. Fetch `/openapi.json` from each service on startup
 2. Merge schemas, adding service prefix to paths
 3. Serve merged schema at gateway's `/openapi.json`
@@ -51,7 +54,7 @@ Implementation:
 Add a gateway graph endpoint that shows service topology:
 
 ```
-GET /graph → 
+GET /graph →
 {
     "services": ["products", "orders", "cart"],
     "connections": [
@@ -61,6 +64,7 @@ GET /graph →
 ```
 
 ## Milestone
+
 - [ ] Admin API endpoints accessible through gateway
 - [ ] Unified Swagger docs showing all services' walkers
 - [ ] Gateway-level service topology view

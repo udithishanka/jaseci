@@ -3,6 +3,7 @@
 ## The Problem
 
 The gateway proxies requests but doesn't track:
+
 - How many requests each service gets
 - How long each service takes to respond
 - Error rates per service
@@ -69,6 +70,7 @@ if path == "/health" {
 ```
 
 ## Milestone
+
 - [ ] Gateway tracks per-service request count, error count, latency
 - [ ] `/health` endpoint includes metrics summary
 - [ ] Can identify slow or failing services from gateway health

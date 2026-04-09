@@ -35,5 +35,6 @@ is_builtin = path.startswith((
 ```
 
 ## Milestone
+
 - [ ] All 51 jac-scale built-in endpoints accessible through gateway
 - [ ] SSO, webhooks, scheduler, metrics all work via gateway

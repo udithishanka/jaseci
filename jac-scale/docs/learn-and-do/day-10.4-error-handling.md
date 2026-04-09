@@ -3,6 +3,7 @@
 ## The Problem
 
 Currently if a service is down:
+
 - Gateway returns 502 and gives up
 - No retry for transient failures
 - No circuit breaker to prevent hammering a dead service
@@ -70,6 +71,7 @@ for svc in healthy_services {
 ```
 
 ## Milestone
+
 - [ ] Gateway retries 502/503 once before failing
 - [ ] service_call has configurable retry with backoff
 - [ ] Standardized error response format with trace_id
