@@ -1,78 +1,54 @@
 """Products Service — product catalog.
 
-Endpoints:
-  POST /walker/ListProducts    — browse all products
-  POST /walker/GetProduct      — get product by ID
-  POST /walker/SearchProducts  — search by name
+Graph: Root --> Products --> [Product, Product, ...]
 """
+
+node Products {}
 
 node Product {
     has id: str,
         name: str,
         price: float,
         description: str = "",
-        stock: int = 0,
-        image: str = "";
+        stock: int = 0;
 }
 
-# Seed catalog on first import
-glob _seeded: bool = False;
-
-walker SeedCatalog {
-    """Seed the catalog with sample products (run once)."""
-    can seed with Root entry {
-        global _seeded;
-        if _seeded {
-            report {"status": "already seeded"};
-            disengage;
-        }
-        products = [
-            Product(id="prod_1", name="Wireless Headphones", price=49.99, stock=25, description="Bluetooth over-ear headphones with noise cancellation"),
-            Product(id="prod_2", name="USB-C Hub", price=34.99, stock=50, description="7-in-1 USB-C hub with HDMI, USB 3.0, and SD card reader"),
-            Product(id="prod_3", name="Mechanical Keyboard", price=89.99, stock=15, description="RGB mechanical keyboard with Cherry MX switches"),
-            Product(id="prod_4", name="Laptop Stand", price=29.99, stock=40, description="Adjustable aluminum laptop stand"),
-            Product(id="prod_5", name="Webcam HD", price=59.99, stock=30, description="1080p webcam with built-in microphone")
-        ];
-        for p in products {
-            here ++> p;
-        }
-        _seeded = True;
-        report {"status": "seeded", "count": len(products)};
-    }
-}
+glob CATALOG: list[dict] = [
+    {"id": "prod_1", "name": "Wireless Headphones", "price": 49.99, "stock": 25, "description": "Bluetooth over-ear headphones"},
+    {"id": "prod_2", "name": "USB-C Hub", "price": 34.99, "stock": 50, "description": "7-in-1 USB-C hub with HDMI"},
+    {"id": "prod_3", "name": "Mechanical Keyboard", "price": 89.99, "stock": 15, "description": "RGB mechanical keyboard"},
+    {"id": "prod_4", "name": "Laptop Stand", "price": 29.99, "stock": 40, "description": "Adjustable aluminum laptop stand"},
+    {"id": "prod_5", "name": "Webcam HD", "price": 59.99, "stock": 30, "description": "1080p webcam with microphone"}
+];
 
 walker ListProducts {
-    """List all products in the catalog."""
-    has items: list = [];
+    """List all products."""
 
-    can collect with Root entry {
-        # Auto-seed if catalog is empty
-        global _seeded;
-        if not _seeded and not [-->] {
-            products = [
-                Product(id="prod_1", name="Wireless Headphones", price=49.99, stock=25, description="Bluetooth over-ear headphones with noise cancellation"),
-                Product(id="prod_2", name="USB-C Hub", price=34.99, stock=50, description="7-in-1 USB-C hub with HDMI, USB 3.0, and SD card reader"),
-                Product(id="prod_3", name="Mechanical Keyboard", price=89.99, stock=15, description="RGB mechanical keyboard with Cherry MX switches"),
-                Product(id="prod_4", name="Laptop Stand", price=29.99, stock=40, description="Adjustable aluminum laptop stand"),
-                Product(id="prod_5", name="Webcam HD", price=59.99, stock=30, description="1080p webcam with built-in microphone")
-            ];
-            for p in products {
-                here ++> p;
+    can enter_root with Root entry {
+        products_nodes = [-->][?:Products];
+
+        if not products_nodes {
+            # Seed on first access
+            anchor = (here ++> Products())[0];
+            for p in CATALOG {
+                anchor ++> Product(
+                    id=p["id"], name=p["name"], price=p["price"],
+                    stock=p["stock"], description=p["description"]
+                );
             }
-            _seeded = True;
+            products_nodes = [-->][?:Products];
         }
-        visit [-->];
-    }
 
-    can gather with Product entry {
-        self.items.append({
-            "id": here.id, "name": here.name, "price": here.price,
-            "description": here.description, "stock": here.stock
-        });
-    }
-
-    can done with Root exit {
-        report self.items;
+        items: list = [];
+        for pnode in products_nodes {
+            for p in [pnode -->][?:Product] {
+                items.append({
+                    "id": p.id, "name": p.name, "price": p.price,
+                    "description": p.description, "stock": p.stock
+                });
+            }
+        }
+        report items;
     }
 }
 
@@ -80,39 +56,37 @@ walker GetProduct {
     """Get a product by ID."""
     has product_id: str;
 
-    can search with Root entry {
-        visit [-->];
-    }
-
-    can check with Product entry {
-        if here.id == self.product_id {
-            report {
-                "id": here.id, "name": here.name, "price": here.price,
-                "description": here.description, "stock": here.stock
-            };
+    can enter_root with Root entry {
+        for pnode in [-->][?:Products] {
+            for p in [pnode -->][?:Product] {
+                if p.id == self.product_id {
+                    report {
+                        "id": p.id, "name": p.name, "price": p.price,
+                        "description": p.description, "stock": p.stock
+                    };
+                    disengage;
+                }
+            }
         }
+        report {"error": "Product not found"};
     }
 }
 
 walker SearchProducts {
-    """Search products by name (case-insensitive partial match)."""
+    """Search products by name."""
     has query: str;
-    has results: list = [];
 
-    can search with Root entry {
-        visit [-->];
-    }
-
-    can check with Product entry {
-        if self.query.lower() in here.name.lower() {
-            self.results.append({
-                "id": here.id, "name": here.name, "price": here.price,
-                "stock": here.stock
-            });
+    can enter_root with Root entry {
+        results: list = [];
+        for pnode in [-->][?:Products] {
+            for p in [pnode -->][?:Product] {
+                if self.query.lower() in p.name.lower() {
+                    results.append({
+                        "id": p.id, "name": p.name, "price": p.price, "stock": p.stock
+                    });
+                }
+            }
         }
-    }
-
-    can done with Root exit {
-        report self.results;
+        report results;
     }
 }

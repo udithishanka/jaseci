@@ -6,15 +6,15 @@ In microservice mode, each service has its own entry point (*_app.jac).
 
 # Products
 import from services.products {
-    Product, SeedCatalog, ListProducts, GetProduct, SearchProducts
+    Products, Product, ListProducts, GetProduct, SearchProducts
 }
 
 # Orders
 import from services.orders {
-    Order, OrderItem, PlaceOrder, ListOrders, GetOrder, CancelOrder
+    Orders, Order, PlaceOrder, ListOrders, GetOrder, CancelOrder
 }
 
 # Cart
 import from services.cart {
-    CartItem, AddToCart, ViewCart, RemoveFromCart, ClearCart
+    Cart, AddToCart, ViewCart, RemoveFromCart, ClearCart
 }

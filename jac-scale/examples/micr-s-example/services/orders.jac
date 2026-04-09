@@ -1,48 +1,35 @@
 """Orders Service — order management.
 
-Endpoints:
-  POST /walker/PlaceOrder   — create an order from cart items
-  POST /walker/ListOrders   — list user's orders
-  POST /walker/GetOrder     — get order by ID
-  POST /walker/CancelOrder  — cancel an order
+Graph: Root --> Orders --> [Order, Order, ...]
+Each Order has items as a list in has field.
 """
 
 glob order_counter: int = 0;
 
-node OrderItem {
-    has product_id: str,
-        product_name: str,
-        qty: int,
-        price: float;
-}
+node Orders {}
 
 node Order {
     has id: str,
-        status: str = "pending",
+        items: list = [],
         total: float = 0.0,
+        status: str = "pending",
         created_at: str = "";
 }
 
 walker PlaceOrder {
-    """Place an order — fetches cart from cart service, creates order, clears cart.
-
-    This is an example of inter-service communication:
-    Orders service calls Cart service via service_call() through the gateway.
-    Pass Authorization header as auth_token for token propagation.
-    """
+    """Place an order — calls cart service to get items, creates order, clears cart."""
     has auth_token: str = "";
 
-    can create with Root entry {
+    can enter_root with Root entry {
         import from jac_scale.microservices.service_client { service_call }
 
         auth_header: str = self.auth_token;
 
-        # 1. Call cart service to get cart items (inter-service call)
+        # 1. Call cart service to get items (inter-service call)
         cart_resp = service_call(
             service="cart",
             endpoint="walker/ViewCart",
-            auth_token=auth_header,
-            gateway_url="http://127.0.0.1:8000"
+            auth_token=auth_header
         );
 
         if cart_resp.status != 200 {
@@ -59,7 +46,7 @@ walker PlaceOrder {
 
         items = cart_reports[0]["items"];
 
-        # 2. Create the order
+        # 2. Create order
         global order_counter;
         order_counter += 1;
         order_id = f"ord_{order_counter}";
@@ -70,26 +57,27 @@ walker PlaceOrder {
             total += float(item.get("price", 0)) * int(item.get("qty", 1));
         }
 
-        new_order = here ++> Order(
+        # Find or create Orders anchor
+        orders_anchor: Orders | None = None;
+        for node in [-->] {
+            if isinstance(node, Orders) {
+                orders_anchor = node;
+            }
+        }
+        if orders_anchor is None {
+            new_nodes = here ++> Orders();
+            orders_anchor = new_nodes[0];
+        }
+
+        orders_anchor ++> Order(
             id=order_id,
-            status="confirmed",
+            items=items,
             total=round(total, 2),
+            status="confirmed",
             created_at=str(datetime.now(UTC))
         );
 
-        if new_order {
-            order_node = new_order[0];
-            for item in items {
-                order_node ++> OrderItem(
-                    product_id=str(item.get("product_id", "")),
-                    product_name=str(item.get("product_name", "")),
-                    qty=int(item.get("qty", 1)),
-                    price=float(item.get("price", 0))
-                );
-            }
-        }
-
-        # 3. Call cart service to clear cart (inter-service call)
+        # 3. Clear cart (inter-service call)
         service_call(
             service="cart",
             endpoint="walker/ClearCart",
@@ -106,53 +94,51 @@ walker PlaceOrder {
 }
 
 walker ListOrders {
-    """List all orders for the current user."""
-    has orders: list = [];
+    """List all orders."""
+    has orders_list: list = [];
 
-    can collect with Root entry {
-        visit [-->];
-    }
-
-    can gather with Order entry {
-        self.orders.append({
-            "id": here.id,
-            "status": here.status,
-            "total": here.total,
-            "created_at": here.created_at
-        });
-    }
-
-    can done with Root exit {
-        report self.orders;
+    can enter_root with Root entry {
+        for node in [-->] {
+            if isinstance(node, Orders) {
+                for o in [node -->] {
+                    if isinstance(o, Order) {
+                        self.orders_list.append({
+                            "id": o.id,
+                            "status": o.status,
+                            "total": o.total,
+                            "item_count": len(o.items),
+                            "created_at": o.created_at
+                        });
+                    }
+                }
+            }
+        }
+        report self.orders_list;
     }
 }
 
 walker GetOrder {
-    """Get order details by ID, including items."""
+    """Get order by ID."""
     has order_id: str;
-    has found_items: list = [];
 
-    can search with Root entry {
-        visit [-->];
-    }
-
-    can check with Order entry {
-        if here.id == self.order_id {
-            visit [-->];
+    can enter_root with Root entry {
+        for node in [-->] {
+            if isinstance(node, Orders) {
+                for o in [node -->] {
+                    if isinstance(o, Order) and o.id == self.order_id {
+                        report {
+                            "id": o.id,
+                            "status": o.status,
+                            "total": o.total,
+                            "items": o.items,
+                            "created_at": o.created_at
+                        };
+                        disengage;
+                    }
+                }
+            }
         }
-    }
-
-    can gather_item with OrderItem entry {
-        self.found_items.append({
-            "product_id": here.product_id,
-            "product_name": here.product_name,
-            "qty": here.qty,
-            "price": here.price
-        });
-    }
-
-    can done with Root exit {
-        report self.found_items;
+        report {"error": "Order not found"};
     }
 }
 
@@ -160,18 +146,22 @@ walker CancelOrder {
     """Cancel an order by ID."""
     has order_id: str;
 
-    can search with Root entry {
-        visit [-->];
-    }
-
-    can cancel with Order entry {
-        if here.id == self.order_id {
-            if here.status == "confirmed" {
-                here.status = "cancelled";
-                report {"id": self.order_id, "status": "cancelled"};
-            } else {
-                report {"error": f"Cannot cancel order in '{here.status}' status"};
+    can enter_root with Root entry {
+        for node in [-->] {
+            if isinstance(node, Orders) {
+                for o in [node -->] {
+                    if isinstance(o, Order) and o.id == self.order_id {
+                        if o.status == "confirmed" {
+                            o.status = "cancelled";
+                            report {"id": self.order_id, "status": "cancelled"};
+                        } else {
+                            report {"error": f"Cannot cancel order in '{o.status}' status"};
+                        }
+                        disengage;
+                    }
+                }
             }
         }
+        report {"error": "Order not found"};
     }
 }

@@ -1,82 +1,69 @@
-"""Cart Service — shopping cart management.
+"""Cart Service — shopping cart.
 
-Endpoints:
-  POST /walker/AddToCart     — add item to cart
-  POST /walker/ViewCart      — view cart contents
-  POST /walker/RemoveFromCart — remove item from cart
-  POST /walker/ClearCart     — empty the cart
+Graph: Root --> Cart (has items: list of {product_id, product_name, price, qty})
 """
 
-node CartItem {
-    has product_id: str,
-        product_name: str,
-        price: float,
-        qty: int = 1;
+node Cart {
+    has items: list = [];
 }
 
 walker AddToCart {
-    """Add a product to the cart. If already in cart, increments qty."""
+    """Add a product to the cart."""
     has product_id: str, product_name: str = "", price: float = 0.0, qty: int = 1;
 
-    can add with Root entry {
-        # Check if product already in cart
-        visit [-->];
+    can enter_root with Root entry {
+        carts = [-->][?:Cart];
+        cart: Cart;
+        if not carts {
+            cart = (here ++> Cart())[0];
+        } else {
+            cart = carts[0];
+        }
 
-        # Not found — add new item
-        here ++> CartItem(
-            product_id=self.product_id,
-            product_name=self.product_name,
-            price=self.price,
-            qty=self.qty
-        );
-        report {
-            "action": "added",
+        # Check if product already in cart
+        for item in cart.items {
+            if item.get("product_id") == self.product_id {
+                item["qty"] = item.get("qty", 0) + self.qty;
+                report {"action": "updated", "product_id": self.product_id, "qty": item["qty"]};
+                disengage;
+            }
+        }
+
+        cart.items.append({
             "product_id": self.product_id,
             "product_name": self.product_name,
+            "price": self.price,
             "qty": self.qty
-        };
-    }
-
-    can check_existing with CartItem entry {
-        if here.product_id == self.product_id {
-            here.qty += self.qty;
-            report {
-                "action": "updated",
-                "product_id": self.product_id,
-                "qty": here.qty
-            };
-            disengage;
-        }
+        });
+        report {"action": "added", "product_id": self.product_id, "qty": self.qty};
     }
 }
 
 walker ViewCart {
-    """View all items in the cart with total."""
-    has items: list = [];
-    has total: float = 0.0;
+    """View cart contents with total."""
 
-    can collect with Root entry {
-        visit [-->];
-    }
+    can enter_root with Root entry {
+        carts = [-->][?:Cart];
+        if not carts {
+            report {"items": [], "total": 0, "item_count": 0};
+            disengage;
+        }
+        cart: Cart = carts[0];
 
-    can gather with CartItem entry {
-        line_total: float = here.price * float(here.qty);
-        self.items.append({
-            "product_id": here.product_id,
-            "product_name": here.product_name,
-            "price": here.price,
-            "qty": here.qty,
-            "line_total": round(line_total, 2)
-        });
-        self.total += line_total;
-    }
-
-    can done with Root exit {
-        report {
-            "items": self.items,
-            "total": round(self.total, 2),
-            "item_count": len(self.items)
-        };
+        total: float = 0.0;
+        display_items: list = [];
+        for item in cart.items {
+            line_total: float = float(item.get("price", 0)) * int(item.get("qty", 1));
+            display_items.append({
+                "product_id": item.get("product_id", ""),
+                "product_name": item.get("product_name", ""),
+                "price": item.get("price", 0),
+                "qty": item.get("qty", 1),
+                "line_total": round(line_total, 2)
+            });
+            total += line_total;
+        }
+        report {"items": display_items, "total": round(total, 2), "item_count": len(cart.items)};
     }
 }
 
@@ -84,29 +71,37 @@ walker RemoveFromCart {
     """Remove a product from the cart."""
     has product_id: str;
 
-    can search with Root entry {
-        for node in [-->] {
-            if isinstance(node, CartItem) and node.product_id == self.product_id {
-                here del --> node;
-                report {"action": "removed", "product_id": self.product_id};
-                disengage;
+    can enter_root with Root entry {
+        carts = [-->][?:Cart];
+        if not carts {
+            report {"error": "Cart not found"};
+            disengage;
+        }
+        cart: Cart = carts[0];
+
+        new_items: list = [];
+        for item in cart.items {
+            if item.get("product_id") != self.product_id {
+                new_items.append(item);
             }
         }
+        cart.items = new_items;
+        report {"action": "removed", "product_id": self.product_id};
     }
 }
 
 walker ClearCart {
-    """Remove all items from the cart."""
+    """Empty the cart."""
 
-    can clear with Root entry {
-        items = [-->];
-        cleared: int = 0;
-        for node in items {
-            if isinstance(node, CartItem) {
-                here del --> node;
-                cleared += 1;
-            }
+    can enter_root with Root entry {
+        carts = [-->][?:Cart];
+        if not carts {
+            report {"action": "cleared", "items_removed": 0};
+            disengage;
         }
+        cart: Cart = carts[0];
+        cleared: int = len(cart.items);
+        cart.items = [];
         report {"action": "cleared", "items_removed": cleared};
     }
 }

@@ -1,9 +1,5 @@
-"""Orders Service — entry point.
-
-Registers order walkers as REST endpoints in Swagger.
-Run standalone: jac start orders_app.jac --port 8002 --no_client
-"""
+"""Orders Service — entry point."""
 
 sv {
-    import from services.orders { Order, OrderItem, PlaceOrder, ListOrders, GetOrder, CancelOrder }
+    import from services.orders { Orders, Order, PlaceOrder, ListOrders, GetOrder, CancelOrder }
 }

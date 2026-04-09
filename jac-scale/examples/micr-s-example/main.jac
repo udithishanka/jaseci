@@ -13,13 +13,13 @@ In monolith mode (microservices.enabled = false):
 # Server-side endpoints — all walkers registered for monolith mode
 sv {
     import from endpoints {
-        Product, SeedCatalog, ListProducts, GetProduct, SearchProducts,
-        Order, OrderItem, PlaceOrder, ListOrders, GetOrder, CancelOrder,
-        CartItem, AddToCart, ViewCart, RemoveFromCart, ClearCart
+        Products, Product, ListProducts, GetProduct, SearchProducts,
+        Orders, Order, PlaceOrder, ListOrders, GetOrder, CancelOrder,
+        Cart, AddToCart, ViewCart, RemoveFromCart, ClearCart
     }
 }
 
-# Client-side UI — served as static SPA by the gateway (or jac-client in monolith)
+# Client-side UI
 cl {
     import from .frontend { app as ClientApp }
 

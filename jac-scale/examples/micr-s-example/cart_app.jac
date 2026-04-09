@@ -1,9 +1,5 @@
-"""Cart Service — entry point.
-
-Registers cart walkers as REST endpoints in Swagger.
-Run standalone: jac start cart_app.jac --port 8003 --no_client
-"""
+"""Cart Service — entry point."""
 
 sv {
-    import from services.cart { CartItem, AddToCart, ViewCart, RemoveFromCart, ClearCart }
+    import from services.cart { Cart, AddToCart, ViewCart, RemoveFromCart, ClearCart }
 }
