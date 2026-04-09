@@ -164,14 +164,22 @@ Only files in `[plugins.scale.microservices.services.*]` become services:
 
 ## Built-in Route Passthrough
 
-The gateway forwards these to the first healthy service:
+The gateway forwards these to healthy services (tries all, skips 404):
 
 | Route | What |
 |-------|------|
-| `/user/register`, `/user/login` | Auth |
-| `/healthz` | Health check |
+| `/user/*` | Auth (register, login, refresh, update) |
+| `/sso/*` | SSO (Google, Apple, GitHub) |
+| `/api-key/*` | API key management |
+| `/walker/*`, `/function/*` | Walker/function calls |
+| `/webhook/*` | Webhook walker endpoints |
+| `/ws/*` | WebSocket walker endpoints |
+| `/jobs/*` | Scheduler job management |
 | `/cl/*` | Client error reporting |
-| `/walker/*`, `/function/*` | Direct walker/function calls |
+| `/healthz` | Health check |
+| `/graph`, `/graph/data` | Graph visualization |
+| `/metrics` | Prometheus metrics |
+| `/docs`, `/openapi.json` | API documentation |
 
 ## Architecture
 
@@ -179,6 +187,31 @@ The gateway forwards these to the first healthy service:
 Client --> Gateway (:8000) --> Products (:8001)
                            --> Orders   (:8002)
                            --> Cart     (:8003)
-                           --> Static files
-                           --> Admin UI
+                           --> Static files (.jac/client/dist/)
+                           --> Admin UI (.jac/admin/)
+
+Inter-service: Orders --service_call()--> Gateway --> Cart
 ```
+
+## Roadmap
+
+### Done
+- Gateway with path-based proxy + static serving + admin UI
+- Service registry, process manager, deployer interface
+- Inter-service communication with token propagation
+- `jac setup microservice` + `jac scale status/stop/restart/logs/destroy`
+- E-commerce example (products, orders, cart)
+
+### Next (Pre-K8s)
+- Complete endpoint passthrough (all 51 jac-scale endpoints)
+- Distributed tracing (X-Trace-Id propagation)
+- Gateway metrics (per-service latency, error rates)
+- Error handling (retry, backoff, circuit breaker)
+- Unified Swagger docs across services
+- Per-service log files + colored gateway output
+
+### Future (K8s)
+- KubernetesDeployer implementing ServiceDeployer interface
+- Per-service K8s Deployments from same Docker image
+- K8s Service DNS for service URLs
+- Ingress for gateway

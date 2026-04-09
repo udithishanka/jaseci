@@ -35,7 +35,24 @@ Build the microservice module from zero to a working system.
 | [9](day-09-plugin-integration.md) | Plugin architecture & hook system | Wire everything into `plugin.jac` — full local flow | `jac start app.jac` launches gateway + all services |
 | [10](day-10-deployment-interface.md) | Deployment interface & Strategy Pattern | `ServiceDeployer` abstraction + `LocalDeployer` + `jac scale` CLI | `jac scale status/stop/restart/logs/destroy` all work |
 
-**After Day 10**: You have a working microservice mode — gateway, subprocess management, auth, inter-service calls, CLI setup, deployment tooling, and a clean interface for adding K8s support.
+**After Day 10**: You have a working microservice mode with deployment tooling.
+
+---
+
+## Part 1.5: Production Readiness (Days 10.1-10.6)
+
+Before K8s, make the local setup production-grade.
+
+| Day | Topic | What to Build | Milestone |
+|-----|-------|--------------|-----------|
+| [10.1](day-10.1-endpoint-passthrough.md) | Complete endpoint passthrough | All 51 jac-scale endpoints accessible via gateway | SSO, webhooks, scheduler, metrics all work |
+| [10.2](day-10.2-distributed-tracing.md) | Distributed tracing | X-Trace-Id propagation across all services | Correlate logs across services by trace ID |
+| [10.3](day-10.3-gateway-metrics.md) | Gateway metrics | Per-service request count, error rate, latency | `/health` shows metrics summary |
+| [10.4](day-10.4-error-handling.md) | Error handling & resilience | Gateway retry, service_call backoff, error format | Transient failures handled gracefully |
+| [10.5](day-10.5-admin-and-docs.md) | Admin & API docs | Unified Swagger, admin passthrough, service topology | Single `/docs` showing all services' walkers |
+| [10.6](day-10.6-dev-experience.md) | Developer experience | Per-service logs, colored output, individual restart | `jac scale logs products` shows service output |
+
+**After Day 10.6**: Production-ready local setup with observability, resilience, and developer tooling.
 
 ---
 
