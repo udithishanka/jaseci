@@ -27,13 +27,19 @@ impl ServiceProcessManager.start_service
 
     try {
         import os;
+        import from pathlib { Path }
         child_env = dict(os.environ);
         child_env["JAC_MICROSERVICE_CHILD"] = "1";
 
+        # Write service logs to .jac/logs/{name}.log
+        log_dir = Path(".jac/logs");
+        log_dir.mkdir(parents=True, exist_ok=True);
+        log_file = open(str(log_dir / f"{name}.log"), "a");
+
         proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=log_file,
             env=child_env
         );
         self.processes[name] = proc;

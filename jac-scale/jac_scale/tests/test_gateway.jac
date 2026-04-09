@@ -513,36 +513,9 @@ test "is_public_path identifies public paths" {
 }
 
 # =============================================================================
-# Auth via TestClient
+# Auth — gateway delegates to services via /user/login passthrough
+# No mock auth endpoint on gateway
 # =============================================================================
-
-test "login endpoint returns valid jwt" {
-    reg = ServiceRegistry();
-    gw = MicroserviceGateway(registry=reg);
-    gw.setup();
-
-    import from fastapi.testclient { TestClient }
-    client = TestClient(gw.app);
-
-    resp = client.post("/auth/login", json={"username": "testuser", "password": "testpass"});
-    assert resp.status_code == 200;
-    token = resp.json()["token"];
-
-    decoded = jwt.decode(token, GW_JWT_SECRET, algorithms=[GW_JWT_ALGORITHM]);
-    assert decoded["user_id"] == "testuser";
-}
-
-test "login endpoint rejects missing credentials" {
-    reg = ServiceRegistry();
-    gw = MicroserviceGateway(registry=reg);
-    gw.setup();
-
-    import from fastapi.testclient { TestClient }
-    client = TestClient(gw.app);
-
-    resp = client.post("/auth/login", json={"username": ""});
-    assert resp.status_code == 400;
-}
 
 test "api request to unreachable service returns 502" {
     reg = ServiceRegistry();

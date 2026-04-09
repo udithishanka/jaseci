@@ -51,8 +51,9 @@ Before K8s, make the local setup production-grade.
 | [10.4](day-10.4-error-handling.md) | Error handling & resilience | Gateway retry, service_call backoff, error format | Transient failures handled gracefully |
 | [10.5](day-10.5-admin-and-docs.md) | Admin & API docs | Unified Swagger, admin passthrough, service topology | Single `/docs` showing all services' walkers |
 | [10.6](day-10.6-dev-experience.md) | Developer experience | Per-service logs, colored output, individual restart | `jac scale logs products` shows service output |
+| [10.7](day-10.7-technical-debt.md) | Technical debt audit | Fix hacks, remove mock auth, proper token propagation | All non-standard patterns documented and resolved |
 
-**After Day 10.6**: Production-ready local setup with observability, resilience, and developer tooling.
+**After Day 10.7**: Production-ready local setup with observability, resilience, proper security, and developer tooling.
 
 ---
 

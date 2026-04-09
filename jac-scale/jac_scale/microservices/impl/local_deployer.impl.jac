@@ -75,19 +75,23 @@ impl LocalDeployer.status -> dict[str, dict] {
     return result;
 }
 
-"""Get logs for a service (limited in local mode — subprocess output is discarded)."""
+"""Get logs for a service — reads from .jac/logs/{name}.log."""
 impl LocalDeployer.get_logs(name: str, lines: int = 50) -> str {
-    pm = self._ensure_pm();
+    import from pathlib { Path }
+
     if name not in self.registry.entries {
         return f"Service '{name}' not found";
     }
-    svc_entry = self.registry.entries[name];
-    if name not in pm.processes {
-        return f"Service '{name}' is not running";
+
+    log_file = Path(".jac/logs") / f"{name}.log";
+    if not log_file.exists() {
+        return f"No log file for '{name}' (service may not have started yet)";
     }
-    # Local mode: stdout/stderr go to DEVNULL, so no logs available
-    # In production, logs would go to files or a logging service
-    return f"Service '{name}' running on pid={svc_entry.pid} port={svc_entry.port}\n(Local mode: logs sent to /dev/null. Use --dev for console output.)";
+
+    # Read last N lines
+    all_lines = log_file.read_text().splitlines();
+    tail = all_lines[-lines:] if len(all_lines) > lines else all_lines;
+    return "\n".join(tail);
 }
 
 """Stop all services."""

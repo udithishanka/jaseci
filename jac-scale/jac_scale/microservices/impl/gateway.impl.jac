@@ -200,33 +200,8 @@ impl MicroserviceGateway.setup -> FastAPI {
             );
         }
 
-        # Auth endpoints — login
-        if path == "/auth/login" and request.method == "POST" {
-            try {
-                body_data = await request.json();
-            } except ValueError {
-                return JSONResponse(status_code=400, content={"error": "Invalid JSON"});
-            }
-            username: str = body_data.get("username", "");
-            password: str = body_data.get("password", "");
-
-            if not username or not password {
-                return JSONResponse(status_code=400, content={"error": "Username and password required"});
-            }
-
-            # Create JWT token
-            import time;
-            exp_timestamp: int = int(time.time()) + (GW_JWT_EXP_DAYS * 86400);
-            payload = {
-                "user_id": username,
-                "email": f"{username}@example.com",
-                "exp": exp_timestamp
-            };
-            token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
-            return JSONResponse(content={"token": token});
-        }
-
         # Built-in jac-scale routes — try all healthy services
+        # Auth is handled by services via /user/login passthrough
         # For /walker/* and /function/*: tries each service until one responds
         # with non-404 (since each service only has its own walkers)
         is_builtin = path.startswith((
