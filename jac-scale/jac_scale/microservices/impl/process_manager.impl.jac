@@ -34,14 +34,17 @@ impl ServiceProcessManager.start_service
         # Write service logs to .jac/logs/{name}.log
         log_dir = Path(".jac/logs");
         log_dir.mkdir(parents=True, exist_ok=True);
-        log_file = open(str(log_dir / f"{name}.log"), "a");
+        log_path = str(log_dir / f"{name}.log");
+        log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND);
 
         proc = subprocess.Popen(
             cmd,
-            stdout=log_file,
-            stderr=log_file,
+            stdout=log_fd,
+            stderr=log_fd,
+            stdin=subprocess.DEVNULL,
             env=child_env
         );
+        os.close(log_fd);
         self.processes[name] = proc;
         entry.pid = proc.pid;
         entry.port = port;
