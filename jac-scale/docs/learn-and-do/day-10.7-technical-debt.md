@@ -48,20 +48,20 @@ Everything that needs fixing before this is production-grade.
 
 ### Phase 2: Add observability (Days 10.2-10.3)
 
-4. **X-Trace-Id** — generate at gateway, propagate through all proxied requests and service_call
-5. **Gateway metrics** — per-service request count, error rate, latency in `/health`
+1. **X-Trace-Id** — generate at gateway, propagate through all proxied requests and service_call
+2. **Gateway metrics** — per-service request count, error rate, latency in `/health`
 
 ### Phase 3: Add resilience (Day 10.4)
 
-6. **service_call retry** — 2 retries with exponential backoff
-7. **Walker routing cache** — cache which service handles which walker path
-8. **Rate limiting** — per-IP token bucket on the gateway
+1. **service_call retry** — 2 retries with exponential backoff
+2. **Walker routing cache** — cache which service handles which walker path
+3. **Rate limiting** — per-IP token bucket on the gateway
 
 ### Phase 4: Clean up (Day 10.5-10.6)
 
-9. **Unified Swagger** — aggregate OpenAPI schemas from all services
-10. **Colored log output** — prefix gateway logs with service name
-11. **Load config at runtime** — move globals to setup()
+1. **Unified Swagger** — aggregate OpenAPI schemas from all services
+2. **Colored log output** — prefix gateway logs with service name
+3. **Load config at runtime** — move globals to setup()
 
 ## What's Acceptable As-Is
 
