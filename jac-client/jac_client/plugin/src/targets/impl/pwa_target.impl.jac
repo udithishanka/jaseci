@@ -193,25 +193,28 @@ def _get_precache_files(dist_dir: Path) -> list[str] {
 
 """Generate service worker JavaScript content."""
 def _build_service_worker_content(cache_name: str, precache_files: list[str]) -> str {
-    return f'''// Jac PWA Service Worker
+    return f'''/* Jac PWA Service Worker */
 const CACHE_NAME = '{cache_name}';
 const PRECACHE_ASSETS = [
-  './',
   {', '.join(
         precache_files
     )}
 ];
 
-// Install event - precache assets
+/* Install event - precache assets individually (resilient to auth redirects) */
 self.addEventListener('install', (event) => {{
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_ASSETS))
+      .then((cache) => Promise.all(
+        PRECACHE_ASSETS.map((url) =>
+          cache.add(url).catch((err) => console.warn('SW: skipped caching', url, err))
+        )
+      ))
       .then(() => self.skipWaiting())
   );
 }});
 
-// Activate event - cleanup old caches
+/* Activate event - cleanup old caches */
 self.addEventListener('activate', (event) => {{
   event.waitUntil(
     caches.keys().then((cacheNames) => {{
@@ -224,11 +227,11 @@ self.addEventListener('activate', (event) => {{
   );
 }});
 
-// Fetch event - cache-first for assets, network-first for API
+/* Fetch event - cache-first for assets, network-first for API */
 self.addEventListener('fetch', (event) => {{
   const url = new URL(event.request.url);
 
-  // Network-first for API calls
+  /* Network-first for API calls */
   if (url.pathname.startsWith('{PWA_API_PATH_PREFIX}')) {{
     event.respondWith(
       fetch(event.request)
@@ -242,7 +245,7 @@ self.addEventListener('fetch', (event) => {{
     return;
   }}
 
-  // Cache-first for static assets
+  /* Cache-first for static assets */
   event.respondWith(
     caches.match(event.request)
       .then((cached) => cached || fetch(event.request))
@@ -270,7 +273,7 @@ def _generate_service_worker(dist_dir: Path, pwa_config: dict) {
 def _build_install_prompt_capture_script -> str {
     return '''
     <script>
-      // Capture beforeinstallprompt EARLY before any modules load
+      /* Capture beforeinstallprompt EARLY before any modules load */
       window.__jacPwaPrompt = null;
       window.__jacPwaPromptCaptured = true;
       window.addEventListener('beforeinstallprompt', function(e) {
@@ -396,7 +399,7 @@ def _build_pwa_install_banner_script(pwa_config: dict) -> str {
     return f'''
     <script>
       (function() {{
-        // PWA Install Banner - Configuration
+        /* PWA Install Banner - Configuration */
         var STORAGE_KEY = '{PWA_BANNER_STORAGE_KEY}';
         var DELAY = {delay};
         var TITLE = '{title}';
@@ -408,18 +411,18 @@ def _build_pwa_install_banner_script(pwa_config: dict) -> str {
         var MS_PER_DAY = {ms_per_day};
         var ANIMATION_MS = {animation_ms};
 
-        // Skip if already installed (standalone mode)
+        /* Skip if already installed (standalone mode) */
         if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {{
           return;
         }}
 
-        // Helper to dismiss banner with animation
+        /* Helper to dismiss banner with animation */
         function dismissBanner(banner) {{
           banner.classList.add('dismissing');
           setTimeout(function() {{ banner.remove(); }}, ANIMATION_MS);
         }}
 
-        // Check dismiss history
+        /* Check dismiss history */
         function shouldShow() {{
           try {{
             var prefs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{{}}');
@@ -447,7 +450,7 @@ def _build_pwa_install_banner_script(pwa_config: dict) -> str {
             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         }}
 
-        // Get app info from manifest
+        /* Get app info from manifest */
         function getManifestInfo(cb) {{
           var link = document.querySelector('link[rel="manifest"]');
           if (!link) return cb(null, null);
@@ -486,7 +489,7 @@ def _build_pwa_install_banner_script(pwa_config: dict) -> str {
 
             installBtn.onclick = function() {{
               if (isIos()) {{
-                // Show iOS guide
+                /* Show iOS guide */
                 var ios = document.createElement('div');
                 ios.className = 'jac-pwa-ios';
                 ios.innerHTML = '<div class="jac-pwa-ios-box">' +
@@ -519,7 +522,7 @@ def _build_pwa_install_banner_script(pwa_config: dict) -> str {
           }});
         }}
 
-        // Show banner after delay - install button handles prompt availability
+        /* Show banner after delay */
         setTimeout(showBanner, DELAY);
       }})();
     </script>''';
