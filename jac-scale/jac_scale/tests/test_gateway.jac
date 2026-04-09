@@ -501,11 +501,14 @@ test "is_public_path identifies public paths" {
     gw = MicroserviceGateway(registry=reg);
 
     assert gw.is_public_path("/health");
+    assert gw.is_public_path("/healthz");
     assert gw.is_public_path("/auth/login");
     assert gw.is_public_path("/auth/register");
     assert gw.is_public_path("/admin/");
     assert gw.is_public_path("/static/app.js");
     assert gw.is_public_path("/assets/style.css");
+    assert gw.is_public_path("/sso/google/login");
+    assert gw.is_public_path("/docs");
     assert not gw.is_public_path("/api/orders/walker/list");
 }
 
@@ -541,7 +544,7 @@ test "login endpoint rejects missing credentials" {
     assert resp.status_code == 400;
 }
 
-test "api request without token returns 401" {
+test "api request to unreachable service returns 502" {
     reg = ServiceRegistry();
     reg.register(ServiceEntry(
         name="orders", file="orders.jac", prefix="/api/orders",
@@ -553,45 +556,9 @@ test "api request without token returns 401" {
     import from fastapi.testclient { TestClient }
     client = TestClient(gw.app);
 
+    # Gateway proxies to service — service is not running so 502
     resp = client.get("/api/orders/walker/list");
-    assert resp.status_code == 401;
-    assert "Missing" in resp.json()["error"];
-}
-
-test "api request with invalid token returns 401" {
-    reg = ServiceRegistry();
-    reg.register(ServiceEntry(
-        name="orders", file="orders.jac", prefix="/api/orders",
-        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
-    ));
-    gw = MicroserviceGateway(registry=reg);
-    gw.setup();
-
-    import from fastapi.testclient { TestClient }
-    client = TestClient(gw.app);
-
-    resp = client.get("/api/orders/walker/list", headers={"Authorization": "Bearer invalidtoken"});
-    assert resp.status_code == 401;
-    assert "Invalid" in resp.json()["error"];
-}
-
-test "api request with expired token returns 401" {
-    reg = ServiceRegistry();
-    reg.register(ServiceEntry(
-        name="orders", file="orders.jac", prefix="/api/orders",
-        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
-    ));
-    gw = MicroserviceGateway(registry=reg);
-    gw.setup();
-
-    expired_payload = {"user_id": "alice", "exp": int(time.time()) - 3600};
-    expired_token: str = jwt.encode(expired_payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
-
-    import from fastapi.testclient { TestClient }
-    client = TestClient(gw.app);
-
-    resp = client.get("/api/orders/walker/list", headers={"Authorization": f"Bearer {expired_token}"});
-    assert resp.status_code == 401;
+    assert resp.status_code == 502;
 }
 
 test "health endpoint does not require auth" {

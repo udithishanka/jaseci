@@ -171,7 +171,7 @@ impl MicroserviceGateway.is_public_path
         return True;
     }
     # Static assets, admin UI, and health don't require auth
-    if path.startswith(("/static/", "/assets/", "/admin", "/user/")) {
+    if path.startswith(("/static/", "/assets/", "/admin", "/user/", "/sso/", "/docs", "/redoc")) {
         return True;
     }
     return False;
@@ -227,10 +227,16 @@ impl MicroserviceGateway.setup -> FastAPI {
         }
 
         # Built-in jac-scale routes — try all healthy services
-        # /user/*, /cl/*, /walker/*, /function/*, /healthz, /graph, etc.
         # For /walker/* and /function/*: tries each service until one responds
         # with non-404 (since each service only has its own walkers)
-        is_builtin = path.startswith(("/user/", "/cl/", "/walker/", "/function/")) or path in ("/user", "/healthz", "/graph");
+        is_builtin = path.startswith((
+            "/user/", "/cl/", "/walker/", "/function/",
+            "/sso/", "/api-key/", "/webhook/", "/ws/",
+            "/jobs/", "/graph/"
+        )) or path in (
+            "/user", "/healthz", "/graph", "/metrics",
+            "/docs", "/openapi.json", "/redoc"
+        );
         if is_builtin {
             fwd_headers: dict[str, str] = {};
             for (key, value) in request.headers.items() {

@@ -18,7 +18,7 @@ glob logger = logging.getLogger(__name__),
      GW_JWT_SECRET: str = _jwt_config['secret'],
      GW_JWT_ALGORITHM: str = _jwt_config['algorithm'],
      GW_JWT_EXP_DAYS: int = int(_jwt_config['exp_delta_days']),
-     PUBLIC_PATHS: set[str] = {"/health", "/auth/login", "/auth/register", "/auth/refresh"};
+     PUBLIC_PATHS: set[str] = {"/health", "/healthz", "/auth/login", "/auth/register", "/auth/refresh", "/docs", "/openapi.json", "/redoc"};
 
 """API Gateway that routes requests to microservices by path prefix."""
 obj MicroserviceGateway {
