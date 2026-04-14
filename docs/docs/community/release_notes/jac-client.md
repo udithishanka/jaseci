@@ -4,8 +4,16 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## jac-client 0.3.12 (Unreleased)
 
+- **Jacpack Template Migration to `to cl:`**: The `client` scaffold's `main.jac` now uses the flatter `to cl:` section-header form instead of wrapping the entire component in a `cl { ... }` block.
+- **Jacpack Template Cleanup**: The `client` and `fullstack` scaffolds drop their leftover React usage, return `JsxElement` from their component roots, and use idiomatic Jac state/effect/event patterns so freshly-created projects pass `jac check` out of the box.
 - **Feat: Multi-mode Sidecar for Windows Desktop**: --jac-cli flag for CLI proxy, manual plugin registration for frozen apps, .env loading from bundled location, UTF-8/NO_COLOR for Windows.
 - **Desktop Plugin Bundling Config**: Added `get_plugins_config()` to `DesktopConfig` for reading the `[desktop.plugins]` section from `jac.toml`, controlling which Jac plugins (jac-scale, byllm, jac-coder) are bundled into desktop apps.
+- **Fix: Sidecar Stdout Crash on Windows Desktop**: Redirect `sys.stdout` to `sys.stderr` after writing `JAC_SIDECAR_PORT` to Tauri. Tauri drops the stdout pipe after reading the port, causing subsequent `console.print()` and `sys.stdout.flush()` calls to crash with `OSError: [Errno 22] Invalid argument`.
+- **Feat: Client-Only Mode for Desktop Builds**: Added `client_only` build mode that builds only the web client bundle without the full Tauri app, useful for development and CI workflows.
+- **Fix: JAC_BUILD Env Var During Desktop Build**: Set `JAC_BUILD=1` environment variable during desktop build to prevent the Jac server from starting during compilation, avoiding port conflicts and unnecessary resource usage.
+- **Fix: Always Bundle jac_client as Core Sidecar Package**: `jac_client` is now bundled as a core package in PyInstaller builds regardless of `[desktop.plugins]` config, since the sidecar entry point depends on it. Previously, setting `jac_client = false` in plugins config would break the sidecar at startup with `ModuleNotFoundError`.
+- **Fix: Exclude Build Artifacts from PyInstaller .jac Collection**: The `rglob('*.jac')` in the PyInstaller spec now skips `src-tauri`, `node_modules`, `dist`, and other build artifact directories. Previously, rebuilding would recursively nest previous sidecar bundles, creating deeply nested paths that exceeded Windows path limits and broke NSIS installer generation.
+- **Fix: Add jac_mcp to Default Desktop Plugin Config**: Added `jac_mcp` to the default `[desktop.plugins]` configuration so MCP server integration is bundled by default in desktop builds.
 - **Fix: Vite Define Skips Empty API URL**: The Vite config no longer injects `__JAC_API_BASE_URL__: undefined` when no API URL is configured, preventing conflicts with Tauri's runtime injection in desktop builds.
 - **Fix: HTML Script Tag Escaping**: Fixed `</script>` sequences in JSON payloads within `<script>` tags being incorrectly interpreted as tag closers by escaping `</` to `<\/`.
 - **Desktop Sidecar Overhaul**: Complete rewrite of sidecar process management with signal handling (`SIGTERM`/`SIGINT`/`SIGHUP`), stderr redirect (`JAC_USE_STDERR=1`) to avoid `BrokenPipeError` after Tauri closes stdout, writable data path (`--data-path` / `JAC_DATA_PATH`) for read-only AppImage environments with fallback probing, and manual plugin registration for PyInstaller-frozen apps.
@@ -19,6 +27,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 - **Fix: PWA install banner now appears correctly**: The PWA install prompt banner is now properly displayed when running apps with `jac start --client pwa`.
 - **Fix: Improved service worker reliability for authenticated apps**: Service worker installation no longer fails on apps that require authentication, ensuring offline caching works correctly.
 - **Fix: PWA scripts now generate valid JavaScript**: Resolved an issue where generated PWA scripts could produce syntax errors, preventing the install banner and prompt capture from functioning.
+- 4 small refactors/changes.
 
 ## jac-client 0.3.11 (Latest Release)
 
