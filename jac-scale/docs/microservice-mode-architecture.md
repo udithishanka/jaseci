@@ -43,6 +43,7 @@ The core handles **service-to-service** RPC. jac-scale handles
 ### Layer 1: `sv import` (already on main)
 
 What it provides:
+
 - **Compiler pass** — `InteropAnalysisPass` detects `sv import` and generates
   HTTP client stubs that call `sv_client.call(module, func, args)`.
 - **`sv_client._registry`** — global dict mapping module names to service URLs.
@@ -55,6 +56,7 @@ What it provides:
   walks compile-time recorded providers and spawns them eagerly.
 
 Limits of the core layer:
+
 - Spawns providers as **threads** (not subprocesses) — fine for dev, not
   production.
 - No client-facing routing — every service is its own public endpoint.
@@ -120,6 +122,7 @@ Orders walker code:
 ```
 
 Notes:
+
 - Inter-service calls bypass the gateway by default (direct `sv_client` call).
 - PR 4 will add auth propagation + retry to `sv_client.call`.
 - The gateway is for **client-facing** traffic, not internal RPC.
@@ -166,6 +169,7 @@ just doesn't get a public client-facing URL through the gateway.
 
 `sv import` solves the **language problem** (RPC that looks like a
 function call). It doesn't solve operational problems:
+
 - How does a browser reach my services? (gateway)
 - How do I stop/restart one service? (deployer)
 - Where does auth flow from a client through services? (gateway + sv_call override)
@@ -204,6 +208,7 @@ etc.). The compiler is the source of truth for "what's a service".
 ### `sv_client._registry` is the single source of truth
 
 All components read service URLs from one place:
+
 - The compiler-generated stub looks up URLs there.
 - The gateway reads URLs there to route `/api/{svc}/*`.
 - The deployer writes URLs there after spawning.
@@ -265,6 +270,7 @@ dist_dir = ".jac/client/dist"
 ```
 
 What is **not** in TOML:
+
 - ❌ Per-service file paths — compiler discovers them via `sv import`
 - ❌ Service-to-service auth — handled by `sv_client.call` override (PR 4)
 - ❌ Internal endpoints — services expose `def:pub` / `walker:pub` automatically
@@ -291,11 +297,13 @@ changes. Switching modes is a config change, not a rewrite.
 ## Trust Boundary & Auth
 
 Currently:
+
 - Gateway validates user JWTs (PR 1 has built-in passthrough for `/user/*`).
 - Each service independently re-validates the token (default jac-scale auth).
 - `sv import` calls (service-to-service) carry no auth by default.
 
 After PR 4:
+
 - `sv_client.call` extracts the current request's `Authorization` header
   from execution context and forwards it.
 - Internal calls inherit the user's identity transparently.

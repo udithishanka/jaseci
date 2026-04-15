@@ -12,6 +12,7 @@ Before planning PRs, here's what jac-scale already has for `sv import`:
 | `tests/fixtures/microservice/` | Test fixture services (math_service, calculator_service, etc.) |
 
 The core `sv import` flow already works end-to-end on main:
+
 1. Compiler detects `sv import` → generates HTTP stub
 2. Stub calls `sv_client.call(module, func, args)`
 3. `sv_client` resolves URL via registry/env/ensure_sv_service hook
@@ -29,6 +30,7 @@ All PRs branch from `main`. Each PR builds on what already exists on main
 is independently mergeable and testable.
 
 ### PR 1: Microservice Gateway + HTTP Forwarding
+
 **Branch**: `feat/ms-gateway`
 **From**: `main`
 
@@ -37,6 +39,7 @@ on the existing `sv import` setup. It's a standalone FastAPI middleware that
 proxies requests to services by URL prefix.
 
 Files:
+
 - `jac_scale/microservices/__init__.py`
 - `jac_scale/microservices/impl/__init__.py`
 - `jac_scale/microservices/gateway.jac` + impl
@@ -46,6 +49,7 @@ Files:
 - `jac_scale/config_loader.jac` + impl (add `get_microservices_config`)
 
 What it does:
+
 - `MicroserviceGateway`: FastAPI middleware for path-based reverse proxy
 - Routes `/api/{service}/walker/*` and `/api/{service}/function/*` to services
 - Static file serving + SPA fallback from client dist
@@ -64,6 +68,7 @@ Depends on: nothing — standalone component
 ---
 
 ### PR 2: ServiceDeployer Interface + LocalDeployer
+
 **Branch**: `feat/ms-deployer`
 **From**: `main` (after PR 1 merged)
 
@@ -71,11 +76,13 @@ Why separate: Clean abstraction layer that wraps the existing `_ensure_sv_siblin
 subprocess spawning with a proper lifecycle interface (stop/restart/status/logs).
 
 Files:
+
 - `jac_scale/microservices/deployer.jac` (interface)
 - `jac_scale/microservices/local_deployer.jac` + impl
 - `jac_scale/tests/test_deployer.jac`
 
 What it does:
+
 - `ServiceDeployer`: abstract interface (deploy, stop, restart, scale, status, logs, destroy)
 - `LocalDeployer`: wraps subprocess lifecycle with deployer API
 - Hash-based port assignment (from core's pattern: `18000 + hash % 1000`, 100 retries)
@@ -91,6 +98,7 @@ Depends on: PR 1 (uses gateway's service URL resolution)
 ---
 
 ### PR 3: Orchestrator + Plugin Hook Override
+
 **Branch**: `feat/ms-orchestrator`
 **From**: `main` (after PR 2 merged)
 
@@ -98,11 +106,13 @@ Why: This is where `sv import` meets jac-scale infrastructure. The orchestrator
 replaces core's thread-based `ensure_sv_service` with production subprocess management.
 
 Files:
+
 - `jac_scale/microservices/orchestrator.jac`
 - `jac_scale/plugin.jac` (override `ensure_sv_service` + add pre-hook)
 - `jac_scale/tests/test_orchestrator.jac`
 
 What it does:
+
 - `@hookimpl ensure_sv_service`: spawn subprocess + JFastApiServer (not thread + HTTPServer)
 - Orchestrator: build client → start services → health check → start gateway
 - Plugin pre-hook: detects `microservices.enabled`, calls orchestrator
@@ -122,6 +132,7 @@ Depends on: PR 2
 ---
 
 ### PR 4: `sv_client.call` Override — Auth Propagation + Retry
+
 **Branch**: `feat/ms-sv-call`
 **From**: `main` (after PR 3 merged)
 
@@ -129,11 +140,13 @@ Why: Makes `sv import` production-ready — auth flows automatically between
 services, transient failures are retried, circuit breaker prevents cascading.
 
 Files:
+
 - `jac_scale/plugin.jac` (override or monkey-patch sv_client.call)
 - `jac_scale/microservices/sv_call.jac` (production call implementation)
 - Tests
 
 What it does:
+
 - Extract auth token from current Jac execution context
 - Forward Authorization header in inter-service calls
 - Retry on 503/timeout with exponential backoff
@@ -141,6 +154,7 @@ What it does:
 - Structured logging with trace ID
 
 User experience:
+
 ```jac
 sv import from cart_app { ViewCart }
 result = ViewCart();  // auth propagated automatically, retry on failure
@@ -152,15 +166,18 @@ May need: Small core PR to make `sv_client.call` hookable (or monkey-patch)
 ---
 
 ### PR 5: CLI Tooling — Setup + Scale Commands
+
 **Branch**: `feat/ms-cli`
 **From**: `main` (after PR 2 merged, parallel with PR 3/4)
 
 Files:
+
 - `jac_scale/microservices/setup.jac`
 - `jac_scale/plugin.jac` (register CLI commands)
 - `jac_scale/tests/test_setup.jac`
 
 What it does:
+
 - `jac setup microservice` — interactive setup, TOML generation
 - `jac setup microservice --add/--remove/--list`
 - `jac scale status` — show all services (reads sv_client._registry)
@@ -172,13 +189,16 @@ Depends on: PR 2 (needs deployer)
 ---
 
 ### PR 6: E-Commerce Example App
+
 **Branch**: `feat/ms-example`
 **From**: `main` (after PR 4 merged)
 
 Files:
+
 - `examples/micr-s-example/` (services, frontend, jac.toml)
 
 What it does:
+
 - 3-service e-commerce: products, orders, cart
 - Inter-service: `sv import from cart_app { ViewCart, ClearCart }` (not manual service_call)
 - Frontend: fetch API calls to gateway
@@ -190,10 +210,12 @@ Depends on: PR 4 (uses sv import with auth propagation)
 ---
 
 ### PR 7: Documentation
+
 **Branch**: `feat/ms-docs`
 **From**: `main` (after PR 6 merged)
 
 Files:
+
 - `jac_scale/microservices/docs.md`
 - Update `docs/docs/tutorials/production/microservices.md`
 
@@ -242,12 +264,14 @@ PR 1 adds the API Gateway — the one thing `sv import` on main cannot do:
 give clients a single URL with routing, static files, and admin.
 
 **Right now on main (without gateway):**
+
 ```
 Client → :8002/function/sum_list     (must know the exact port)
 Client → :18342/function/check_stock  (auto-assigned, random-looking port)
 ```
 
 **After PR 1:**
+
 ```
 Client → :8000/api/orders/function/create_order    (gateway routes it)
 Client → :8000/api/inventory/function/check_stock  (gateway routes it)

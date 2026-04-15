@@ -17,6 +17,7 @@ Process A (orders.jac)          Process B (payments.jac)
 ```
 
 **Why subprocesses for microservices?**
+
 - Crash isolation: one service dying doesn't kill others
 - Memory isolation: no walker name collisions between services
 - Maps 1:1 to K8s pods (same architecture local and in production)
@@ -72,6 +73,7 @@ Start process → wait 2s → poll /health every 5s
 ### Graceful Shutdown
 
 When stopping a service:
+
 1. Send `SIGTERM` (polite: "please shut down")
 2. Wait up to 10 seconds for the process to exit
 3. If still running, send `SIGKILL` (force kill)

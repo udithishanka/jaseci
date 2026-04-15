@@ -55,6 +55,7 @@ Not all users should access all services. **Scopes** in the JWT control what a u
 ```
 
 The gateway can enforce scopes per prefix:
+
 - `GET /api/orders/*` requires `orders:read`
 - `POST /api/orders/*` requires `orders:write`
 - `POST /api/admin/*` requires `role: admin`

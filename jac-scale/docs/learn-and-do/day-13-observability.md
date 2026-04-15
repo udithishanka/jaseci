@@ -17,6 +17,7 @@ In a monolith, debugging is "read the log file." In microservices, a single user
 Unstructured: `ERROR: Failed to charge payment for user`
 
 Structured:
+
 ```json
 {"level": "error", "service": "orders", "user_id": "abc123", "action": "charge_payment",
  "target_service": "payments", "error": "timeout", "duration_ms": 10023, "trace_id": "t-789"}

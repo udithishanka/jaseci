@@ -5,6 +5,7 @@
 ### How jac-scale's Plugin System Works
 
 jac-scale uses **pluggy** — a plugin framework where:
+
 1. A **host** defines hook specifications (what hooks exist)
 2. **Plugins** implement hooks (what happens when a hook fires)
 3. The **plugin manager** calls hooks and collects results
@@ -59,6 +60,7 @@ Microservice flow (what we're building):
 ### Signal Handling
 
 When the user presses Ctrl+C:
+
 1. Python receives SIGINT
 2. The gateway's uvicorn server shuts down
 3. We need to **also stop all service subprocesses**

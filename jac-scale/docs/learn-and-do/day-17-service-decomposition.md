@@ -14,6 +14,7 @@ Split too little → you're still a monolith
 **Bounded Contexts** from DDD are the best guide for service boundaries:
 
 A bounded context is an area of the business where:
+
 - Terms have specific meanings ("Order" in shipping means something different than in billing)
 - Data is owned by one team
 - Changes are independent from other areas
@@ -76,6 +77,7 @@ Phase 3: Extract more
 ```
 
 In jac-scale terms:
+
 1. Start with `jac start app.jac` (monolith)
 2. Move payments walkers to `services/payments.jac`
 3. Enable microservice mode, declare payments as a service
@@ -125,6 +127,7 @@ Non-critical: Orders → Notifications (can fail gracefully)
 Start with a monolith, extract one service:
 
 **Before** — `app.jac`:
+
 ```jac
 walker list_orders { ... }
 walker create_order { ... }
@@ -135,6 +138,7 @@ walker refund_payment { ... }
 **After** — extract payments:
 
 `app.jac` (keeps orders):
+
 ```jac
 walker list_orders { ... }
 walker create_order {
@@ -147,12 +151,14 @@ walker create_order {
 ```
 
 `services/payments.jac` (extracted):
+
 ```jac
 walker charge { ... }   # same code, moved here
 walker refund { ... }   # same code, moved here
 ```
 
 `jac.toml`:
+
 ```toml
 [plugins.scale.microservices]
 enabled = true

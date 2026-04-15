@@ -5,12 +5,14 @@
 ### Why CLI Setup Commands Matter
 
 Making users hand-write TOML config is error-prone. A setup command:
+
 - **Discovers** what's in the project (scans for .jac files)
 - **Guides** the user through choices (which files are services?)
 - **Generates** correct config (no typos, proper structure)
 - **Validates** the result (file exists? prefix conflicts?)
 
 Good CLI tools follow these principles:
+
 1. **Sensible defaults** — works with minimal input
 2. **Progressive disclosure** — simple first, advanced options available
 3. **Idempotent** — running it twice doesn't break anything
@@ -35,6 +37,7 @@ The user then runs: `jac setup microservice`
 ### TOML Manipulation in Python
 
 Python's `tomllib` reads TOML, but there's no built-in TOML writer. Options:
+
 - **`tomlkit`** — preserves comments and formatting (best for editing existing files)
 - **`tomli_w`** — simple writer (good for generating new files)
 

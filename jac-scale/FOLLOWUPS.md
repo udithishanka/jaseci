@@ -25,6 +25,7 @@ Simple checklist of what's done and what's next.
 ## 📋 Upcoming PRs
 
 ### PR 2: ServiceDeployer + LocalDeployer
+
 - [ ] `ServiceDeployer` abstract interface
 - [ ] `LocalDeployer` subprocess-based impl
 - [ ] Hash-based port assignment (`18000 + hash % 1000`)
@@ -32,6 +33,7 @@ Simple checklist of what's done and what's next.
 - [ ] 12 tests
 
 ### PR 3: Orchestrator + Plugin Hooks
+
 - [ ] `start_microservice_mode()` orchestrator
 - [ ] `@hookimpl ensure_sv_service` override (subprocess + JFastApiServer)
 - [ ] Pre-hook in `plugin.jac` for `microservices.enabled`
@@ -42,6 +44,7 @@ Simple checklist of what's done and what's next.
 - [ ] **This unlocks `jac start main.jac` auto-launching everything**
 
 ### PR 4: `sv_client.call` Override
+
 - [ ] Auth token extraction from request context
 - [ ] Forward `Authorization` header
 - [ ] Retry with exponential backoff
@@ -50,6 +53,7 @@ Simple checklist of what's done and what's next.
 - [ ] Tests
 
 ### PR 5: CLI Tooling
+
 - [ ] `jac setup microservice` (interactive)
 - [ ] `jac setup microservice --add/--remove/--list`
 - [ ] `jac scale status`
@@ -57,6 +61,7 @@ Simple checklist of what's done and what's next.
 - [ ] 12 tests
 
 ### PR 6: Example App
+
 - [ ] `examples/micr-s-example/` 3-service e-commerce
 - [ ] products, orders, cart services
 - [ ] Inter-service via `sv import`
@@ -64,6 +69,7 @@ Simple checklist of what's done and what's next.
 - [ ] README
 
 ### PR 7: User Documentation
+
 - [ ] `jac_scale/microservices/docs.md`
 - [ ] Update `docs/docs/tutorials/production/microservices.md`
 - [ ] Architecture diagram
@@ -73,6 +79,7 @@ Simple checklist of what's done and what's next.
 ## 📋 Production Readiness (Days 10.1–10.6)
 
 ### PR 8: Endpoint Passthrough
+
 - [ ] `/sso/*`
 - [ ] `/webhooks/*`
 - [ ] `/scheduler/*`
@@ -81,18 +88,21 @@ Simple checklist of what's done and what's next.
 - [ ] `/docs` and `/openapi.json` aggregated
 
 ### PR 9: Distributed Tracing
+
 - [ ] Generate `X-Trace-Id` at gateway
 - [ ] Forward through HTTP proxies
 - [ ] Forward through `sv_client.call`
 - [ ] Structured logs with trace ID
 
 ### PR 10: Gateway Metrics
+
 - [ ] Request count per service
 - [ ] Error rate per service
 - [ ] p50/p95/p99 latency
 - [ ] `/metrics` Prometheus format
 
 ### PR 11: Error Handling
+
 - [ ] Gateway retry on 503/timeout
 - [ ] Backoff in `service_call` / `sv_client.call`
 - [ ] Standardized error envelope
@@ -100,11 +110,13 @@ Simple checklist of what's done and what's next.
 - [ ] Service-down fallback
 
 ### PR 12: Admin & Unified Swagger
+
 - [ ] Admin passthrough for all services
 - [ ] Unified Swagger at `/docs`
 - [ ] Service topology view
 
 ### PR 13: Developer Experience
+
 - [ ] Per-service log files
 - [ ] Colored/prefixed console output
 - [ ] HMR per service
@@ -115,6 +127,7 @@ Simple checklist of what's done and what's next.
 ## 📋 K8s (Future)
 
 ### PR 14: KubernetesDeployer
+
 - [ ] `KubernetesDeployer` implementing `ServiceDeployer`
 - [ ] `kubectl`-based deploy/stop/restart
 - [ ] K8s Service DNS URL resolution
@@ -124,6 +137,7 @@ Simple checklist of what's done and what's next.
 - [ ] Multi-service manifest generation
 
 ### PR 15: K8s Example + Docs
+
 - [ ] K8s manifests for e-commerce example
 - [ ] Ingress config
 - [ ] ConfigMaps + Secrets

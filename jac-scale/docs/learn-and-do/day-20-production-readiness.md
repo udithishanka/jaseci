@@ -222,6 +222,7 @@ Orders → Notifications (graceful degradation if down)
 Over 20 days, you've gone from "what are microservices?" to building and understanding a production-grade system:
 
 ### Days 1-10: Build It
+
 | Day | What you built |
 |-----|---------------|
 | 1 | Foundation — config schema, project structure |
@@ -236,6 +237,7 @@ Over 20 days, you've gone from "what are microservices?" to building and underst
 | 10 | K8s Deployment — multi-service manifests |
 
 ### Days 11-20: Master It
+
 | Day | What you mastered |
 |-----|------------------|
 | 11 | Testing — pyramid, contracts, E2E |
@@ -252,6 +254,7 @@ Over 20 days, you've gone from "what are microservices?" to building and underst
 ### What Makes You an Expert
 
 You can now:
+
 - **Design**: Identify service boundaries using bounded contexts
 - **Build**: Implement gateway, registry, process management, inter-service communication
 - **Secure**: JWT + scopes + network segmentation + input validation

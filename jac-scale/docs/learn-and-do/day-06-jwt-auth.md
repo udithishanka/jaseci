@@ -59,6 +59,7 @@ In local mode this is fine — services only listen on `127.0.0.1`. In K8s, netw
 ### What jac-scale Already Has
 
 `jac_scale/impl/serve.core.impl.jac` already has:
+
 - JWT creation and validation
 - Login/register endpoints
 - `Authorization: Bearer` header parsing
@@ -72,6 +73,7 @@ We'll **reuse the same JWT functions** in the gateway — no new auth code neede
 ### Task 1: Add auth middleware to the Gateway
 
 The gateway needs to:
+
 1. Let auth endpoints through without a token (`/auth/login`, `/auth/register`, `/health`)
 2. Validate JWT on everything else
 3. Inject identity headers before proxying

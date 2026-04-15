@@ -30,6 +30,7 @@ CLOSED (normal)          OPEN (broken)           HALF-OPEN (testing)
 ```
 
 **States:**
+
 - **CLOSED**: Normal operation. Failures are counted.
 - **OPEN**: Too many failures. Requests fail immediately (no network call). Saves resources.
 - **HALF-OPEN**: After a cooldown, try one request. If it succeeds, close the circuit. If it fails, stay open.
@@ -46,6 +47,7 @@ Attempt 4: success!
 ```
 
 **Rules:**
+
 - Only retry on transient errors (503, timeout) — NOT on 400, 401, 404
 - Use exponential backoff (1s, 2s, 4s, 8s...) — don't hammer a struggling service
 - Set a max retries limit (3-5)

@@ -20,6 +20,7 @@ Kubernetes (K8s) is a system that runs and manages containers across multiple ma
 For each microservice, we create:
 
 **1. Deployment** — "run this container, keep N replicas alive"
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -38,6 +39,7 @@ spec:
 ```
 
 **2. Service** — "give this Deployment a stable DNS name"
+
 ```yaml
 apiVersion: v1
 kind: Service
@@ -53,6 +55,7 @@ spec:
 Now any pod can reach Orders at `http://orders:8000`.
 
 **3. Ingress** (gateway only) — "expose the gateway to the internet"
+
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -101,6 +104,7 @@ Internet
 ### How jac-scale's `KubernetesTarget` Already Works
 
 The existing `jac start app.jac --scale` flow:
+
 1. Builds a Docker image containing the Jac app
 2. Pushes it to a registry
 3. Creates K8s manifests (Deployment, Service, Ingress, MongoDB, Redis)
@@ -127,6 +131,7 @@ This keeps the Docker build simple — one image, multiple entry points.
 ### Task 1: Understand the existing K8s target
 
 Read through these files to understand the existing pattern:
+
 - `jac_scale/targets/kubernetes/kubernetes_target.jac` — the main deployment logic
 - Look at how it generates Deployment, Service, and Ingress manifests
 
@@ -253,6 +258,7 @@ for m in manifests:
 ```
 
 If you have minikube or Docker Desktop K8s:
+
 ```bash
 jac start app.jac --scale
 # Should create per-service Deployments instead of a single one

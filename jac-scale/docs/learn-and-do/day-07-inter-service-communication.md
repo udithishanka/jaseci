@@ -58,6 +58,7 @@ User (JWT) → Gateway → Orders → ??? → Gateway → Payments
 ```
 
 The internal token:
+
 - Is signed by the gateway (same JWT secret)
 - Has a very short TTL (30 seconds)
 - Contains the original user's identity
@@ -72,6 +73,7 @@ result = service_call(service="payments", endpoint="/charge", body={...});
 ```
 
 Under the hood it:
+
 1. Reads `X-Internal-Token` from the current request context
 2. Calls `http://gateway:8000/api/payments/charge` with that token
 3. Returns the response

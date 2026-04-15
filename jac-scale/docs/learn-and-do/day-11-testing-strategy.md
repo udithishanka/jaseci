@@ -5,6 +5,7 @@
 ### Why Testing Microservices Is Hard
 
 In a monolith, you test one thing. In microservices, you test:
+
 - Each service in isolation (**unit/integration tests**)
 - Services talking to each other (**contract tests**)
 - The whole system together (**end-to-end tests**)
@@ -36,6 +37,7 @@ In a monolith, you test one thing. In microservices, you test:
 The biggest pitfall in microservices: **Service A changes its response format and breaks Service B** without anyone knowing until production.
 
 **Contract tests** prevent this. A contract says:
+
 - "When you call `POST /walker/charge` with `{amount: float}`, you get back `{charge_id: string, status: string}`"
 
 If either side violates the contract, the test fails.

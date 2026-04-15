@@ -59,6 +59,7 @@ Request: GET /dashboard/settings
 ### How jac-scale Already Does This
 
 Look at `jac_scale/impl/serve.static.impl.jac` — it already:
+
 1. Searches multiple directories for static files
 2. Detects MIME types
 3. Has SPA fallback (root asset endpoint)
@@ -144,6 +145,7 @@ import from fastapi.responses { HTMLResponse }
 ### Task 3: Update the catch-all route to try static files first
 
 Modify the `setup()` method's catch-all handler to check in this order:
+
 1. Is it an API route? → proxy to service
 2. Is it a static file? → serve it
 3. Otherwise → SPA fallback (serve index.html)
@@ -192,6 +194,7 @@ mkdir -p test-microservices/.jac/client/dist/assets
 ```
 
 **`test-microservices/.jac/client/dist/index.html`**
+
 ```html
 <!DOCTYPE html>
 <html>
@@ -215,11 +218,13 @@ mkdir -p test-microservices/.jac/client/dist/assets
 ```
 
 **`test-microservices/.jac/client/dist/assets/app.js`**
+
 ```javascript
 document.getElementById('path').textContent = window.location.pathname;
 ```
 
 **`test-microservices/.jac/client/dist/assets/app.css`**
+
 ```css
 body { font-family: system-ui; max-width: 600px; margin: 2rem auto; }
 nav { margin-top: 1rem; }

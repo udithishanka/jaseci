@@ -5,6 +5,7 @@
 ### The Microservice Performance Tax
 
 Every service-to-service call adds:
+
 - **Network latency**: ~1-5ms local, 10-100ms across data centers
 - **Serialization**: JSON encode/decode on each hop
 - **Auth overhead**: Token validation per request
@@ -23,7 +24,7 @@ A monolith function call: ~0.01ms. A microservice HTTP call: ~5-50ms. That's 500
 ### Cache Invalidation (The Hard Part)
 
 ```
-"There are only two hard things in Computer Science: 
+"There are only two hard things in Computer Science:
  cache invalidation and naming things." — Phil Karlton
 ```
 
@@ -49,6 +50,7 @@ Request 3: connect → use → close     Request 3: reuse → use → keep
 ### Response Compression
 
 Large JSON responses benefit from compression:
+
 - Client sends: `Accept-Encoding: gzip`
 - Server responds with gzipped body
 - Typically 70-90% smaller for JSON

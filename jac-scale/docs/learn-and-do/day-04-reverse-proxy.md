@@ -17,6 +17,7 @@ Our gateway IS a reverse proxy. The client sends requests to `:8000`, and the ga
 ### How HTTP Proxying Works
 
 The proxy needs to:
+
 1. **Receive** the full request (method, path, headers, body)
 2. **Transform** it (strip prefix, add headers)
 3. **Forward** it to the target service
@@ -43,6 +44,7 @@ async def proxy_request(client_request, target_url):
 ### Path Stripping
 
 When the gateway receives `GET /api/orders/list`:
+
 1. Match prefix: `/api/orders` → Orders service
 2. Strip prefix: `/api/orders/list` → `/list`
 3. Forward: `GET http://127.0.0.1:8001/walker/list`
@@ -62,6 +64,7 @@ The service doesn't know about prefixes — it just sees `/walker/list` as if th
 ### Existing Pattern: `sandbox_proxy.jac`
 
 jac-scale already has a reverse proxy — the sandbox proxy at `providers/proxy/sandbox_proxy.jac`. It:
+
 - Routes by **hostname** (not path)
 - Uses **aiohttp** for async HTTP forwarding
 - Handles **WebSocket** proxying too

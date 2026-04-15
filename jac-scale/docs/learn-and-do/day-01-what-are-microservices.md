@@ -58,6 +58,7 @@ This is why **microservice mode is off by default** in our design. Most Jac apps
 ### The API Gateway Pattern
 
 The **gateway** is the single entry point that clients talk to. It:
+
 1. Receives all HTTP requests
 2. Matches the URL path to the right service
 3. Forwards (proxies) the request to that service
@@ -78,6 +79,7 @@ Orders:  GET /walker/list → executes walker → returns JSON
 ### Key Concept: Path-Based Routing
 
 Each service "owns" a URL prefix:
+
 - `/api/orders/*` → Orders service
 - `/api/users/*` → Users service
 - `/api/payments/*` → Payments service
@@ -104,6 +106,7 @@ mkdir -p jac_scale/microservices/impl
 Create empty init file:
 
 **`jac_scale/microservices/__init__.jac`**
+
 ```jac
 """Microservice mode — decomposes a Jac project into independent service processes."""
 ```
@@ -173,6 +176,7 @@ mkdir -p test-microservices/services test-microservices/shared test-microservice
 ```
 
 **`test-microservices/services/orders.jac`**
+
 ```jac
 walker list_orders {
     can process with `root entry {
@@ -193,6 +197,7 @@ walker create_order {
 ```
 
 **`test-microservices/services/payments.jac`**
+
 ```jac
 walker charge {
     has amount: float, currency: str = "USD";
@@ -212,6 +217,7 @@ walker refund {
 ```
 
 **`test-microservices/shared/models.jac`**
+
 ```jac
 """Shared types used by multiple services."""
 
@@ -231,6 +237,7 @@ obj Payment {
 ```
 
 **`test-microservices/jac.toml`**
+
 ```toml
 [plugins.scale.microservices]
 enabled = true
@@ -260,6 +267,7 @@ print('services:', list(ms.get('services', {}).keys()))
 ```
 
 Expected output:
+
 ```
 enabled: True
 services: ['orders', 'payments']
