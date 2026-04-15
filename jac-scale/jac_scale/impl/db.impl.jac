@@ -328,6 +328,153 @@ def get_db -> Db {
     );
 }
 
+# ===== REDIS STREAMS =====
+
+"""Decode bytes to str if needed."""
+def _decode(val: object) -> object {
+    if isinstance(val, bytes) {
+        return val.decode("utf-8");
+    }
+    return val;
+}
+
+"""Lua script: release lock only if value matches owner."""
+glob _RELEASE_LOCK_LUA: str = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end";
+
+"""Lua script: refresh lock TTL only if value matches owner."""
+glob _REFRESH_LOCK_LUA: str = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end";
+
+impl Db.xadd(stream: str, fields: dict, maxlen: int = 0, approximate: bool = True) -> str {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("xadd() is Redis-only. Streams are not supported on MongoDB.");
+    }
+    kwargs: dict = {};
+    if maxlen > 0 {
+        kwargs["maxlen"] = maxlen;
+        kwargs["approximate"] = approximate;
+    }
+    result = self.client.xadd(stream, fields, **kwargs);
+    return _decode(result);
+}
+
+impl Db.xread(streams: dict, count: int = 100, block: int = 0) -> list {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("xread() is Redis-only. Streams are not supported on MongoDB.");
+    }
+    raw = self.client.xread(streams, count=count, block=block);
+    if not raw {
+        return [];
+    }
+    decoded: list = [];
+    for item in raw {
+        s_name = _decode(item[0]);
+        d_entries: list = [];
+        for entry in item[1] {
+            e_id = _decode(entry[0]);
+            d_fields: dict = {};
+            for k in entry[1] {
+                d_fields[_decode(k)] = _decode(entry[1][k]);
+            }
+            d_entries.append((e_id, d_fields));
+        }
+        decoded.append((s_name, d_entries));
+    }
+    return decoded;
+}
+
+impl Db.xrange(stream: str, min_id: str = "-", max_id: str = "+", count: int = 100) -> list {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("xrange() is Redis-only. Streams are not supported on MongoDB.");
+    }
+    raw = self.client.xrange(stream, min=min_id, max=max_id, count=count);
+    decoded: list = [];
+    for entry in raw {
+        e_id = _decode(entry[0]);
+        d_fields: dict = {};
+        for k in entry[1] {
+            d_fields[_decode(k)] = _decode(entry[1][k]);
+        }
+        decoded.append((e_id, d_fields));
+    }
+    return decoded;
+}
+
+impl Db.xtrim(stream: str, maxlen: int, approximate: bool = True) -> int {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("xtrim() is Redis-only. Streams are not supported on MongoDB.");
+    }
+    return self.client.xtrim(stream, maxlen=maxlen, approximate=approximate);
+}
+
+impl Db.xlen(stream: str) -> int {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("xlen() is Redis-only. Streams are not supported on MongoDB.");
+    }
+    return self.client.xlen(stream);
+}
+
+impl Db.xdel_stream(stream: str) -> bool {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("xdel_stream() is Redis-only. Streams are not supported on MongoDB.");
+    }
+    return self.client.delete(stream) > 0;
+}
+
+# ===== REDIS LISTS =====
+
+impl Db.lpush(key: str, value: str) -> int {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("lpush() is Redis-only. Lists are not supported on MongoDB.");
+    }
+    return self.client.lpush(key, value);
+}
+
+impl Db.brpop(keys: list, timeout: int = 0) -> tuple | None {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("brpop() is Redis-only. Lists are not supported on MongoDB.");
+    }
+    result = self.client.brpop(keys, timeout=timeout);
+    if result is None {
+        return None;
+    }
+    return (_decode(result[0]), _decode(result[1]));
+}
+
+impl Db.llen(key: str) -> int {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("llen() is Redis-only. Lists are not supported on MongoDB.");
+    }
+    return self.client.llen(key);
+}
+
+# ===== REDIS DISTRIBUTED LOCKS =====
+
+impl Db.acquire_lock(key: str, value: str, ttl: int = 30) -> bool {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("acquire_lock() is Redis-only.");
+    }
+    result = self.client.set(key, value, nx=True, ex=ttl);
+    return result is True;
+}
+
+impl Db.release_lock(key: str, value: str) -> bool {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("release_lock() is Redis-only.");
+    }
+    result = self.client.eval(_RELEASE_LOCK_LUA, 1, key, value);
+    return int(result) == 1;
+}
+
+impl Db.refresh_lock(key: str, value: str, ttl: int = 30) -> bool {
+    if self.db_type != DatabaseType.REDIS {
+        raise NotImplementedError("refresh_lock() is Redis-only.");
+    }
+    result = self.client.eval(_REFRESH_LOCK_LUA, 1, key, value, str(ttl));
+    return int(result) == 1;
+}
+
+# ===== UTILITY =====
+
 impl Db.find_nodes(
     node_type: str, filter: dict = {}, col_name: str = '_anchors'
 ) -> list {

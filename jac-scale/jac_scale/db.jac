@@ -219,4 +219,54 @@ obj Db {
     def find_nodes(
         node_type: str, filter: dict = {}, col_name: str = '_anchors'
     ) -> list;
+
+    # ===== REDIS STREAMS (cross-service event delivery) =====
+    # Keys are raw (no namespace) — shared between independent services.
+
+    """Append fields to a Redis Stream. Returns entry ID (e.g. '1713100000-0')."""
+    def xadd(stream: str, fields: dict, maxlen: int = 0, approximate: bool = True) -> str;
+
+    """Blocking read from one or more streams.
+    streams: {stream_name: last_seen_id} — use '0-0' to read from start.
+    Returns list of (stream_name, [(entry_id, fields_dict), ...])."""
+    def xread(streams: dict, count: int = 100, block: int = 0) -> list;
+
+    """Read entries in an ID range from a stream."""
+    def xrange(stream: str, min_id: str = "-", max_id: str = "+", count: int = 100) -> list;
+
+    """Trim stream to maxlen entries. Returns number of entries removed."""
+    def xtrim(stream: str, maxlen: int, approximate: bool = True) -> int;
+
+    """Get number of entries in a stream."""
+    def xlen(stream: str) -> int;
+
+    """Delete an entire stream key."""
+    def xdel_stream(stream: str) -> bool;
+
+    # ===== REDIS LISTS (cross-service job queue) =====
+
+    """Push value to head of list. Returns new list length."""
+    def lpush(key: str, value: str) -> int;
+
+    """Blocking pop from tail of one or more lists.
+    Returns (key, value) tuple or None on timeout."""
+    def brpop(keys: list, timeout: int = 0) -> tuple | None;
+
+    """Get list length."""
+    def llen(key: str) -> int;
+
+    # ===== REDIS DISTRIBUTED LOCKS =====
+
+    """Acquire a distributed lock (SET key value NX EX ttl).
+    value should be a unique owner ID (e.g. worker UUID).
+    Returns True if lock was acquired."""
+    def acquire_lock(key: str, value: str, ttl: int = 30) -> bool;
+
+    """Release a distributed lock atomically.
+    Only releases if current value matches (prevents releasing another owner's lock).
+    Returns True if lock was released."""
+    def release_lock(key: str, value: str) -> bool;
+
+    """Refresh lock TTL without releasing. Returns True if refreshed."""
+    def refresh_lock(key: str, value: str, ttl: int = 30) -> bool;
 }
