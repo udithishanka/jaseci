@@ -2,612 +2,332 @@
 
 ## Overview
 
-**Microservice Mode** is a jac-scale feature that, when enabled via `jac.toml`, allows the user to **explicitly declare** which Jac files should run as independent microservice backends. Only files the user designates become services — everything else remains regular Jac code (shared modules, libraries, etc.). An API gateway process fronts the declared services, and any jac-client UI is pre-built as static assets and served from the gateway.
+Jac apps split into microservices through **two layers**:
+
+1. **Core (`sv import`)** — language-level RPC. The compiler detects
+   `sv import from X { func }` and rewrites calls into HTTP stubs.
+   Lives in `jaclang/runtimelib/sv_client.py`.
+
+2. **jac-scale microservices module** — production infrastructure on top:
+   API gateway, subprocess lifecycle, CLI tooling, deployment abstraction,
+   static/admin serving.
+
+The core handles **service-to-service** RPC. jac-scale handles
+**client-to-service** routing, lifecycle management, and operability.
 
 ```
-                    ┌──────────────────────────────────────────────┐
-                    │               API Gateway                    │
-                    │  (single FastAPI process)                    │
-                    │                                              │
-    HTTP ──────────►│  /api/orders/*  ──► Orders Service (proc)   │
-    requests        │  /api/users/*   ──► Users Service (proc)    │
-                    │  /api/payments/*──► Payments Service (proc)  │
-                    │                                              │
-                    │  /*  ──► Static client assets (SPA)          │
-                    └──────────────────────────────────────────────┘
+                  ┌────────────────────────────────────────────┐
+                  │             API Gateway (jac-scale)        │
+                  │                                            │
+   Client ───────►│  /api/orders/*   ──► Orders subprocess     │
+   (browser,      │  /api/payments/* ──► Payments subprocess   │
+    curl, app)    │  /admin/         ──► Admin UI              │
+                  │  /                ──► Static SPA            │
+                  └────────────────────────────────────────────┘
+                                │
+                                │ Reads service URLs from
+                                ▼
+                  sv_client._registry  (managed by core)
+                                ▲
+                                │ Populated by ensure_sv_service
+                                │ (core or jac-scale override)
 
-    Non-service files (shared/models.jac, utils.jac, etc.) are NOT
-    launched as services — they are imported by services as needed.
-```
-
-### Design Principles
-
-1. **Off by default** — microservice mode is disabled until the user explicitly enables it via `jac setup microservice` or manual TOML config
-2. **Explicit declaration** — only files the user marks in `jac.toml` become services; no auto-discovery magic
-3. **Local = subprocesses, K8s = pods** — `jac start` runs services as local subprocesses; `jac start --scale` deploys each service as a separate K8s pod
-4. **Shared auth, shared DB** — JWT, MongoDB, Redis are gateway-level; services inherit credentials
-5. **HTTP-based inter-service communication** — services talk to each other via HTTP with token propagation
-6. **Separate module** — `jac_scale/microservices/` is fully independent from `providers/proxy/sandbox_proxy.jac`; they share only a tiny HTTP forwarding utility
-7. **Existing patterns reused** — builds on `ModuleIntrospector`, `JFastApiServer`, sandbox proxy patterns
-
----
-
-## Setup: `jac setup microservice`
-
-Microservice mode is **off by default**. Users enable it via an interactive CLI command that scaffolds the TOML configuration:
-
-```bash
-$ jac setup microservice
-```
-
-### What it does
-
-1. **Checks for `jac.toml`** — creates one if it doesn't exist
-2. **Prompts the user to select which `.jac` files should be services:**
-   ```
-   Scanning project...
-
-   Found .jac files:
-     1. services/orders.jac
-     2. services/users.jac
-     3. services/payments.jac
-     4. shared/models.jac
-     5. utils.jac
-     6. client/main.jac
-
-   Select files to run as microservices (comma-separated numbers): 1, 2, 3
-   ```
-3. **Prompts for optional client entry:**
-   ```
-   Client UI entry point (leave blank for none): client/main.jac
-   ```
-4. **Writes the `[plugins.scale.microservices]` section to `jac.toml`:**
-   ```
-   Added microservice config to jac.toml:
-     - orders  → /api/orders  (services/orders.jac)
-     - users   → /api/users   (services/users.jac)
-     - payments → /api/payments (services/payments.jac)
-     - client  → client/main.jac
-
-   Run `jac start app.jac` to launch locally.
-   Run `jac start app.jac --scale` to deploy to Kubernetes.
-   ```
-
-### Generated TOML
-
-The command produces:
-
-```toml
-[plugins.scale.microservices]
-enabled = true                       # set to false to disable without removing config
-
-# Gateway settings
-gateway_port = 8000
-gateway_host = "0.0.0.0"
-```
-
-### Adding/Removing Services Later
-
-```bash
-# Add a new service to existing config
-$ jac setup microservice --add services/notifications.jac
-
-# Remove a service
-$ jac setup microservice --remove notifications
-
-# List current services
-$ jac setup microservice --list
+   Internal RPC (compiler-generated by `sv import`):
+       Orders subprocess ─sv_client.call("payments", "charge")─► Payments
 ```
 
 ---
 
-## TOML Configuration (Reference)
+## Two-Layer Stack
 
-The full configuration schema (generated by `jac setup microservice` or written manually):
+### Layer 1: `sv import` (already on main)
 
-```toml
-[plugins.scale.microservices]
-enabled = false                      # off by default — enable via `jac setup microservice`
+What it provides:
+- **Compiler pass** — `InteropAnalysisPass` detects `sv import` and generates
+  HTTP client stubs that call `sv_client.call(module, func, args)`.
+- **`sv_client._registry`** — global dict mapping module names to service URLs.
+- **`ensure_sv_service` hook** — called on first `sv_client.call` for an
+  unregistered module. Default impl spawns the provider as a thread in the
+  same process.
+- **`JAC_SV_<MODULE>_URL` env var** — explicit URL override, takes precedence
+  over auto-spawn.
+- **`_ensure_sv_siblings()`** in `serve.core.impl.jac` — at server startup,
+  walks compile-time recorded providers and spawns them eagerly.
 
-# Gateway settings
-gateway_port = 8000                  # external-facing port
-gateway_host = "0.0.0.0"
+Limits of the core layer:
+- Spawns providers as **threads** (not subprocesses) — fine for dev, not
+  production.
+- No client-facing routing — every service is its own public endpoint.
+- No lifecycle management (stop/restart/logs).
+- No central auth, static serving, admin UI.
 
-# Only explicitly listed files become services.
-# Files NOT listed here remain regular Jac modules (importable, not served).
+### Layer 2: jac-scale microservices module
 
-[plugins.scale.microservices.services.orders]
-file = "services/orders.jac"         # path to jac file (relative to project root)
-port = 0                             # 0 = auto-assign from pool (8001+)
-prefix = "/api/orders"               # route prefix (default: /api/{service_name})
-replicas = 1                         # local: ignored, k8s: pod replicas
-env = { STRIPE_KEY = "${STRIPE_KEY}" }
+What it adds:
 
-[plugins.scale.microservices.services.users]
-file = "services/users.jac"
-prefix = "/api/users"
-
-[plugins.scale.microservices.services.payments]
-file = "services/payments.jac"
-prefix = "/api/payments"
-
-# Client build settings (optional — omit entire section if no UI)
-[plugins.scale.microservices.client]
-entry = "client/main.jac"            # jac-client entry point
-dist_dir = ".jac/client/dist"        # build output location
-base_route = "/"                     # SPA base route
-```
-
-### What Is and Isn't a Service
-
-```
-my-app/
-├── jac.toml
-├── services/
-│   ├── orders.jac       ← listed in toml → BECOMES A SERVICE
-│   ├── users.jac        ← listed in toml → BECOMES A SERVICE
-│   └── payments.jac     ← listed in toml → BECOMES A SERVICE
-├── shared/
-│   ├── models.jac       ← NOT listed     → regular module, imported by services
-│   └── validators.jac   ← NOT listed     → regular module, imported by services
-├── utils.jac            ← NOT listed     → regular module
-└── client/
-    └── main.jac         ← UI entry       → built as static SPA
-```
-
-Only the three files under `[plugins.scale.microservices.services.*]` get their own process and HTTP endpoint prefix. Everything else is just code that services can `import`.
-
----
-
-## Architecture Components
-
-### 1. Service Registry
-
-A runtime data structure maintained by the gateway that tracks all managed services.
-
-```
-ServiceRegistry
-├── register(name, file, prefix, port, pid)
-├── deregister(name)
-├── get_route(path) → ServiceEntry | None
-├── health_check() → dict[str, ServiceHealth]
-└── entries: dict[str, ServiceEntry]
-
-ServiceEntry
-├── name: str              # "orders"
-├── file: str              # "services/orders.jac"
-├── prefix: str            # "/api/orders"
-├── port: int              # 8001
-├── pid: int | None        # subprocess PID (local mode)
-├── url: str               # "http://127.0.0.1:8001" (local) or k8s service URL
-├── status: ServiceStatus  # STARTING | HEALTHY | UNHEALTHY | STOPPED
-└── last_health: datetime
-```
-
-**Location:** `jac_scale/microservices/registry.jac`
-
-### 2. Gateway Process
-
-The gateway is a FastAPI application that:
-
-- Accepts all inbound HTTP traffic on `gateway_port`
-- Matches request paths against registered service prefixes (longest-prefix match)
-- Proxies matched requests to the target service (strip prefix, forward)
-- Serves static client assets for unmatched routes (SPA fallback)
-- Hosts shared endpoints: `/health`, `/auth/*`, `/admin/*`, `/metrics`
-
-**Key behavior:**
-- Path `/api/orders/list` → proxy to `http://127.0.0.1:8001/walker/list`
-- Path `/api/orders/walker/list` → proxy to `http://127.0.0.1:8001/walker/list`
-- Path `/dashboard` → serve `index.html` from client dist (SPA)
-- Path `/static/app.js` → serve from client dist
-
-The gateway reuses the existing `sandbox_proxy.jac` pattern (aiohttp-based request forwarding) but operates at the path level instead of hostname level.
-
-**Location:** `jac_scale/microservices/gateway.jac`
-
-### 3. Service Process Manager (Local Mode)
-
-Manages the lifecycle of service subprocesses when running locally (without `--scale`).
-
-```
-ServiceProcessManager
-├── start_all(registry) → None
-├── start_service(entry) → pid
-├── stop_service(name) → None
-├── stop_all() → None
-├── restart_service(name) → None
-├── watch_health() → async loop     # periodic health checks, auto-restart
-└── processes: dict[str, Process]
-```
-
-Each service is started as a subprocess:
-```bash
-jac start services/orders.jac --port 8001 --no-client
-```
-
-This reuses the existing `jac start` machinery — each subprocess is a full `JacAPIServer` instance with its own `ModuleIntrospector`. The `--no-client` flag skips client build since the gateway serves static assets.
-
-**When `--scale` is used**, the process manager is NOT involved. Instead, each service is deployed as a separate K8s Deployment/Pod via the existing `KubernetesTarget` (see Phase 5).
-
-**Location:** `jac_scale/microservices/process_manager.jac`
-
-### 4. Client Builder
-
-Pre-builds the jac-client UI and places output in a known directory for the gateway to serve.
-
-```
-ClientBuilder
-├── build(entry_file, dist_dir) → None
-├── is_built(dist_dir) → bool
-└── watch(entry_file, dist_dir) → async loop   # dev mode: rebuild on change
-```
-
-Build step:
-1. Run `jac build client/main.jac` (existing jac-client build)
-2. Output lands in `.jac/client/dist/`
-3. Gateway's static file handler serves from this directory
-
-In dev mode, the client builder watches for changes and triggers rebuilds (integrating with the existing HMR path).
-
-**Location:** `jac_scale/microservices/client_builder.jac`
+| Component | Purpose | Status |
+|-----------|---------|--------|
+| `MicroserviceGateway` | Single client-facing port (`/api/{svc}/*`), static, admin, passthrough | ✅ PR 1 (`feat/ms-gateway`) |
+| `ServiceDeployer` interface | Abstract lifecycle (deploy/stop/restart/status/logs) | 📋 PR 2 |
+| `LocalDeployer` | Subprocess-based impl (replaces core's thread-based spawning) | 📋 PR 2 |
+| `Orchestrator` + plugin pre-hook | Auto-launch on `jac start` when `microservices.enabled` | 📋 PR 3 |
+| `ensure_sv_service` override | Production subprocess spawning instead of threads | 📋 PR 3 |
+| `sv_client.call` override | Auth propagation, retry, circuit breaker, tracing | 📋 PR 4 |
+| `jac scale` CLI | `status`, `stop`, `restart`, `logs`, `destroy` | 📋 PR 5 |
+| `jac setup microservice` | Interactive TOML setup | 📋 PR 5 |
+| `KubernetesDeployer` | K8s impl of `ServiceDeployer` | 📋 PR 14 |
 
 ---
 
 ## Request Flow
 
-### API Request
+### Client request through gateway
 
 ```
-Client                Gateway (:8000)              Orders Service (:8001)
-  │                       │                              │
-  │  GET /api/orders/list │                              │
-  │──────────────────────►│                              │
-  │                       │  match prefix /api/orders    │
-  │                       │  strip prefix → /list        │
-  │                       │  GET /walker/list             │
-  │                       │─────────────────────────────►│
-  │                       │                              │  execute walker
-  │                       │         200 {orders: [...]}  │
-  │                       │◄─────────────────────────────│
-  │    200 {orders: [...]}│                              │
-  │◄──────────────────────│                              │
+Browser / curl
+     │
+     │  POST /api/orders/walker/place_order
+     ▼
+Gateway (FastAPI middleware on :8000)
+     │
+     │  1. Look up "orders" → http://127.0.0.1:18342  (from sv_client._registry)
+     │  2. Strip /api/orders prefix → /walker/place_order
+     │  3. Forward HTTP request via aiohttp
+     ▼
+Orders subprocess (jac-scale server on :18342)
+     │
+     │  Walker executes
+     ▼
+Response flows back through gateway to client
 ```
 
-### Static Asset Request
+### Inter-service RPC via `sv import`
 
 ```
-Client                Gateway (:8000)
-  │                       │
-  │  GET /dashboard       │
-  │──────────────────────►│
-  │                       │  no prefix match
-  │                       │  serve .jac/client/dist/index.html (SPA fallback)
-  │    200 <html>...</html>│
-  │◄──────────────────────│
+Orders walker code:
+   sv import from payments { charge }
+   result = charge(order_id, amount)
+                  │
+                  │  Compiler-generated stub:
+                  │  sv_client.call("payments", "charge", [order_id, amount])
+                  ▼
+   sv_client looks up "payments" in _registry
+                  │
+                  │  Direct HTTP call (no gateway hop):
+                  │  POST http://127.0.0.1:18888/function/charge
+                  ▼
+   Payments subprocess executes, returns result
 ```
 
-### Auth Flow (Shared)
-
-```
-Client                Gateway (:8000)              Any Service
-  │                       │                            │
-  │  POST /auth/login     │                            │
-  │──────────────────────►│                            │
-  │                       │  gateway handles auth      │
-  │    200 {token: "..."}  │                            │
-  │◄──────────────────────│                            │
-  │                       │                            │
-  │  GET /api/orders/list │                            │
-  │  Authorization: Bearer│                            │
-  │──────────────────────►│                            │
-  │                       │  validate JWT              │
-  │                       │  inject X-User-Id header   │
-  │                       │  GET /walker/list          │
-  │                       │─────────────────────────► │
-  │                       │                   200 OK   │
-  │                       │◄──────────────────────────│
-  │                  200  │                            │
-  │◄──────────────────────│                            │
-```
+Notes:
+- Inter-service calls bypass the gateway by default (direct `sv_client` call).
+- PR 4 will add auth propagation + retry to `sv_client.call`.
+- The gateway is for **client-facing** traffic, not internal RPC.
 
 ---
 
-## Implementation Plan
+## How Services Are Identified
 
-### Phase 0: Setup CLI
+### On `main` today (core only)
 
-| # | Task | Files | Depends On |
-|---|------|-------|------------|
-| 0a | `jac setup microservice` command — scan project, interactive file selection, write TOML | `microservices/setup.jac`, `plugin.jac` | — |
-| 0b | `--add`, `--remove`, `--list` flags for incremental config changes | `microservices/setup.jac` | 0a |
-
-### Phase 1: Core Infrastructure
-
-| # | Task | Files | Depends On |
-|---|------|-------|------------|
-| 1 | Add `microservices` section to config schema (`enabled = false` default) | `plugin_config.jac` | — |
-| 2 | Create `ServiceEntry` and `ServiceRegistry` | `microservices/registry.jac` | — |
-| 3 | Create `ServiceProcessManager` (start/stop/health) | `microservices/process_manager.jac` | 2 |
-| 4 | Create gateway with path-based proxy (reuse sandbox_proxy pattern) | `microservices/gateway.jac` | 2 |
-| 5 | Static asset serving in gateway (reuse `serve.static.impl.jac` pattern) | `microservices/gateway.jac` | 4 |
-| 6 | Wire into plugin.jac — detect `microservices.enabled`, launch gateway instead of single server | `plugin.jac` | 3, 4 |
-
-### Phase 2: Auth and Shared Services
-
-| # | Task | Files | Depends On |
-|---|------|-------|------------|
-| 7 | Gateway-level JWT validation + `X-User-Id` / `X-User-Email` header injection | `microservices/gateway.jac` | 4 |
-| 8 | Auth endpoints on gateway (`/auth/login`, `/auth/register`, `/auth/refresh`) | `microservices/gateway.jac` | 7 |
-| 9 | Service-side middleware: trust gateway headers, skip re-auth | New mixin or config flag | 7 |
-
-### Phase 3: Client Build Integration
-
-| # | Task | Files | Depends On |
-|---|------|-------|------------|
-| 10 | `ClientBuilder` — pre-build jac-client UI | `microservices/client_builder.jac` | — |
-| 11 | SPA fallback routing in gateway | `microservices/gateway.jac` | 5, 10 |
-| 12 | Dev mode: file watcher + HMR rebuild trigger | `microservices/client_builder.jac` | 10 |
-
-### Phase 4: Developer Experience
-
-| # | Task | Files | Depends On |
-|---|------|-------|------------|
-| 13 | `service_call()` helper for inter-service HTTP calls with token propagation | `microservices/client.jac` | 7 |
-| 14 | CLI: `jac start app.jac --microservices` flag | `plugin.jac` | 6 |
-| 15 | Startup banner: list all services, ports, prefixes | `microservices/gateway.jac` | 6 |
-| 16 | `jac status` shows per-service health in microservice mode | `plugin.jac` | 3 |
-| 17 | Admin dashboard: service health panel | `admin/` | 3 |
-
-### Phase 5: Kubernetes Deployment
-
-| # | Task | Files | Depends On |
-|---|------|-------|------------|
-| 18 | K8s manifests: one Deployment per service + gateway Deployment | `targets/kubernetes/` | 6 |
-| 19 | K8s Service + Ingress per microservice | `targets/kubernetes/` | 18 |
-| 20 | Shared MongoDB/Redis across services (existing pattern) | `targets/kubernetes/` | 18 |
-| 21 | `jac start app.jac --scale --microservices` deploys all | `plugin.jac` | 18 |
-
----
-
-## File Structure
-
-The microservice module is **completely separate** from the sandbox/proxy system. They share no code and no runtime state. The only shared primitive is HTTP forwarding, which is extracted into a tiny utility.
-
-```
-jac_scale/
-├── microservices/                    # NEW — self-contained module
-│   ├── __init__.jac
-│   ├── setup.jac                    # `jac setup microservice` CLI command
-│   ├── registry.jac                 # ServiceEntry, ServiceRegistry
-│   ├── gateway.jac                  # API Gateway (FastAPI + path-based proxy)
-│   ├── process_manager.jac          # Subprocess lifecycle (local mode only)
-│   ├── client_builder.jac           # jac-client build orchestration
-│   ├── client.jac                   # service_call() — inter-service HTTP + token propagation
-│   └── impl/
-│       ├── setup.impl.jac
-│       ├── registry.impl.jac
-│       ├── gateway.impl.jac
-│       ├── process_manager.impl.jac
-│       ├── client_builder.impl.jac
-│       └── client.impl.jac
-│
-├── providers/
-│   └── proxy/
-│       └── sandbox_proxy.jac        # UNCHANGED — hostname-based proxy for sandboxes
-│
-├── utils/
-│   └── http_proxy.jac               # SHARED — tiny HTTP forwarding utility
-│                                    #   used by both gateway.jac and sandbox_proxy.jac
-│
-├── ... (all other existing files unchanged)
-```
-
-### Why Separate from Sandbox?
-
-| | Sandbox Proxy | Microservice Gateway |
-|---|---|---|
-| **Routing** | Hostname-based (`{id}.preview.example.com`) | Path-based (`/api/orders/*`) |
-| **Framework** | Standalone aiohttp app | FastAPI (needs auth, admin, static serving) |
-| **Discovery** | K8s pod watch (dynamic) | TOML config (static, user-declared) |
-| **Lifecycle** | Ephemeral, TTL-based auto-cleanup | Permanent, user-managed |
-| **Purpose** | Preview environments | Production service decomposition |
-
-The only overlap is the HTTP forwarding primitive (~20 lines: read request, proxy to target, return response). This is extracted into `utils/http_proxy.jac` so both modules can use it without depending on each other.
-
----
-
-## Inter-Service Communication
-
-Services communicate with each other **over HTTP**, with automatic **token propagation** so that identity and authorization flow across service boundaries.
-
-### How It Works
-
-When Service A needs to call Service B:
-
-1. The incoming request to Service A carries a JWT (validated by the gateway)
-2. The gateway injects `X-Internal-Token` — a short-lived, gateway-signed service token
-3. Service A calls Service B via the gateway, forwarding the token
-4. The gateway validates the token and proxies to Service B with identity headers
-
-```
-Client          Gateway (:8000)         Orders (:8001)        Payments (:8002)
-  │                  │                       │                      │
-  │ POST /api/orders │                       │                      │
-  │ Auth: Bearer USR │                       │                      │
-  │─────────────────►│                       │                      │
-  │                  │ validate USR token     │                      │
-  │                  │ inject X-User-Id       │                      │
-  │                  │ inject X-Internal-Token │                      │
-  │                  │ POST /walker/create    │                      │
-  │                  │──────────────────────►│                      │
-  │                  │                       │ needs to charge...   │
-  │                  │                       │                      │
-  │                  │    POST /api/payments/charge                 │
-  │                  │    X-Internal-Token: SVC_TOKEN               │
-  │                  │◄──────────────────────│                      │
-  │                  │ validate SVC_TOKEN     │                      │
-  │                  │ POST /walker/charge    │                      │
-  │                  │─────────────────────────────────────────────►│
-  │                  │                       │          200 {ok}    │
-  │                  │◄────────────────────────────────────────────│
-  │                  │ forward response      │                      │
-  │                  │──────────────────────►│                      │
-  │                  │                       │ complete order       │
-  │                  │         200 {order}   │                      │
-  │                  │◄──────────────────────│                      │
-  │   200 {order}    │                       │                      │
-  │◄─────────────────│                       │                      │
-```
-
-### Token Types
-
-| Token | Issuer | Purpose | Lifetime |
-|-------|--------|---------|----------|
-| **User JWT** | Gateway (on login) | Client-to-gateway auth | Days (configurable) |
-| **Internal Service Token** | Gateway (per-request) | Service-to-service auth via gateway | Seconds (short-lived, single-hop) |
-
-### Service-Side API
-
-Services use a built-in HTTP client that automatically handles token propagation:
+A service is **any `.jac` module imported with `sv import`**. The compiler
+discovers them at compile time, no config required:
 
 ```jac
-# In orders.jac — calling the payments service
-import from jac_scale.microservices.client { service_call }
-
-walker create_order {
-    can process with entry {
-        # service_call() routes through the gateway and forwards
-        # the current request's internal token automatically.
-        charge_result = service_call(
-            service="payments",          # service name from toml
-            endpoint="/charge",          # walker/function path on target service
-            method="POST",
-            body={"amount": 99.99, "currency": "USD"}
-        );
-
-        if charge_result.status == 200 {
-            # order created successfully
-            report {"order": "confirmed", "charge": charge_result.json()};
-        }
-    }
-}
+sv import from payments { charge }   # payments is now a service
 ```
 
-`service_call()` resolves the service name → gateway URL + prefix, attaches the internal token from the current request context, and makes the HTTP call. This keeps inter-service calls simple and auth-transparent.
+`def:pub` and `walker:pub` declarations in the imported module become
+`/function/<name>` and `/walker/<name>` endpoints.
 
-### Why Via Gateway (Not Direct)
+### With jac-scale microservice mode
 
-- **Single auth boundary** — gateway validates all tokens, services don't need auth logic
-- **Consistent routing** — same prefix rules apply whether the caller is a client or another service
-- **Observability** — all inter-service traffic flows through one point, easy to log/meter
-- **No service discovery needed** — services only know the gateway URL, not each other's ports
-- **K8s parity** — in production, gateway is a K8s Service; same pattern works locally and in-cluster
-
-### Direct Mode (Opt-in, Future)
-
-For latency-sensitive paths, a future enhancement can allow direct service-to-service calls:
+Same — `sv import` is the only way to mark something as a service. The
+gateway just maps prefixes to service modules:
 
 ```toml
-[plugins.scale.microservices]
-direct_communication = true   # inject SERVICE_URLS env vars
-```
-
-Each service would get `SERVICE_PAYMENTS_URL=http://127.0.0.1:8002` etc. This bypasses the gateway hop but requires each service to validate tokens independently. **Not in initial implementation.**
-
----
-
-## Local (`jac start`) vs Kubernetes (`jac start --scale`)
-
-| Aspect | `jac start` (local) | `jac start --scale` (K8s) |
-|--------|---------------------|---------------------------|
-| Service isolation | Subprocess per service | K8s Pod per service |
-| Gateway | Single FastAPI process on `gateway_port` | Gateway Deployment + K8s Ingress |
-| Service discovery | `127.0.0.1:{auto_port}` | K8s Service DNS (`orders.default.svc.cluster.local`) |
-| Client assets | Dev server with HMR | Pre-built static in gateway container image |
-| Health checks | HTTP `/health` polling by process manager | K8s liveness/readiness probes |
-| Scaling | Single instance per service | HPA per service (`replicas` from TOML) |
-| Database | Shared local MongoDB/Redis | Shared StatefulSet (existing pattern) |
-| Managed by | `ServiceProcessManager` (subprocess lifecycle) | `KubernetesTarget` (Deployments, Services, Ingress) |
-
----
-
-## Example Project Layout
-
-```
-my-app/
-├── jac.toml
-├── services/
-│   ├── orders.jac         # declared as service → /api/orders/*
-│   ├── users.jac          # declared as service → /api/users/*
-│   └── payments.jac       # declared as service → /api/payments/*
-├── shared/
-│   ├── models.jac         # NOT a service — imported by orders.jac, users.jac, etc.
-│   └── validators.jac     # NOT a service — shared validation logic
-├── client/
-│   └── main.jac           # jac-client entry → built to .jac/client/dist/
-└── utils.jac              # NOT a service — helper functions
-```
-
-```toml
-# jac.toml
 [plugins.scale.microservices]
 enabled = true
+gateway_port = 8000
 
-[plugins.scale.microservices.services.orders]
-file = "services/orders.jac"
-
-[plugins.scale.microservices.services.users]
-file = "services/users.jac"
-
-[plugins.scale.microservices.services.payments]
-file = "services/payments.jac"
-
-[plugins.scale.microservices.client]
-entry = "client/main.jac"
+[plugins.scale.microservices.routes]
+payments = "/api/payments"      # route prefix → module name
+inventory = "/api/inventory"
 ```
+
+Anything not in `routes` is still a service if `sv import`ed somewhere — it
+just doesn't get a public client-facing URL through the gateway.
 
 ---
 
 ## Key Design Decisions
 
-### Why subprocess-per-service locally, pods on K8s?
+### Why a layered approach?
 
-- **Isolation**: a crash in one service doesn't take down others (locally or in K8s)
-- **Independent reloads**: HMR can restart one service subprocess without affecting the rest
-- **Memory isolation**: each service has its own `ModuleIntrospector` — no walker/function name collisions
-- **1:1 mapping**: local subprocess = K8s pod — same architecture, no behavioral surprises when deploying
-- **Existing code reuse**: each subprocess is just `jac start <file> --port N --no-client`, no changes to core serving logic; `--scale` reuses `KubernetesTarget` to deploy each service as a Deployment
+`sv import` solves the **language problem** (RPC that looks like a
+function call). It doesn't solve operational problems:
+- How does a browser reach my services? (gateway)
+- How do I stop/restart one service? (deployer)
+- Where does auth flow from a client through services? (gateway + sv_call override)
+- How do I deploy to K8s? (KubernetesDeployer with same interface)
 
-### Why gateway-level auth (not per-service)?
+These are infra concerns, not language concerns. Splitting them keeps `sv
+import` simple and lets jac-scale evolve the operational layer
+independently.
 
-- Single point of JWT validation — services don't need auth config
-- Token refresh, SSO, and user management live in one place
-- Services receive pre-validated identity via headers
-- Matches the existing `JacAPIServerCore` auth pattern — gateway reuses it directly
+### Why subprocesses (jac-scale) instead of threads (core default)?
 
-### Why path-based routing (not hostname-based)?
+- **Crash isolation** — a service crash doesn't take the others down.
+- **Independent restart** — kill and respawn one service.
+- **Independent logging** — separate log files per service.
+- **Production parity** — local subprocesses ≈ K8s pods.
 
-- Simpler for local dev — no DNS/hosts file editing
-- Single origin for the SPA — no CORS complexity
-- Hostname-based is already used by sandbox proxy — path-based is complementary
-- K8s Ingress supports both; path-based needs only one Ingress resource
+PR 3's `ensure_sv_service` override replaces core's thread-based spawning
+with subprocess + `JFastApiServer` for production hardness.
+
+### Why a gateway when `sv import` already routes?
+
+`sv import` routes **service-to-service** (one process calls another).
+The gateway routes **client-to-service** (browser/curl calls a service).
+
+Without the gateway, every service must be its own public endpoint with
+its own auth, CORS, port forwarding, TLS. That doesn't scale. The gateway
+collapses N public endpoints into one.
+
+### Why not require config for services?
+
+Services are discovered by the compiler from `sv import` — no TOML
+required. The TOML only configures **which services get public routes**
+(via the gateway) and **deployment knobs** (per-service replicas, env vars,
+etc.). The compiler is the source of truth for "what's a service".
+
+### `sv_client._registry` is the single source of truth
+
+All components read service URLs from one place:
+- The compiler-generated stub looks up URLs there.
+- The gateway reads URLs there to route `/api/{svc}/*`.
+- The deployer writes URLs there after spawning.
+- `JAC_SV_<MODULE>_URL` env var pre-populates it.
+
+This decouples the gateway from how services are spawned. Whether they're
+in-process threads, local subprocesses, or K8s pods — the gateway sees the
+same registry.
 
 ---
 
-## Interaction with Existing Features
+## File Layout (after all PRs land)
 
-| Feature | Behavior in Microservice Mode |
-|---------|------------------------------|
-| `jac setup microservice` | Interactive CLI — selects files, writes TOML config, enables the mode |
-| `jac start app.jac` | If `microservices.enabled = true`, launches gateway + service subprocesses locally |
-| `jac start app.jac --scale` | Deploys gateway + each service as separate K8s Deployments/Pods |
-| `jac start app.jac` (no microservices) | Default behavior unchanged — single monolith server |
-| Admin dashboard | Hosted on gateway, gains service health panel |
-| Monitoring/metrics | Gateway aggregates metrics from all services |
-| Sandbox/preview | Each sandbox gets its own gateway + services set |
-| SSO | Handled by gateway, services receive identity headers |
-| Webhooks | Routed through gateway to the target service |
-| WebSockets | Gateway proxies WS connections to target service (existing pattern from sandbox_proxy) |
-| HMR (dev mode) | Per-service file watching and subprocess restart |
-| Scheduler | Runs on gateway; can dispatch jobs to specific services |
+```
+jac-scale/
+├── jac_scale/
+│   ├── microservices/
+│   │   ├── __init__.py
+│   │   ├── gateway.jac + impl/             # PR 1
+│   │   ├── impl/http_forward.py            # PR 1
+│   │   ├── deployer.jac + impl/            # PR 2 (interface)
+│   │   ├── local_deployer.jac + impl/      # PR 2
+│   │   ├── orchestrator.jac + impl/        # PR 3
+│   │   ├── sv_call.jac + impl/             # PR 4
+│   │   ├── setup.jac                       # PR 5 (jac setup microservice)
+│   │   └── kubernetes_deployer.jac + impl/ # PR 14
+│   ├── plugin.jac                          # PR 3 hooks, PR 5 CLI
+│   ├── plugin_config.jac                   # PR 1 schema
+│   └── tests/
+│       ├── test_ms_gateway.jac             # PR 1
+│       ├── test_deployer.jac               # PR 2
+│       ├── test_orchestrator.jac           # PR 3
+│       └── test_setup.jac                  # PR 5
+└── examples/
+    └── micr-s-example/                     # PR 6 (e-commerce)
+```
+
+---
+
+## Configuration
+
+```toml
+# jac.toml
+
+[plugins.scale.microservices]
+enabled = true                # opt in
+gateway_port = 8000
+gateway_host = "0.0.0.0"
+
+# Map module names → public route prefixes (gateway only)
+[plugins.scale.microservices.routes]
+payments = "/api/payments"
+inventory = "/api/inventory"
+
+# Optional client UI (served as static SPA from /)
+[plugins.scale.microservices.client]
+entry = "client/main.jac"
+dist_dir = ".jac/client/dist"
+```
+
+What is **not** in TOML:
+- ❌ Per-service file paths — compiler discovers them via `sv import`
+- ❌ Service-to-service auth — handled by `sv_client.call` override (PR 4)
+- ❌ Internal endpoints — services expose `def:pub` / `walker:pub` automatically
+
+---
+
+## Local Mode vs Kubernetes Mode
+
+| Concern | Local | Kubernetes |
+|---------|-------|------------|
+| Service spawning | Subprocesses on auto ports (`18000 + hash % 1000`) | Pods via Deployment manifests |
+| URL resolution | `http://127.0.0.1:18xxx` | `http://svc.namespace.svc.cluster.local:8000` |
+| Health checks | HTTP `/healthz` polling | K8s liveness/readiness probes |
+| Lifecycle | `LocalDeployer` (subprocess) | `KubernetesDeployer` (kubectl) |
+| Gateway | FastAPI middleware in main process | Same gateway, K8s Service in front |
+| Logs | Per-service log files | `kubectl logs` |
+| Scaling | 1 replica per service | HPA, configurable replicas |
+
+**Same interface** (`ServiceDeployer`) — only the deployer implementation
+changes. Switching modes is a config change, not a rewrite.
+
+---
+
+## Trust Boundary & Auth
+
+Currently:
+- Gateway validates user JWTs (PR 1 has built-in passthrough for `/user/*`).
+- Each service independently re-validates the token (default jac-scale auth).
+- `sv import` calls (service-to-service) carry no auth by default.
+
+After PR 4:
+- `sv_client.call` extracts the current request's `Authorization` header
+  from execution context and forwards it.
+- Internal calls inherit the user's identity transparently.
+- Services trust headers from peer services because they're co-located on
+  a private network (local: `127.0.0.1`; K8s: cluster-internal).
+
+External requests cross the gateway. Internal RPC stays internal. No
+public-facing service should accept calls from outside the cluster
+without going through the gateway.
+
+---
+
+## Observability (planned)
+
+- **Distributed tracing (PR 9)** — `X-Trace-Id` generated at the gateway,
+  forwarded through all hops.
+- **Metrics (PR 10)** — gateway tracks per-service request count, error
+  rate, latency.
+- **Logs (PR 13)** — per-service log files, colored console output.
+- **Admin (PR 12)** — unified Swagger at `/docs` showing all services'
+  endpoints.
+
+---
+
+## Open Questions
+
+See [PR_PLAN.md](../PR_PLAN.md) and [FOLLOWUPS.md](../FOLLOWUPS.md) for the
+full PR breakdown and open questions. Briefly:
+
+1. Add `sv_service_call` hookspec to core for clean `sv_client.call`
+   override, or monkey-patch?
+2. Does `sv import` work for `walker:pub`? Currently only `def:pub`.
+3. Eager (core) vs lazy spawn — keep both modes?
+4. Multi-process shelf DB locking?
+5. How much of TOML can we drop once `sv import` is universal?
