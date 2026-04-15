@@ -33,16 +33,21 @@ obj KubernetesSandbox(SandboxEnvironment) {
         _cleanup_started: bool = False;
 
     def _init_k8s -> None {
-        if self._k8s_initialized {
-            return;
-        }
-        import from kubernetes { config as k8s_config }
+        import from kubernetes { config as k8s_config, client as k8s_client }
         import from kubernetes.config { ConfigException }
+        # Always reload config to pick up rotated ServiceAccount tokens.
+        # EKS rotates projected tokens every 12-24h; caching the old token
+        # causes 401 Unauthorized on all K8s API calls after rotation.
         try {
             k8s_config.load_kube_config();
         } except ConfigException {
             k8s_config.load_incluster_config();
         }
+        # Force a fresh ApiClient so the new token is used by all
+        # subsequently created API objects (CoreV1Api, etc.)
+        k8s_client.Configuration.set_default(
+            k8s_client.ApiClient().configuration
+        );
         self._k8s_initialized = True;
     }
 
@@ -525,6 +530,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
     }
 
     def _claim_warm_pod(sandbox_id: str, user_id: str, project_id: str) -> (str | None) {
+        self._init_k8s();
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         namespace = self.config.namespace;
