@@ -4,6 +4,7 @@ This document provides a summary of new features, improvements, and bug fixes in
 
 ## byllm 0.6.4 (Unreleased)
 
+- **Fix: `ModelPool` streaming fallback infinite recursion**: Fixed a bug where `ModelPool` with `strategy="fallback"` and `stream=True` caused LiteLLM Router's `stream_with_fallbacks` to recurse infinitely on primary model failure. The fix calls `Router._completion()` directly per model with `fallbacks=[]`, avoiding recursive re-entry. A `yielded` guard prevents corrupted output on mid-stream failures by propagating the exception instead of silently falling back. Fallback alias construction is deduplicated into a `_fallback_model_names` field populated in `postinit`.
 - **Add: Automatic Anthropic prompt caching**: Caches system prompt, tool schemas, and ReAct conversation history across iterations for Claude models, significantly reducing input token costs. Enabled by default.
 - **Fix: Emit `usage` StreamEvent for no-tool streaming calls**: The usage event now fires for every streaming invocation, not just ReAct loops with tools, so token accounting is complete across all `by llm()` shapes.
 
