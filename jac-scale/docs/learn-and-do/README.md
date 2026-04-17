@@ -78,37 +78,44 @@ Go from "it works" to "I understand the hard problems and can run this in produc
 
 ---
 
-## What You'll Know
+## Mapping to v2 PRs
 
-```
-Days 1-10 (Build)           Days 11-20 (Master)
-─────────────────           ────────────────────
-Service Registry            Testing Pyramid
-Process Management          Circuit Breakers
-API Gateway                 Distributed Tracing
-Static Serving              Rate Limiting
-JWT Auth                    Saga Pattern
-Inter-Service Calls         API Versioning
-CLI Tooling                 Service Decomposition
-Plugin Integration          Security in Depth
-K8s Deployment              Caching & Performance
-                            Production Readiness
-```
+The learn-and-do days map to the production PR plan in [PLAN.md](../../jac_scale/microservices/PLAN.md):
+
+| Days | v2 PR | What |
+|------|-------|------|
+| 1-3 | PR 1 | ServiceDeployer + LocalDeployer |
+| 4-5 | PR 2 | Gateway + HTTP forwarding + static serving |
+| 6, 7 | PR 4 | Auth propagation + `sv_service_call` override |
+| 8 | PR 5 | CLI tooling |
+| 9 | PR 3 | Orchestrator + `ensure_sv_service` hook |
+| 10 | PR 1-2 | Deployment interface |
+| 10.1-10.7 | Pre-K8s hardening | Production readiness |
+| 11-20 | Mastery topics | Testing, resilience, observability, security |
 
 ## Test Project
 
-Throughout the 20 days, you'll build against a test project:
+Throughout the program, you build an e-commerce app using `sv import`:
 
 ```
-test-microservices/
+ecommerce/
 ├── jac.toml
-├── services/
-│   ├── orders.jac       # walker: list_orders, create_order
-│   └── payments.jac     # walker: charge, refund
-├── shared/
-│   └── models.jac       # shared types (Order, Payment)
+├── main.jac                # client UI entry
+├── products_app.jac        # def:pub list_products, get_product
+├── cart_app.jac            # def:pub get_cart, add_to_cart, clear_cart
+├── orders_app.jac          # sv import from cart_app, products_app
 └── client/
-    └── main.jac         # simple jac-client UI
+    └── main.jac            # jac-client SPA
 ```
 
-This gets created on Day 1 and grows throughout the program.
+Services expose `def:pub` functions (not walkers) for cross-service calls.
+Walkers stay internal to each service. `sv import` generates HTTP stubs automatically.
+
+## Key Concepts
+
+- **`sv import`** — compiler-generated HTTP stubs for cross-service calls
+- **`sv {}`** — marks functions/walkers as service endpoints
+- **`def:pub`** — public functions exposed via `sv import`
+- **`ServiceDeployer`** — abstract lifecycle (local subprocesses or K8s pods)
+- **Gateway** — client-facing reverse proxy, reads `sv_client._registry`
+- **`sv_service_call` hook** — auth propagation + retry + circuit breaker

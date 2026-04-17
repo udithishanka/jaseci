@@ -1,70 +1,104 @@
 # Microservice Mode
 
-Split your Jac app into independent services behind an API gateway.
+Split your Jac app into independent services using `sv import`.
+
+## How It Works
+
+Write `sv import` — the compiler handles the rest:
+
+```jac
+# orders_app.jac
+sv import from cart_app { get_cart, clear_cart }
+
+def:pub create_order(user_id: str) -> dict {
+    cart = get_cart(user_id=user_id);      # cross-service call (HTTP under the hood)
+    # ... create order from cart items ...
+    clear_cart(user_id=user_id);           # another cross-service call
+    return {"order_id": "ord_1", "status": "confirmed"};
+}
+```
+
+```jac
+# cart_app.jac — exposes functions via sv {}
+sv {
+    def:pub get_cart(user_id: str) -> dict { ... }
+    def:pub clear_cart(user_id: str) -> bool { ... }
+    def:pub add_to_cart(user_id: str, product_id: str, qty: int) -> dict { ... }
+}
+```
+
+Locally: runtime spawns subprocesses, assigns ports, routes calls.
+On K8s: runtime creates pods, uses K8s DNS, routes calls.
+**Same code, zero changes.**
 
 ## Quick Start
 
-### 1. Create service files
+### 1. Create services
 
-Each service has walkers in a `.jac` file and an entry point with `sv {}`:
+Each service exposes `def:pub` functions via `sv {}`:
 
 ```
 my-app/
 ├── jac.toml
-├── main.jac              # client UI entry
-├── products_app.jac      # service entry point
-├── orders_app.jac        # service entry point
-├── services/
-│   ├── products.jac      # product walkers
-│   └── orders.jac        # order walkers
-```
-
-**services/products.jac**:
-
-```jac
-walker ListProducts {
-    has items: list = [];
-    can collect with Root entry { visit [-->]; }
-    can gather with Product entry {
-        self.items.append({"id": here.id, "name": here.name});
-    }
-    can done with Root exit { report self.items; }
-}
+├── main.jac              # client UI + entry point
+├── products_app.jac      # product catalog functions
+├── cart_app.jac          # cart management functions
+├── orders_app.jac        # order functions (sv imports cart + products)
 ```
 
 **products_app.jac**:
-
 ```jac
+node Product {
+    has id: str, name: str, price: float;
+}
+
 sv {
-    import from services.products { Product, ListProducts, GetProduct }
+    def:pub list_products() -> list[dict] {
+        products: list[dict] = [];
+        for p in [-->](`?Product) {
+            products.append({"id": p.id, "name": p.name, "price": p.price});
+        }
+        return products;
+    }
+
+    def:pub get_product(product_id: str) -> dict | None { ... }
+}
+```
+
+**orders_app.jac** — consumes other services:
+```jac
+sv import from cart_app { get_cart, clear_cart }
+sv import from products_app { get_product }
+
+sv {
+    def:pub create_order(user_id: str) -> dict {
+        cart = get_cart(user_id=user_id);
+        # ... validate, create order ...
+        clear_cart(user_id=user_id);
+        return {"order_id": "ord_1", "status": "confirmed"};
+    }
 }
 ```
 
 ### 2. Configure jac.toml
 
-```bash
-jac setup microservice
-```
-
-Or manually:
-
 ```toml
 [plugins.scale.microservices]
 enabled = true
-gateway_port = 8000
 
-[plugins.scale.microservices.services.products]
-file = "products_app.jac"
-prefix = "/api/products"
+# Map module names to gateway URL prefixes (for client-facing routing)
+[plugins.scale.microservices.routes]
+products_app = "/api/products"
+cart_app = "/api/cart"
+orders_app = "/api/orders"
 
-[plugins.scale.microservices.services.orders]
-file = "orders_app.jac"
-prefix = "/api/orders"
-
+# Optional: client UI served as SPA
 [plugins.scale.microservices.client]
 entry = "main.jac"
-dist_dir = ".jac/client/dist"
 ```
+
+Services are NOT declared individually — `sv import` handles discovery.
+The TOML only maps module names to gateway prefixes.
 
 ### 3. Start
 
@@ -72,13 +106,18 @@ dist_dir = ".jac/client/dist"
 jac start main.jac
 ```
 
-Launches gateway on :8000, products on :8001, orders on :8002, client UI built and served.
+Runtime automatically:
+1. Discovers providers from `sv import` statements (BFS traversal)
+2. Spawns each provider as a subprocess on auto-assigned port
+3. Starts gateway on :8000
+4. Routes client requests to services by prefix
 
 ## URL Structure
 
 ```
-POST /api/{service}/walker/{walker_name}
-POST /api/{service}/function/{func_name}
+POST /api/{module}/function/{func_name}     # public functions
+POST /api/{module}/walker/{walker_name}      # public walkers
+GET  /health                                 # gateway health
 ```
 
 ## CLI Commands
@@ -87,53 +126,45 @@ POST /api/{service}/function/{func_name}
 # Setup
 jac setup microservice                   # interactive config
 jac setup microservice --list            # show config
-jac setup microservice --add file.jac    # add service
-jac setup microservice --remove name     # remove service
+jac setup microservice --add file.jac    # add route mapping
+jac setup microservice --remove name     # remove route mapping
 
-# Management
+# Service management
 jac scale status                         # show all services
-jac scale stop orders                    # stop one service
-jac scale restart cart                   # restart one service
-jac scale logs products                  # view logs
+jac scale stop orders_app                # stop one service
+jac scale restart cart_app               # restart one service
+jac scale logs products_app              # view logs
 jac scale destroy                        # stop everything
 ```
 
 ## Inter-Service Communication
 
+**With `sv import` (recommended)**:
 ```jac
-import from jac_scale.microservices.service_client { service_call }
+sv import from cart_app { get_cart, clear_cart }
 
-walker PlaceOrder {
-    has auth_token: str = "";
-
-    can create with Root entry {
-        cart_resp = service_call(
-            service="cart",
-            endpoint="walker/ViewCart",
-            auth_token=self.auth_token
-        );
-        items = cart_resp.json().get("data", {}).get("reports", [[]])[0].get("items", []);
-
-        service_call(service="cart", endpoint="walker/ClearCart", auth_token=self.auth_token);
-    }
-}
+# Just call it like a normal function — auth propagated automatically
+cart = get_cart(user_id="u123");
+clear_cart(user_id="u123");
 ```
 
-| Param | Description |
-|-------|-------------|
-| `service` | Service name from jac.toml |
-| `endpoint` | Path e.g. `"walker/ViewCart"` |
-| `method` | HTTP method (default: `"POST"`) |
-| `body` | JSON body dict (default: `{}`) |
-| `auth_token` | Authorization header to forward |
-| `gateway_url` | Override gateway URL |
+Under the hood:
+1. Compiler generates HTTP stub
+2. Stub calls `sv_client.call("cart_app", "get_cart", {user_id: "u123"})`
+3. jac-scale hook: reads auth from request context, forwards Authorization header
+4. Cart service validates token, executes function, returns result
+5. Stub unwraps response and returns to caller
+
+**No manual `service_call()`, no `auth_token` passing, no URL management.**
 
 ## Client Frontend
+
+The frontend calls the gateway API directly:
 
 ```jac
 impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
     token = localStorage.getItem("jac_token");
-    resp = await fetch(f"/api/{service}/walker/{endpoint}", {
+    resp = await fetch(f"/api/{service}/function/{endpoint}", {
         "method": "POST",
         "headers": {
             "Content-Type": "application/json",
@@ -143,24 +174,63 @@ impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
     });
     return await resp.json();
 }
-
-impl app.fetchProducts -> None {
-    data = await apiCall("products", "ListProducts", {});
-    products = data.data.reports[0] if data.data and data.data.reports else [];
-}
 ```
 
 ## What Is and Isn't a Service
 
-Only files in `[plugins.scale.microservices.services.*]` become services:
+Any module `sv import`ed somewhere is a service. No TOML declaration needed:
 
-| File | In TOML? | What happens |
-|------|----------|-------------|
-| `products_app.jac` | Yes | Runs as service on :8001 |
-| `orders_app.jac` | Yes | Runs as service on :8002 |
-| `services/products.jac` | No | Imported by products_app.jac |
-| `shared/models.jac` | No | Imported by any service |
-| `main.jac` | No (client entry) | Built as static SPA |
+| File | How it becomes a service |
+|------|------------------------|
+| `cart_app.jac` | Some module has `sv import from cart_app { ... }` |
+| `products_app.jac` | Some module has `sv import from products_app { ... }` |
+| `shared/models.jac` | Regular import, NOT a service |
+| `main.jac` | Entry point, client UI |
+
+The TOML `[routes]` section only controls which services get **public gateway URLs**.
+A service without a route still works for internal `sv import` calls.
+
+## Architecture
+
+```
+Client --> Gateway (:8000) --> /api/products/* --> products_app (:18342)
+                           --> /api/orders/*   --> orders_app   (:18567)
+                           --> /api/cart/*     --> cart_app     (:18103)
+                           --> Static files, Admin UI
+
+Inter-service (sv import, direct — no gateway hop):
+  orders_app (:18567) --sv_client.call()--> cart_app (:18103)
+```
+
+Ports are auto-assigned: `18000 + hash(module_name) % 1000`, 100 retries.
+
+## Auth Flow
+
+```
+1. Client --> Gateway (Authorization: Bearer USER_TOKEN)
+2. Gateway forwards Authorization --> orders_app
+3. orders_app walker calls: get_cart(user_id)  [sv imported]
+4. jac-scale sv_service_call hook:
+   a. Reads Authorization from execution context
+   b. POST to cart_app with same Authorization header
+5. cart_app validates token (same JWT secret)
+6. Result flows back automatically
+```
+
+No manual token passing. The hook reads it from the execution context.
+
+## Local vs Kubernetes
+
+Same code, different deployer:
+
+| | Local | K8s (`--scale`) |
+|-|-------|-----------------|
+| Spawning | Subprocess per service | Pod per service |
+| URLs | `http://127.0.0.1:18xxx` | `http://svc.ns.svc.cluster.local:8000` |
+| Health | HTTP `/healthz` polling | K8s probes |
+| Lifecycle | `LocalDeployer` | `KubernetesDeployer` |
+| Scaling | 1 replica | HPA per service |
+| Data | `.jac/data/{module}/` per process | Separate PVC per pod |
 
 ## Built-in Route Passthrough
 
@@ -168,53 +238,26 @@ The gateway forwards these to healthy services (tries all, skips 404):
 
 | Route | What |
 |-------|------|
-| `/user/*` | Auth (register, login, refresh, update) |
+| `/user/*` | Auth (register, login, refresh) |
 | `/sso/*` | SSO (Google, Apple, GitHub) |
-| `/api-key/*` | API key management |
-| `/walker/*`, `/function/*` | Walker/function calls |
-| `/webhook/*` | Webhook walker endpoints |
-| `/ws/*` | WebSocket walker endpoints |
-| `/jobs/*` | Scheduler job management |
-| `/cl/*` | Client error reporting |
+| `/walker/*`, `/function/*` | Direct walker/function calls |
 | `/healthz` | Health check |
-| `/graph`, `/graph/data` | Graph visualization |
-| `/metrics` | Prometheus metrics |
+| `/cl/*` | Client error reporting |
 | `/docs`, `/openapi.json` | API documentation |
 
-## Architecture
+## PR Roadmap
 
-```
-Client --> Gateway (:8000) --> Products (:8001)
-                           --> Orders   (:8002)
-                           --> Cart     (:8003)
-                           --> Static files (.jac/client/dist/)
-                           --> Admin UI (.jac/admin/)
+| PR | What | Status |
+|----|------|--------|
+| 0 | Core hookspecs (`sv_service_call` + `get_sv_registry`) | Planned |
+| 1 | ServiceDeployer + LocalDeployer | Prototype done |
+| 2 | Gateway + config | Prototype done |
+| 3 | Orchestrator + `ensure_sv_service` hook override | Prototype done |
+| 4 | `sv_service_call` override (auth + retry + circuit breaker) | Planned |
+| 5 | CLI tooling (`jac setup microservice` + `jac scale`) | Prototype done |
+| 6 | E-commerce example app | Prototype done |
+| 7 | Documentation | In progress |
+| 8 | KubernetesDeployer | Planned |
+| 9 | K8s example + E2E | Planned |
 
-Inter-service: Orders --service_call()--> Gateway --> Cart
-```
-
-## Roadmap
-
-### Done
-
-- Gateway with path-based proxy + static serving + admin UI
-- Service registry, process manager, deployer interface
-- Inter-service communication with token propagation
-- `jac setup microservice` + `jac scale status/stop/restart/logs/destroy`
-- E-commerce example (products, orders, cart)
-
-### Next (Pre-K8s)
-
-- Complete endpoint passthrough (all 51 jac-scale endpoints)
-- Distributed tracing (X-Trace-Id propagation)
-- Gateway metrics (per-service latency, error rates)
-- Error handling (retry, backoff, circuit breaker)
-- Unified Swagger docs across services
-- Per-service log files + colored gateway output
-
-### Future (K8s)
-
-- KubernetesDeployer implementing ServiceDeployer interface
-- Per-service K8s Deployments from same Docker image
-- K8s Service DNS for service URLs
-- Ingress for gateway
+See [PLAN.md](PLAN.md) for full PR details, dependency graph, and design decisions.
