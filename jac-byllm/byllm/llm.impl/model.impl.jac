@@ -9,12 +9,11 @@ impl Model.postinit -> None {
     self.http_client = bool(
         self.config.get("http_client", _model_config.get("http_client", False))
     );
-    # Resolve api_key: constructor > instance config > global config > env vars (litellm fallback)
-    self.api_key = (
-        self.api_key
-        or self.config.get("api_key", "")
-        or _model_config.get("api_key", "")
-    );
+    # Resolve api_key: constructor > instance config > global config
+    if not self.api_key {
+        self.api_key = self.config.get("api_key", "")
+        or _model_config.get("api_key", "");
+    }
     # When model_name is 'mockllm', delegate to MockLLM behavior
     if self.model_name == MODEL_MOCK {
         self._mock_delegate = MockLLM(model_name=self.model_name, config=self.config);
@@ -113,6 +112,10 @@ Uses OpenAI client if proxy mode is enabled, otherwise uses LiteLLM.
 Returns a generator that yields response chunks.
 """
 impl Model.model_call_with_stream(params: dict) {
+    # Ask the provider to include token usage in the final streamed chunk.
+    params["stream_options"] = (params.get("stream_options") or {}) | {
+        "include_usage": True
+    };
     try {
         if self.proxy {
             client = OpenAI(base_url=self.api_base, api_key=self.api_key or None);

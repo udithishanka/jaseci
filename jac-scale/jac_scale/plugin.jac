@@ -187,7 +187,7 @@ def _print_deployment_status(status_data: dict) -> None {
 class JacCmd {
     """Create Jac CLI cmds."""
     @hookimpl
-    static def create_cmd -> None {
+    static def create_cmd {
         """Jac Scale functionality.""";
         registry = get_registry();
 
@@ -484,8 +484,7 @@ glob func = JacScalePlugin.create_j_context,
      sig = inspect.signature(func),
      sig_nodef = sig.replace(
          parameters=[
-             p.replace(default=inspect.Parameter.empty)
-             for p in sig.parameters.values()
+             p.replace(default=inspect.Parameter.empty) for p in sig.parameters.values()
          ]
      );
 

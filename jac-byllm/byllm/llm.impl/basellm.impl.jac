@@ -1,3 +1,50 @@
+"""Check if the model is eligible for Anthropic prompt caching."""
+def _is_prompt_caching_eligible(model_name: str) -> bool {
+    pc_config = _byllm_config.get_prompt_caching_config();
+    if not pc_config.get("enabled", True) {
+        return False;
+    }
+    name = model_name.lower();
+    return name.startswith("anthropic/") or name.startswith("claude-");
+}
+
+
+"""Attach a cache_control marker to a message (string or list content)."""
+def _mark_message_for_caching(msg: dict) {
+    content = msg.get("content");
+    if isinstance(content, str) {
+        msg["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
+    } elif isinstance(content, list) and len(content) > 0 {
+        content[-1]["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
+    }
+}
+
+
+"""Mark cache breakpoints for Anthropic: last system, last non-system, last tool."""
+def _apply_prompt_caching(messages: list, tools: list | None) {
+    last_sys_idx = -1;
+    last_nonsys_idx = -1;
+    for (i, msg) in enumerate(messages) {
+        if isinstance(msg, dict) {
+            if msg.get("role") == "system" {
+                last_sys_idx = i;
+            } else {
+                last_nonsys_idx = i;
+            }
+        }
+    }
+    if last_sys_idx >= 0 {
+        _mark_message_for_caching(messages[last_sys_idx]);
+    }
+    if last_nonsys_idx >= 0 {
+        _mark_message_for_caching(messages[last_nonsys_idx]);
+    }
+    if tools {
+        tools[-1]["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
+    }
+}
+
+
 """Construct the call parameters and return self (factory pattern).
 
 Allows chaining like: `model(temperature=0.5).invoke(mt_run)`.
@@ -149,18 +196,25 @@ impl BaseLLM.make_model_params(mt_run: MTRuntime) -> dict {
         logger.debug(f"agent_metadata build failed: {e}");
     }
 
+    messages = mt_run.get_msg_list();
+    tools = mt_run.get_tool_list() or None;
+
+    if _is_prompt_caching_eligible(self.model_name) {
+        _apply_prompt_caching(messages, tools);
+    }
+
     params = {
         "model": self.model_name,
+        "api_key": self.api_key or None,
         "api_base": (
             self.config.get("base_url")
             or self.config.get("host")
             or self.config.get("api_base")
             or _model_config.get("base_url")
         ),
-        "messages": mt_run.get_msg_list(),
-        "tools": mt_run.get_tool_list() or None,
+        "messages": messages,
+        "tools": tools,
         "response_format": mt_run.get_output_schema(),
-        "api_key": self.api_key or None,
         "temperature": self.call_params.get("temperature", default_temp),
         "max_tokens": self.call_params.get("max_tokens", default_max_tokens),
         "metadata": agent_metadata,
@@ -232,10 +286,18 @@ impl BaseLLM.dispatch_no_streaming(mt_run: MTRuntime) -> CompletionResult {
     params = self.make_model_params(mt_run);
     # Call the LiteLLM API
     log_params = self.format_prompt(params);
-    self.log_info(f"Calling LLM: {self.model_name} with params: {log_params}");
     self.api_base = params.pop("api_base", DEFAULT_BASE_URL);
     params.pop("api_key", None);
-    response = self.model_call_no_stream(params);
+    try {
+        response = self.model_call_no_stream(params);
+    } except Exception {
+        # Log with model_name on failure so verbose output is still captured
+        self.log_info(f"Calling LLM: {self.model_name} with params: {log_params}");
+        raise;
+    }
+    # Log the actual model that served the request (from response, useful for proxy/pool)
+    actual_model = response.get("model", self.model_name);
+    self.log_info(f"Calling LLM: {actual_model} with params: {log_params}");
     # Output format:
     # https://docs.litellm.ai/docs/#response-format-openai-format
     #
@@ -285,6 +347,11 @@ impl BaseLLM.dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None]
     params.pop("api_key", None);
     response = self.model_call_with_stream(params);
     for chunk in response {
+        # Final chunk carries usage when stream_options.include_usage is set.
+        chunk_usage = getattr(chunk, "usage", None);
+        if chunk_usage {
+            self._usage_history.append(chunk_usage);
+        }
         if chunk?.choices and chunk?.choices?[0]?.delta {
             delta = chunk.choices[0].delta;
             yield delta.content or "";

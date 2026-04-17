@@ -53,6 +53,7 @@ obj JEndPoint {
         callback: Callable[(..., Any)],
         parameters: (list[APIParameter] | None) = None,
         response_model: (type[BaseModel] | None) = None,
+        request_model: (type[BaseModel] | None) = None,
         tags: (list[str] | None) = None,
         summary: (str | None) = None,
         description: (str | None) = None;
@@ -102,5 +103,5 @@ class JServer(ABC, Generic[T]) {
     @abstractmethod
     def run_server(
         self: JServer, host: str = 'localhost', port: int = 8000, max_retries: int = 10
-    ) -> None { }
+    ) { }
 }

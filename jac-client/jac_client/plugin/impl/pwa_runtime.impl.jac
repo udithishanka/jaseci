@@ -77,11 +77,12 @@ impl useIsStandalone -> bool {
 
     reactUseEffect(
         lambda -> Any {
-        # Listen for display-mode changes
-        mediaQuery = window.matchMedia("(display-mode: standalone)");handler = lambda e:
-            Any  -> None { setStandalone(e.matches);};mediaQuery.addEventListener(
-            "change", handler
-        );return lambda -> None { mediaQuery.removeEventListener("change", handler);}; },
+            # Listen for display-mode changes
+            mediaQuery = window.matchMedia("(display-mode: standalone)");
+            handler = lambda e: Any { setStandalone(e.matches);};
+            mediaQuery.addEventListener("change", handler);
+            return lambda { mediaQuery.removeEventListener("change", handler);};
+        },
         []
     );
 
@@ -101,16 +102,23 @@ impl captureInstallPrompt -> None {
 
     window.addEventListener(
         "beforeinstallprompt",
-        lambda e: Any  -> None { e.preventDefault();window.__jacPwaPrompt = e;window.dispatchEvent(
-            Reflect.construct(CustomEvent, ["jac:pwa:promptready"])
-        );}
+        lambda e: Any {
+            e.preventDefault();
+            window.__jacPwaPrompt = e;
+            window.dispatchEvent(
+                Reflect.construct(CustomEvent, ["jac:pwa:promptready"])
+            );
+        }
     );
 
     window.addEventListener(
         "appinstalled",
-        lambda -> None { window.__jacPwaInstalled = True;window.__jacPwaPrompt = None;recordInstallSuccess();window.dispatchEvent(
-            Reflect.construct(CustomEvent, ["jac:pwa:installed"])
-        );}
+        lambda {
+            window.__jacPwaInstalled = True;
+            window.__jacPwaPrompt = None;
+            recordInstallSuccess();
+            window.dispatchEvent(Reflect.construct(CustomEvent, ["jac:pwa:installed"]));
+        }
     );
 }
 
@@ -154,7 +162,8 @@ impl getManifest -> dict {
         }
 
         return await response.json();
-    } except Exception {
+    } except Exception as e {
+        console.warn("[jac-pwa] Failed to fetch manifest:", e);
         return {};
     }
 }
@@ -177,7 +186,8 @@ impl getAppIcon -> str {
 
         # Fallback to first icon
         return icons[0].src or "";
-    } except Exception {
+    } except Exception as e {
+        console.warn("[jac-pwa] Failed to get app icon:", e);
         return "";
     }
 }
@@ -186,7 +196,8 @@ impl getAppName -> str {
     try {
         manifest = await getManifest();
         return manifest.name or manifest.short_name or "";
-    } except Exception {
+    } except Exception as e {
+        console.warn("[jac-pwa] Failed to get app name:", e);
         return "";
     }
 }
@@ -200,8 +211,10 @@ impl getPwaUserPrefs -> dict {
         if stored {
             return JSON.parse(stored);
         }
-    } except Exception {
-        ;
+    } except Exception as e {
+        console.warn(
+            "[jac-pwa] Failed to read PWA user preferences from localStorage:", e
+        );
     }
 
     return {
@@ -223,16 +236,18 @@ impl setPwaUserPrefs(prefs: dict) -> None {
         current = getPwaUserPrefs();
         merged = Object.assign({}, current, prefs);
         localStorage.setItem(PWA_STORAGE_KEY, JSON.stringify(merged));
-    } except Exception {
-        ;
+    } except Exception as e {
+        console.warn(
+            "[jac-pwa] Failed to save PWA user preferences to localStorage:", e
+        );
     }
 }
 
 impl resetPwaUserPrefs -> None {
     try {
         localStorage.removeItem(PWA_STORAGE_KEY);
-    } except Exception {
-        ;
+    } except Exception as e {
+        console.warn("[jac-pwa] Failed to reset PWA user preferences:", e);
     }
 }
 
@@ -310,32 +325,45 @@ impl usePwaInstall -> dict {
 
     # Fetch manifest data on mount
     reactUseEffect(
-        lambda -> Any { async def loadManifest -> None {
-            name = await getAppName();
-            icon = await getAppIcon();
-            setAppName(name);
-            setAppIcon(icon);
-        } loadManifest();return None; },
+        lambda -> Any {
+            async def loadManifest {
+                name = await getAppName();
+                icon = await getAppIcon();
+                setAppName(name);
+                setAppIcon(icon);
+            }
+            loadManifest();
+            return None;
+        },
         []
     );
 
     # Listen for prompt ready event
     reactUseEffect(
-        lambda -> Any { handler = lambda -> None { setCanInstall(True);setShowBanner(
-            shouldShowInstallBanner()
-        );};window.addEventListener("jac:pwa:promptready", handler);return lambda -> None { window.removeEventListener(
-            "jac:pwa:promptready", handler
-        );}; },
+        lambda -> Any {
+            handler = lambda {
+                setCanInstall(True);
+                setShowBanner(shouldShowInstallBanner());
+            };
+            window.addEventListener("jac:pwa:promptready", handler);
+            return lambda { window.removeEventListener(
+                "jac:pwa:promptready", handler
+            );};
+        },
         []
     );
 
     # Listen for installed event
     reactUseEffect(
-        lambda -> Any { handler = lambda -> None { setIsInstalled(True);setCanInstall(
-            False
-        );setShowBanner(False);};window.addEventListener("jac:pwa:installed", handler);return lambda -> None { window.removeEventListener(
-            "jac:pwa:installed", handler
-        );}; },
+        lambda -> Any {
+            handler = lambda {
+                setIsInstalled(True);
+                setCanInstall(False);
+                setShowBanner(False);
+            };
+            window.addEventListener("jac:pwa:installed", handler);
+            return lambda { window.removeEventListener("jac:pwa:installed", handler);};
+        },
         []
     );
 
@@ -361,19 +389,19 @@ impl usePwaInstall -> dict {
     }
 
     # Show iOS guide
-    def showIosGuide -> None {
+    def showIosGuide {
         setIosGuideOpen(True);
         setPwaUserPrefs({"iosGuideShown": True, "iosGuideShownAt": Date.now()});
     }
 
     # Dismiss action
-    def dismiss -> None {
+    def dismiss {
         recordDismiss();
         setShowBanner(False);
     }
 
     # Close iOS guide
-    def closeIosGuide -> None {
+    def closeIosGuide {
         setIosGuideOpen(False);
     }
 
@@ -672,25 +700,29 @@ impl PwaInstallBanner(props: dict) -> JsxElement {
 
     # Show after delay
     reactUseEffect(
-        lambda -> Any { if not pwa.shouldShowBanner or pwa.isInstalled {
-            return None;
-        }timer = setTimeout(lambda -> None { setVisible(True);}, showAfterMs);return lambda -> None { clearTimeout(
-            timer
-        );}; },
+        lambda -> Any {
+            if not pwa.shouldShowBanner or pwa.isInstalled { return None;  }
+            timer = setTimeout(lambda { setVisible(True);}, showAfterMs);
+            return lambda { clearTimeout(timer);};
+        },
         [pwa.shouldShowBanner, pwa.isInstalled]
     );
 
     # Handle dismiss with animation
-    def handleDismiss -> None {
+    def handleDismiss {
         setDismissing(True);
         setTimeout(
-            lambda -> None { pwa.dismiss();setVisible(False);setDismissing(False);},
+            lambda {
+                pwa.dismiss();
+                setVisible(False);
+                setDismissing(False);
+            },
             300
         );
     }
 
     # Handle install
-    async def handleInstall -> None {
+    async def handleInstall {
         result = await pwa.install();
         if result {
             setVisible(False);
@@ -717,9 +749,7 @@ impl PwaInstallBanner(props: dict) -> JsxElement {
 
     return (
         <>
-            <style>
-                {__getPwaStyles()}
-            </style>
+            <style>{__getPwaStyles()}</style>
             <div className={bannerClass} style={style}>
                 {showIcon
                 and pwa.appIcon
@@ -732,12 +762,8 @@ impl PwaInstallBanner(props: dict) -> JsxElement {
                     />
                 )}
                 <div className="jac-pwa-banner__content">
-                    <div className="jac-pwa-banner__title">
-                        {title}
-                    </div>
-                    <div className="jac-pwa-banner__description">
-                        {description}
-                    </div>
+                    <div className="jac-pwa-banner__title">{title}</div>
+                    <div className="jac-pwa-banner__description">{description}</div>
                 </div>
                 <div className="jac-pwa-banner__actions">
                     <button
@@ -772,7 +798,7 @@ impl PwaInstallButton(props: dict) -> JsxElement {
     style = props.style or {};
     onInstalled = props.onInstalled;
 
-    async def handleClick -> None {
+    async def handleClick {
         result = await pwa.install();
         if result and onInstalled {
             onInstalled();
@@ -786,9 +812,7 @@ impl PwaInstallButton(props: dict) -> JsxElement {
 
     return (
         <>
-            <style>
-                {__getPwaStyles()}
-            </style>
+            <style>{__getPwaStyles()}</style>
             <button
                 className={className}
                 style={style}
@@ -823,62 +847,40 @@ impl IosInstallGuide(props: dict) -> JsxElement {
 
     return (
         <>
-            <style>
-                {__getPwaStyles()}
-            </style>
+            <style>{__getPwaStyles()}</style>
             <div className="jac-pwa-ios-overlay" onClick={onClose}>
                 <div
                     className={"jac-pwa-ios-guide " + className}
-                    onClick={lambda e: Any  -> None { e.stopPropagation();}}
+                    onClick={lambda e: Any { e.stopPropagation();}}
                 >
-                    <div className="jac-pwa-ios-guide__title">
-                        {title}
-                    </div>
+                    <div className="jac-pwa-ios-guide__title">{title}</div>
                     <div className="jac-pwa-ios-guide__subtitle">
                         Add to your home screen
                     </div>
                     <div className="jac-pwa-ios-guide__steps">
                         <div className="jac-pwa-ios-guide__step">
-                            <span className="jac-pwa-ios-guide__step-num">
-                                1
-                            </span>
-                            <span className="jac-pwa-ios-guide__step-icon">
-                                ↑
-                            </span>
+                            <span className="jac-pwa-ios-guide__step-num">1</span>
+                            <span className="jac-pwa-ios-guide__step-icon">↑</span>
                             <span className="jac-pwa-ios-guide__step-text">
                                 Tap the
-                                <strong>
-                                    Share
-                                </strong>
+                                <strong>Share</strong>
                                 button
                             </span>
                         </div>
                         <div className="jac-pwa-ios-guide__step">
-                            <span className="jac-pwa-ios-guide__step-num">
-                                2
-                            </span>
-                            <span className="jac-pwa-ios-guide__step-icon">
-                                +
-                            </span>
+                            <span className="jac-pwa-ios-guide__step-num">2</span>
+                            <span className="jac-pwa-ios-guide__step-icon">+</span>
                             <span className="jac-pwa-ios-guide__step-text">
                                 Tap
-                                <strong>
-                                    Add to Home Screen
-                                </strong>
+                                <strong>Add to Home Screen</strong>
                             </span>
                         </div>
                         <div className="jac-pwa-ios-guide__step">
-                            <span className="jac-pwa-ios-guide__step-num">
-                                3
-                            </span>
-                            <span className="jac-pwa-ios-guide__step-icon">
-                                ✓
-                            </span>
+                            <span className="jac-pwa-ios-guide__step-num">3</span>
+                            <span className="jac-pwa-ios-guide__step-icon">✓</span>
                             <span className="jac-pwa-ios-guide__step-text">
                                 Tap
-                                <strong>
-                                    Add
-                                </strong>
+                                <strong>Add</strong>
                                 to confirm
                             </span>
                         </div>

@@ -1,3 +1,5 @@
+import from jaclang.cli.console { console }
+
 """Get the client build directory from project config."""
 impl ViteCompiler._get_client_dir(self: ViteCompiler) -> Path {
     # Try to get from project config
@@ -91,7 +93,11 @@ impl ViteCompiler._create_pages_entry_content(
         if config and config?.routing and config.routing {
             auth_redirect = config.routing.get('auth_redirect', '/login');
         }
-    } except Exception { }
+    } except Exception as e {
+        console.warning(
+            f"Failed to load routing config, using default auth_redirect='/login': {e}"
+        );
+    }
     # Check if main.jac exists and exports app (used as wrapper)
     app_module = self.compiled_dir / f"{module_path.stem}.js";
     has_app_wrapper = app_module.exists();
@@ -128,7 +134,9 @@ impl ViteCompiler._create_pages_entry_content(
     lines.append(
         f'function _AuthGuardRoute() {{ return AuthGuard("{auth_redirect}"); }}'
     );
-    lines.append('const authGuardElement = React.createElement(_AuthGuardRoute, null);');
+    lines.append(
+        'const authGuardElement = React.createElement(_AuthGuardRoute, null);'
+    );
     lines.append('');
     # --- Single App component with one BrowserRouter ---
     lines.append('function App() {');
@@ -200,10 +208,12 @@ impl ViteCompiler._copy_asset_file(
         output_path = self.compiled_dir / asset_path.name;
     }
     output_path.parent.mkdir(parents=True, exist_ok=True);
-    with contextlib.suppress(FileNotFoundError, OSError) {
+    try {
         output_path.write_text(
             asset_path.read_text(encoding='utf-8'), encoding='utf-8'
         );
+    } except (FileNotFoundError, OSError) as e {
+        console.warning(f"Failed to copy asset '{asset_path}' to '{output_path}': {e}");
     }
 }
 
@@ -338,7 +348,9 @@ impl ViteCompiler.compile_dependencies_recursively(
                 }
             }
         }
-    } except Exception { }
+    } except Exception as e {
+        console.warning(f"Failed to generate source map for '{module_path}': {e}");
+    }
     if (not manifest or not manifest.imports) {
         return;
     }
@@ -374,7 +386,9 @@ impl ViteCompiler.compile_runtime_utils(self: ViteCompiler) -> tuple[str, list[s
     (runtimeutils_js, mod, runtimeutils_manifest) = self.jac_compiler.compile_module(
         runtime_utils_path
     );
-    runtimeutils_exports_list = self.jac_compiler.extract_exports(runtimeutils_manifest);
+    runtimeutils_exports_list = self.jac_compiler.extract_exports(
+        runtimeutils_manifest
+    );
     glob_names = list(runtimeutils_manifest.globals) if runtimeutils_manifest else [];
     all_exports = sorted(
         set(runtimeutils_exports_list + self.ROUTER_EXPORTS + glob_names)

@@ -23,6 +23,7 @@ import from typing {
     Any,
     Literal,
     ParamSpec,
+    Protocol,
     TypeAlias,
     TypeVar,
     cast,
@@ -31,6 +32,7 @@ import from typing {
 import from uuid { UUID }
 import from jaclang.jac0core.archetype {
     GenericEdge,
+    ObjectAnchor,
     ObjectSpatialDestination,
     ObjectSpatialFunction,
     ObjectSpatialPath,
@@ -39,6 +41,7 @@ import from jaclang.jac0core.archetype {
 import from jaclang.jac0core.constant { EdgeDir, colors }
 import from jaclang.jac0core.constructs {
     AccessLevel,
+    access_level_cast,
     Anchor,
     Archetype,
     EdgeAnchor,
@@ -210,9 +213,9 @@ class JacWalker {
         `walker: WalkerArchetype,
         expr:
             (
-                list[
-                    (NodeArchetype | EdgeArchetype)
-                ] | list[NodeArchetype] | list[EdgeArchetype] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
+                list[(NodeArchetype | EdgeArchetype)] | list[NodeArchetype] | list[
+                    EdgeArchetype
+                ] | NodeArchetype | EdgeArchetype | ObjectSpatialPath
             ),
         insert_loc: int = -1
     ) -> bool;
@@ -246,9 +249,7 @@ class JacWalker {
         Returns True if walker should continue, False if disengaged.
         """
     static def _visit_node_recursive(
-        warch: WalkerArchetype,
-        `walker: WalkerAnchor,
-        anchor: (NodeAnchor | EdgeAnchor)
+        warch: WalkerArchetype, `walker: WalkerAnchor, anchor: (NodeAnchor | EdgeAnchor)
     ) -> bool;
 
     """Jac's spawn operator feature with recursive DFS semantics.
@@ -289,9 +290,7 @@ class JacWalker {
         Returns True if walker should continue, False if disengaged.
         """
     static async def _async_visit_node_recursive(
-        warch: WalkerArchetype,
-        `walker: WalkerAnchor,
-        anchor: (NodeAnchor | EdgeAnchor)
+        warch: WalkerArchetype, `walker: WalkerAnchor, anchor: (NodeAnchor | EdgeAnchor)
     ) -> bool;
 
     """Jac's async spawn operator feature with recursive DFS semantics.
@@ -567,6 +566,17 @@ class JacAPIServer {
         """
     static def get_api_server_class -> type;
 
+    """Lazily ensure an sv-imported microservice is started and registered.
+
+        Called from sv_client.call() when an sv-imported function is invoked
+        for the first time and the service has no URL or TestClient yet.
+        Plugins (e.g. jac-scale) can override this to spawn their own
+        enhanced server. The default implementation spawns a base
+        JacAPIServer in a background thread, waits for the server to be
+        responsive, and registers the URL via sv_client.register().
+        """
+    static def ensure_sv_service(module_name: str, base_path: str) -> None;
+
     """Create the API server instance.
 
     If the specified port is in use, tries subsequent ports up to max_retries times.
@@ -620,6 +630,17 @@ class JacResponseBuilder {
     ) -> None;
 }
 
+"""Protocol defining the minimal contract for LLM model objects.
+
+    Both the core stub (returned when no plugin is loaded) and plugin
+    implementations (e.g. byllm's BaseLLM/Model) satisfy this protocol.
+    """
+obj LLMModel(Protocol) {
+    has call_params: dict[(str, object)];
+
+    def __call__(**kwargs: object) -> LLMModel;
+}
+
 """Jac byLLM integration."""
 class JacByLLM {
     """Get byLLM library."""
@@ -633,13 +654,13 @@ class JacByLLM {
     static def `sem(semstr: str, inner_semstr: dict[(str, str)]) -> Callable;
 
     """Call the LLM model."""
-    static def call_llm(model: object, mt_run: MTRuntime) -> Any;
+    static def call_llm(model: LLMModel, mt_run: MTRuntime) -> Any;
 
     """Python library mode decorator for Jac's by llm() syntax."""
-    static def `by(model: object) -> Callable;
+    static def `by(model: LLMModel) -> Callable;
 
     static def filter_visitable_by(
-        connected_nodes: list[NodeArchetype], model: object, descriptions: str = ''
+        connected_nodes: list[NodeArchetype], model: LLMModel, descriptions: str = ''
     ) -> list[NodeArchetype];
 
     """by operator feature for expression composition.
@@ -657,7 +678,7 @@ class JacByLLM {
         in call_llm. Plugins (e.g. byllm) override this to return a configured
         Model instance based on jac.toml settings.
         """
-    static def default_llm -> object;
+    static def default_llm -> LLMModel;
 
     """Add MTIR to the node's MTIR map."""
     static def add_mtir_to_map(scope: str, mtir: Info) -> None;
@@ -897,7 +918,7 @@ def generate_plugin_helpers(
             name: str, sig_nodef: inspect.Signature, doc: str, method: Callable
         ) -> Callable {
             @wraps(method)
-            def placeholder(*args: object, **kwargs: object) -> None {
+            def placeholder(*args: object, **kwargs: object) {
                 ;
             }
             placeholder.__name__ = name;

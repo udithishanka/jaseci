@@ -74,7 +74,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         return self._ingress_provider;
     }
 
-    def _ensure_namespace -> None {
+    def _ensure_namespace {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         try {
@@ -502,8 +502,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
             namespace = self.config.namespace;
 
             existing = core_v1.list_namespaced_pod(
-                namespace,
-                label_selector=f"{_SANDBOX_LABEL}=true,jac-sandbox-pool=warm"
+                namespace, label_selector=f"{_SANDBOX_LABEL}=true,jac-sandbox-pool=warm"
             );
             warm_count = 0;
             for p in existing.items {
@@ -738,7 +737,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _signal_start(pod_name: str) -> None {
+    def _signal_start(pod_name: str) {
         import from kubernetes { client }
         import from kubernetes.stream { stream }
         core_v1 = client.CoreV1Api();
@@ -756,7 +755,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         );
     }
 
-    def _poll_pod_readiness(sandbox_id: str) -> None {
+    def _poll_pod_readiness(sandbox_id: str) {
         import from kubernetes { client }
         core_v1 = client.CoreV1Api();
         namespace = self.config.namespace;
@@ -888,8 +887,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
                             ;
                         }
                         return SandboxResult(
-                            success=False,
-                            message="Failed to inject code into warm pod"
+                            success=False, message="Failed to inject code into warm pod"
                         );
                     }
 
@@ -1038,7 +1036,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _cleanup_k8s_resources(sandbox_id: str, namespace: str) -> None {
+    def _cleanup_k8s_resources(sandbox_id: str, namespace: str) {
         import from kubernetes { client }
         import from kubernetes.client.exceptions { ApiException }
         core_v1 = client.CoreV1Api();
@@ -1083,7 +1081,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def stop(sandbox_id: str) -> None {
+    def stop(sandbox_id: str) {
         self._init_k8s();
         rec: Any = self._registry.get(sandbox_id);
         namespace = self.config.namespace;
@@ -1142,7 +1140,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         );
     }
 
-    def destroy(sandbox_id: str) -> None {
+    def destroy(sandbox_id: str) {
         self.stop(sandbox_id);
         self._lock.acquire();
         try {
@@ -1187,7 +1185,7 @@ obj KubernetesSandbox(SandboxEnvironment) {
         }
     }
 
-    def _cleanup_loop -> None {
+    def _cleanup_loop {
         while True {
             time.sleep(60);
             try {

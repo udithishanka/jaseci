@@ -53,7 +53,7 @@ cl {
         }
 
         # Toggle todo completion status
-        async def toggleTodo(id: Any) -> None {
+        async def toggleTodo(id: Any) {
             print("toggleTodo", id);
             result = id spawn toggle_todo();
             updated = result.reports[0][0];
@@ -61,7 +61,7 @@ cl {
         }
 
         # Delete a todo
-        def deleteTodo(id: Any) -> None {
+        def deleteTodo(id: Any) {
             todos = [
                 todo
                 for todo in todos
@@ -70,7 +70,7 @@ cl {
         }
 
         # Clear all completed todos
-        def clearCompleted -> None {
+        def clearCompleted {
             todos = [
                 todo
                 for todo in todos
@@ -144,10 +144,8 @@ cl {
                     <input
                         type="text"
                         value={inputValue}
-                        onChange={lambda e: Any  -> None { inputValue = e.target.value;}}
-                        onKeyPress={lambda e: Any  -> None { if e.key == "Enter" {
-                            addTodo();
-                        }}}
+                        onChange={lambda e: Any { inputValue = e.target.value;}}
+                        onKeyPress={lambda e: Any { if e.key == "Enter" { addTodo(); }}}
                         placeholder="What needs to be done?"
                         style={{
                             "flex": "1",
@@ -185,7 +183,7 @@ cl {
                     }}
                 >
                     <button
-                        onClick={lambda -> None { filter = "all";}}
+                        onClick={lambda { filter = "all";}}
                         style={{
                             "padding": "8px 16px",
                             "background": ("#3b82f6" if filter == "all" else "#ffffff"),
@@ -200,7 +198,7 @@ cl {
                         All
                     </button>
                     <button
-                        onClick={lambda -> None { filter = "active";}}
+                        onClick={lambda { filter = "active";}}
                         style={{
                             "padding": "8px 16px",
                             "background": (
@@ -217,7 +215,7 @@ cl {
                         Active
                     </button>
                     <button
-                        onClick={lambda -> None { filter = "completed";}}
+                        onClick={lambda { filter = "completed";}}
                         style={{
                             "padding": "8px 16px",
                             "background": (
@@ -281,9 +279,7 @@ cl {
                                     <input
                                         type="checkbox"
                                         checked={todo.done}
-                                        onChange={lambda -> None { toggleTodo(
-                                            todo._jac_id
-                                        );}}
+                                        onChange={lambda { toggleTodo(todo._jac_id);}}
                                         style={{
                                             "width": "20px",
                                             "height": "20px",
@@ -305,9 +301,7 @@ cl {
                                         {todo.text}
                                     </span>
                                     <button
-                                        onClick={lambda -> None { deleteTodo(
-                                            todo.__jac_id
-                                        );}}
+                                        onClick={lambda { deleteTodo(todo.__jac_id);}}
                                         style={{
                                             "padding": "6px 12px",
                                             "background": "#ef4444",
@@ -361,7 +355,7 @@ cl {
                             </button>
                         )
                             if todos.some(
-                                lambda todo: Any  -> bool { return todo.done; }
+                                lambda todo: Any -> bool { return todo.done; }
                             )
                             else None}
                     </div>

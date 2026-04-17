@@ -30,7 +30,7 @@ def examples_path(path: str) -> str {
     return os.path.join(EXAMPLES, path);
 }
 
-def _assert_error_pretty_found(needle: str, haystack: str) -> None {
+def _assert_error_pretty_found(needle: str, haystack: str) {
     for line in [
         line.strip()
         for line in needle.splitlines()
@@ -91,19 +91,19 @@ def _capture_output -> tuple {
 }
 
 """Restore original stdout/stderr."""
-def _restore_output(old_stdout: object, old_stderr: object) -> None {
+def _restore_output(old_stdout: object, old_stderr: object) {
     sys.stdout = old_stdout;
     sys.stderr = old_stderr;
 }
 
 """Reset the global config cache to force rediscovery."""
-def _reset_config -> None {
+def _reset_config {
     import from jaclang.project { config as config_module }
     config_module._config = None;
 }
 
 """Ensure template registry is initialized once."""
-def _ensure_template_registry -> None {
+def _ensure_template_registry {
     initialized = _template_state.get("initialized", False);
     if not initialized {
         import from jaclang.project.template_registry { initialize_template_registry }
@@ -125,55 +125,61 @@ test "jac cli run" {
     assert "Hello World!" in stdout_value;
 }
 
-test "show errors flag" {
-    # Create a temp file with known type errors and a with entry block
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jac", delete=False) as tmp {
-        tmp.write(
-            'glob x: str = 5;\n'
-            'glob y: int = "hello";\n'
-            'with entry { print("ran"); }\n'
-        );
-        tmp_path = tmp.name;
-    }
-    try {
-        # Without --show-errors: program runs, summary line shown, no detailed errors
-        captured_out = io.StringIO();
-        captured_err = io.StringIO();
-        sys.stdout = captured_out;
-        sys.stderr = captured_err;
-        try {
-            execution.run(tmp_path);
-        } finally {
-            sys.stdout = sys.__stdout__;
-            sys.stderr = sys.__stderr__;
-        }
-        stdout_val = captured_out.getvalue();
-        stderr_val = captured_err.getvalue();
-        combined = stdout_val + stderr_val;
-        assert "ran" in stdout_val , "Program should still execute";
-        assert "error(s)" in combined , "Summary line should appear";
-        assert "Cannot assign" not in combined , (
-            "Detailed errors should not appear without --show-errors"
-        );
+test "diagnostics flag" {
+    err_file = os.path.join(
+        JAC_ROOT, "tests", "compiler", "fixtures", "new_keyword_err.jac"
+    );
 
-        # With --show-errors: detailed errors shown
-        captured_out2 = io.StringIO();
-        captured_err2 = io.StringIO();
-        sys.stdout = captured_out2;
-        sys.stderr = captured_err2;
-        try {
-            execution.run(tmp_path, show_errors=True);
-        } finally {
-            sys.stdout = sys.__stdout__;
-            sys.stderr = sys.__stderr__;
-        }
-        combined2 = captured_out2.getvalue() + captured_err2.getvalue();
-        assert "Cannot assign" in combined2 , (
-            "Detailed errors should appear with --show-errors"
-        );
+    # Default (diagnostics="error"): errors shown, returns 1
+    captured_out = io.StringIO();
+    captured_err = io.StringIO();
+    sys.stdout = captured_out;
+    sys.stderr = captured_err;
+    try {
+        result = execution.run(err_file);
     } finally {
-        os.unlink(tmp_path);
+        sys.stdout = sys.__stdout__;
+        sys.stderr = sys.__stderr__;
     }
+    combined = captured_out.getvalue() + captured_err.getvalue();
+    assert "'new' is not supported in Jac" in combined , (
+        "Detailed errors should appear by default"
+    );
+    assert result == 1 , "Should return exit code 1 on errors";
+
+    # diagnostics="all": errors shown
+    captured_out2 = io.StringIO();
+    captured_err2 = io.StringIO();
+    sys.stdout = captured_out2;
+    sys.stderr = captured_err2;
+    try {
+        result2 = execution.run(err_file, diagnostics="all");
+    } finally {
+        sys.stdout = sys.__stdout__;
+        sys.stderr = sys.__stderr__;
+    }
+    combined2 = captured_out2.getvalue() + captured_err2.getvalue();
+    assert "'new' is not supported in Jac" in combined2 , (
+        "Detailed errors should appear with diagnostics=all"
+    );
+    assert result2 == 1 , "Should return exit code 1 on errors";
+
+    # diagnostics="none": no errors shown, returns 0
+    captured_out3 = io.StringIO();
+    captured_err3 = io.StringIO();
+    sys.stdout = captured_out3;
+    sys.stderr = captured_err3;
+    try {
+        result3 = execution.run(err_file, diagnostics="none");
+    } finally {
+        sys.stdout = sys.__stdout__;
+        sys.stderr = sys.__stderr__;
+    }
+    combined3 = captured_out3.getvalue() + captured_err3.getvalue();
+    assert "'new' is not supported in Jac" not in combined3 , (
+        "Errors should not appear with diagnostics=none"
+    );
+    assert result3 == 0 , "Should return exit code 0 with diagnostics=none";
 }
 
 test "jac cli run python file" {
@@ -818,6 +824,11 @@ test "cli error exit codes" {
     assert "not found" in stderr;
 
     # Test successful run returns exit code 0
+    # Clear stale errors from previous sub-tests so only hello.jac's
+    # own diagnostics affect the exit code.
+    _rt = __import__("jaclang.jac0core.runtime", fromlist=["JacRuntime"]);
+    _rt.JacRuntime.program.errors_had.clear();
+    _rt.JacRuntime.program.warnings_had.clear();
     captured = io.StringIO();
     old_stdout = sys.stdout;
     sys.stdout = captured;
@@ -894,6 +905,57 @@ test "format tracks changed files" {
         combined_output = stdout + stderr;
         assert "2/2" in combined_output;
         assert "(1 changed)" in combined_output;
+    }
+}
+
+test "format -s preserves bracketed Jac syntax through Rich console" {
+    # Regression: `jac format -s` prints formatted source via `console.print`.
+    # Under the jac-super (Rich-backed) console — which is what real users see
+    # when they run the `jac` CLI — bracketed Jac syntax like `[root()-->]` or
+    # `todos + [t]` looks like Rich markup and gets silently stripped unless
+    # the call passes `markup=False, highlight=False`. This test must invoke
+    # the `jac` binary via subprocess so that the jac-super plugin's console
+    # is installed (calling `analysis.format` from inside pytest hits the
+    # plain JacConsole and would not catch the regression).
+    with tempfile.TemporaryDirectory() as tmpdir {
+        src_path = os.path.join(tmpdir, "brackets.jac");
+        # Deliberately unformatted so --to_screen has something to print.
+        src = (
+            "node Todo { has title: str; }\n"
+            "with entry {\n"
+            "    t: Todo = Todo(title=\"x\");\n"
+            "    todos: list[Todo] = [];\n"
+            "    todos = todos + [t];\n"
+            "    ancestors = [root()-->];\n"
+            "}\n"
+        );
+        with open(src_path, "w") as f {
+            f.write(src);
+        }
+        process = subprocess.Popen(
+            ["jac", "format", "-s", src_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        );
+        (stdout, stderr) = process.communicate();
+        combined = stdout + stderr;
+        # Both bracket forms must appear verbatim in the -s output. If Rich
+        # markup interpretation ever leaks back in, these get stripped
+        # (producing `todos = todos + ;` and `ancestors = ;`) and this test
+        # fails loudly.
+        assert "[root()-->]" in combined , (
+            f"edge-walk literal was stripped by Rich markup parser:\n{combined}"
+        );
+        assert "+ [t]" in combined , (
+            f"list literal RHS was stripped by Rich markup parser:\n{combined}"
+        );
+        # Sanity check: the file on disk must be unchanged under --to_screen.
+        with open(src_path) as f {
+            assert f.read() == src , (
+                "jac format -s must not write back to the source file"
+            );
+        }
     }
 }
 

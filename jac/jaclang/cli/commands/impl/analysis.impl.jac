@@ -29,7 +29,7 @@ impl check(
     start_time = time();
     ignore_list = _normalize_ignore_patterns(ignore);
     # Helper to process and store single file result
-    def process_file_result(file_path: str, idx: int, total: int) -> None {
+    def process_file_result(file_path: str, idx: int, total: int) {
         nonlocal total_files , total_errors , total_warnings , failed_files;
         total_files += 1;
         (success, errs, warns, errors_list, warnings_list) = check_single_file(
@@ -165,6 +165,9 @@ impl lint(paths: list, fix: bool = False, ignore: list = []) -> int {
         try {
             prog = JacProgram.jac_file_linter(str(path_obj));
             error_count = 0;
+            for warning in prog.warnings_had {
+                console.warning(f"{warning}");
+            }
             for error in prog.errors_had {
                 console.error(f"{error}");
                 error_count += 1;
@@ -478,7 +481,12 @@ impl format(
                 if res['formatted_code'] is not None {
                     try {
                         if to_screen {
-                            console.print(res['formatted_code']);
+                            # markup=False, highlight=False: prevent Rich from
+                            # interpreting Jac syntax like [root()-->], [?:Todo],
+                            # or [todo] as markup tags and silently stripping them.
+                            console.print(
+                                res['formatted_code'], markup=False, highlight=False
+                            );
                         } else {
                             with open(res['path'], 'w', encoding='utf-8') as f {
                                 f.write(res['formatted_code']);
@@ -492,7 +500,7 @@ impl format(
                 for (impl_path, impl_code) in res['impl_results'] {
                     try {
                         if to_screen {
-                            console.print(impl_code);
+                            console.print(impl_code, markup=False, highlight=False);
                         } else {
                             with open(impl_path, 'w', encoding='utf-8') as f {
                                 f.write(impl_code);
