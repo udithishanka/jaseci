@@ -67,8 +67,6 @@ def mock_sso_config_partial_credentials -> dict {
 obj MockUserInfo {
     has email: str,
         id: str = "mock_sso_id",
-        external_id: str = "mock_external_id",
-        platform: str = "google",
         first_name: str = "Test",
         last_name: str = "User",
         display_name: str = "Test User",
@@ -484,15 +482,10 @@ test "sso callback login existing user" {
     (test_dir, user_manager) = _setup_user_manager();
     try {
         mock_request = unittest.mock.Mock(spec=Request);
-        mock_user_id = str(uuid4());
-        mock_root_id = str(uuid4());
-        user_manager.find_user_by_identity = unittest.mock.Mock(
-            return_value={
-                "user_id": mock_user_id,
-                "root_id": mock_root_id
-            }
-        );
-        user_manager.link_sso_account = unittest.mock.Mock(return_value={});
+        user_manager.get_user.return_value = {
+            "email": "test@example.com",
+            "root_id": str(uuid4())
+        };
         mock_sso = MockGoogleSSO("id", "secret", "uri");
         mock_sso.verify_and_process = unittest.mock.AsyncMock(
             return_value=MockUserInfo(email="test@example.com")
@@ -509,6 +502,7 @@ test "sso callback login existing user" {
                 assert isinstance(result, (JSONResponse, TransportResponse));
                 body = _get_response_body(result);
                 assert "Login successful" in body;
+                assert "test@example.com" in body;
                 assert "mock_jwt_token" in body;
             }
         }
@@ -522,13 +516,11 @@ test "sso callback auto register new user" {
     (test_dir, user_manager) = _setup_user_manager();
     try {
         mock_request = unittest.mock.Mock(spec=Request);
-        mock_user_id = str(uuid4());
-        user_manager.find_user_by_identity = unittest.mock.Mock(return_value=None);
+        user_manager.get_user.return_value = None;
         user_manager.create_user.return_value = {
-            "user_id": mock_user_id,
-            "message": "User registered successfully"
+            "email": "newuser@example.com",
+            "root_id": str(uuid4())
         };
-        user_manager.link_sso_account = unittest.mock.Mock(return_value={});
         mock_sso = MockGoogleSSO("id", "secret", "uri");
         mock_sso.verify_and_process = unittest.mock.AsyncMock(
             return_value=MockUserInfo(email="newuser@example.com")
@@ -548,8 +540,7 @@ test "sso callback auto register new user" {
                     );
                     assert isinstance(result, (JSONResponse, TransportResponse));
                     user_manager.create_user.assert_called_once_with(
-                        identities=[{'type': 'email', 'value': 'newuser@example.com', 'verified': True}],
-                        credential={'type': 'password', 'password': 'random_pass'}
+                        "newuser@example.com", "random_pass"
                     );
                 }
             }
@@ -696,30 +687,24 @@ test "supported platforms initialization without jac toml credentials" {
 # ============================================================================
 # SSO Account Linking Tests
 # ============================================================================
-"""Setup user manager without mocked create_user/get_user for linking tests."""
-def _setup_real_user_manager -> tuple[str, JacScaleUserManager] {
-    test_dir = mkdtemp();
-    reset_scale_config();
-    mock_config = MockScaleConfig(mock_sso_config_with_credentials());
-    with unittest.mock.patch(
-        "jac_scale.user_manager.get_scale_config", return_value=mock_config
-    ) {
-        user_manager = JacScaleUserManager(base_path=test_dir);
-    }
-    return (test_dir, user_manager);
-}
-
 """Test linking an SSO account successfully."""
 test "link sso account success" {
-    (test_dir, user_manager) = _setup_real_user_manager();
+    (test_dir, user_manager) = _setup_user_manager();
     try {
-        user1 = user_manager.create_internal_user("user1", "pass1");
-        user1_id = user1.get("user_id", "user1");
+        user_manager._ensure_connection();
+        user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token", "root")
+        );
+        user_manager._conn.commit();
 
-        result = user_manager.link_sso_account(user1_id, "google", "ext_123");
+        result = user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        );
         assert result.get("message") == "SSO account linked successfully";
+        assert result.get("user_id") == "user1";
 
-        accounts = user_manager.get_sso_accounts(user1_id);
+        accounts = user_manager.get_sso_accounts("user1");
         assert len(accounts) == 1;
         assert accounts[0]["platform"] == "google";
         assert accounts[0]["external_id"] == "ext_123";
@@ -730,19 +715,29 @@ test "link sso account success" {
 
 """Test preventing duplicate SSO account linking."""
 test "link sso account duplicate" {
-    (test_dir, user_manager) = _setup_real_user_manager();
+    (test_dir, user_manager) = _setup_user_manager();
     try {
-        user1 = user_manager.create_internal_user("user1", "pass1");
-        user1_id = user1.get("user_id", "user1");
-        user2 = user_manager.create_internal_user("user2", "pass2");
-        user2_id = user2.get("user_id", "user2");
+        user_manager._ensure_connection();
+        user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token", "root")
+        );
+        user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user2", "hash", "token2", "root2")
+        );
+        user_manager._conn.commit();
 
-        user_manager.link_sso_account(user1_id, "google", "ext_123");
+        user_manager.link_sso_account("user1", "google", "ext_123", "test@google.com");
 
-        result = user_manager.link_sso_account(user2_id, "google", "ext_123");
+        result = user_manager.link_sso_account(
+            "user2", "google", "ext_123", "test@google.com"
+        );
         assert "already linked to another user" in result.get("error", "");
 
-        result = user_manager.link_sso_account(user1_id, "google", "ext_123");
+        result = user_manager.link_sso_account(
+            "user1", "google", "ext_123", "test@google.com"
+        );
         assert "already linked to this user" in result.get("message", "");
     } finally {
         _teardown_user_manager(test_dir);
@@ -751,17 +746,21 @@ test "link sso account duplicate" {
 
 """Test unlinking an SSO account."""
 test "unlink sso account" {
-    (test_dir, user_manager) = _setup_real_user_manager();
+    (test_dir, user_manager) = _setup_user_manager();
     try {
-        user1 = user_manager.create_internal_user("user1", "pass1");
-        user1_id = user1.get("user_id", "user1");
+        user_manager._ensure_connection();
+        user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token", "root")
+        );
+        user_manager._conn.commit();
 
-        user_manager.link_sso_account(user1_id, "google", "ext_123");
+        user_manager.link_sso_account("user1", "google", "ext_123", "test@google.com");
 
-        result = user_manager.unlink_sso_account(user1_id, "google");
+        result = user_manager.unlink_sso_account("user1", "google");
         assert result.get("message") == "SSO account unlinked successfully";
 
-        accounts = user_manager.get_sso_accounts(user1_id);
+        accounts = user_manager.get_sso_accounts("user1");
         assert len(accounts) == 0;
     } finally {
         _teardown_user_manager(test_dir);
@@ -770,16 +769,22 @@ test "unlink sso account" {
 
 """Test retrieving user by SSO credentials."""
 test "get user by sso" {
-    (test_dir, user_manager) = _setup_real_user_manager();
+    (test_dir, user_manager) = _setup_user_manager();
     try {
-        user1 = user_manager.create_internal_user("user1", "pass1");
-        user1_id = user1.get("user_id", "user1");
+        user_manager._ensure_connection();
+        user_manager._conn.execute(
+            "INSERT INTO users (username, password_hash, token, root_id) VALUES (?, ?, ?, ?)",
+            ("user1", "hash", "token_val", "root_val")
+        );
+        user_manager._conn.commit();
 
-        user_manager.link_sso_account(user1_id, "google", "ext_123");
+        user_manager.link_sso_account("user1", "google", "ext_123", "test@google.com");
 
         user = user_manager.get_user_by_sso("google", "ext_123");
         assert user is not None;
-        assert user["user_id"] == user1_id;
+        assert user["email"] == "user1";
+        assert user["token"] == "token_val";
+        assert user["root_id"] == "root_val";
 
         user = user_manager.get_user_by_sso("google", "nonexistent");
         assert user is None;
@@ -941,11 +946,10 @@ test "apple sso callback login existing user" {
     (test_dir, user_manager) = _setup_user_manager();
     try {
         mock_request = unittest.mock.Mock(spec=Request);
-        mock_user_id = str(uuid4());
-        user_manager.find_user_by_identity = unittest.mock.Mock(
-            return_value={"user_id": mock_user_id, "root_id": str(uuid4())}
-        );
-        user_manager.link_sso_account = unittest.mock.Mock(return_value={});
+        user_manager.get_user.return_value = {
+            "email": "test@privaterelay.appleid.com",
+            "root_id": str(uuid4())
+        };
         mock_sso = MockAppleSSO("id", "secret", "uri");
         mock_sso.verify_and_process = unittest.mock.AsyncMock(
             return_value=MockUserInfo(email="test@privaterelay.appleid.com")
@@ -962,6 +966,7 @@ test "apple sso callback login existing user" {
                 assert isinstance(result, (JSONResponse, TransportResponse));
                 body = _get_response_body(result);
                 assert "Login successful" in body;
+                assert "test@privaterelay.appleid.com" in body;
                 assert "mock_apple_jwt" in body;
             }
         }
@@ -975,13 +980,11 @@ test "apple sso callback auto register new user" {
     (test_dir, user_manager) = _setup_user_manager();
     try {
         mock_request = unittest.mock.Mock(spec=Request);
-        mock_user_id = str(uuid4());
-        user_manager.find_user_by_identity = unittest.mock.Mock(return_value=None);
+        user_manager.get_user.return_value = None;
         user_manager.create_user.return_value = {
-            "user_id": mock_user_id,
-            "message": "User registered successfully"
+            "email": "newuser@privaterelay.appleid.com",
+            "root_id": str(uuid4())
         };
-        user_manager.link_sso_account = unittest.mock.Mock(return_value={});
         mock_sso = MockAppleSSO("id", "secret", "uri");
         mock_sso.verify_and_process = unittest.mock.AsyncMock(
             return_value=MockUserInfo(email="newuser@privaterelay.appleid.com")
@@ -1001,8 +1004,7 @@ test "apple sso callback auto register new user" {
                     );
                     assert isinstance(result, (JSONResponse, TransportResponse));
                     user_manager.create_user.assert_called_once_with(
-                        identities=[{'type': 'email', 'value': 'newuser@privaterelay.appleid.com', 'verified': True}],
-                        credential={'type': 'password', 'password': 'random_pass'}
+                        "newuser@privaterelay.appleid.com", "random_pass"
                     );
                 }
             }
@@ -1166,11 +1168,10 @@ test "github sso callback login existing user" {
     (test_dir, user_manager) = _setup_user_manager();
     try {
         mock_request = unittest.mock.Mock(spec=Request);
-        mock_user_id = str(uuid4());
-        user_manager.find_user_by_identity = unittest.mock.Mock(
-            return_value={"user_id": mock_user_id, "root_id": str(uuid4())}
-        );
-        user_manager.link_sso_account = unittest.mock.Mock(return_value={});
+        user_manager.get_user.return_value = {
+            "email": "test@github.com",
+            "root_id": str(uuid4())
+        };
         mock_sso = MockGithubSSO("id", "secret", "uri");
         mock_sso.verify_and_process = unittest.mock.AsyncMock(
             return_value=MockUserInfo(email="test@github.com")
@@ -1187,6 +1188,7 @@ test "github sso callback login existing user" {
                 assert isinstance(result, (JSONResponse, TransportResponse));
                 body = _get_response_body(result);
                 assert "Login successful" in body;
+                assert "test@github.com" in body;
                 assert "mock_github_jwt" in body;
             }
         }
@@ -1200,13 +1202,11 @@ test "github sso callback auto register new user" {
     (test_dir, user_manager) = _setup_user_manager();
     try {
         mock_request = unittest.mock.Mock(spec=Request);
-        mock_user_id = str(uuid4());
-        user_manager.find_user_by_identity = unittest.mock.Mock(return_value=None);
+        user_manager.get_user.return_value = None;
         user_manager.create_user.return_value = {
-            "user_id": mock_user_id,
-            "message": "User registered successfully"
+            "email": "newuser@github.com",
+            "root_id": str(uuid4())
         };
-        user_manager.link_sso_account = unittest.mock.Mock(return_value={});
         mock_sso = MockGithubSSO("id", "secret", "uri");
         mock_sso.verify_and_process = unittest.mock.AsyncMock(
             return_value=MockUserInfo(email="newuser@github.com")
@@ -1226,8 +1226,7 @@ test "github sso callback auto register new user" {
                     );
                     assert isinstance(result, (JSONResponse, TransportResponse));
                     user_manager.create_user.assert_called_once_with(
-                        identities=[{'type': 'email', 'value': 'newuser@github.com', 'verified': True}],
-                        credential={'type': 'password', 'password': 'random_pass'}
+                        "newuser@github.com", "random_pass"
                     );
                 }
             }
