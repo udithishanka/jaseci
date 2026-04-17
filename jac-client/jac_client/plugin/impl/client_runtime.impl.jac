@@ -339,33 +339,19 @@ impl __jacCallFunction(function_name: str, args: dict = {}) -> Any {
 
 impl jacSignup(username: str, password: str) -> dict {
     base_url = __getApiBaseUrl();
-    response = await fetch(
+    register_response = await fetch(
         f"{base_url}/user/register",
         {
             "method": "POST",
             "headers": {"Content-Type": "application/json"},
-            "body": JSON.stringify({"username": username, "password": password})
+            "body": JSON.stringify({
+                "identities": [{"type": "username", "value": username}],
+                "credential": {"type": "password", "password": password}
+            })
         }
     );
-    if response.ok {
-        data = JSON.parse(await response.text());
-        token = None;
-        if data["data"] and data["data"]["token"] {
-            token = data["data"]["token"];
-        }
-        if token {
-            # Clear cache on auth change
-            state = __getCacheState();
-            for key in Object.keys(state["cache"]) {
-                Reflect.deleteProperty(state["cache"], key);
-            }
-            state["order"].splice(0, state["order"].length);
-            __setLocalStorage("jac_token", token);
-            return {"success": True, "token": token, "username": username};
-        }
-        return {"success": False, "error": "No token received"};
-    } else {
-        error_text = await response.text();
+    if not register_response.ok {
+        error_text = await register_response.text();
         try {
             error_data = JSON.parse(error_text);
             return {
@@ -378,6 +364,13 @@ impl jacSignup(username: str, password: str) -> dict {
             return {"success": False, "error": error_text};
         }
     }
+    # Registration no longer returns a token — log in to obtain one.
+    logged_in = await jacLogin(username, password);
+    if logged_in {
+        token = __getLocalStorage("jac_token");
+        return {"success": True, "token": token, "username": username};
+    }
+    return {"success": False, "error": "Signup succeeded but auto-login failed"};
 }
 
 impl jacLogin(username: str, password: str) -> bool {
@@ -387,7 +380,10 @@ impl jacLogin(username: str, password: str) -> bool {
         {
             "method": "POST",
             "headers": {"Content-Type": "application/json"},
-            "body": JSON.stringify({"username": username, "password": password})
+            "body": JSON.stringify({
+                "identity": {"type": "username", "value": username},
+                "credential": {"type": "password", "password": password}
+            })
         }
     );
     if response.ok {
