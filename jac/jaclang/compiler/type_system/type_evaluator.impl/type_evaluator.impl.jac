@@ -502,6 +502,22 @@ impl TypeEvaluator._get_type_of_expression_core(
 
         case uni.JsxElement():
             if self.prefetch and self.prefetch.jsx_element_class {
+                if expr.name and expr.name.parts {
+                    for part in expr.name.parts {
+                        if isinstance(part, uni.Name) {
+                            tag_val = part.value or "";
+                            if tag_val and tag_val[0].isupper() {
+                                # Uppercase = user component — resolve via normal scope.
+                                self.get_type_of_expression(part);
+                            } else {
+                                # Lowercase = intrinsic HTML element — resolve via
+                                # _JsxIntrinsicElements registry (JSX-context only,
+                                # not global scope).
+                                self._resolve_intrinsic_jsx_tag(part, tag_val);
+                            }
+                        }
+                    }
+                }
                 self._validate_jsx_props(expr, expected_type);
                 return self._convert_to_instance(self.prefetch.jsx_element_class);
             }
@@ -548,6 +564,14 @@ impl TypeEvaluator._get_type_of_expression_core(
                 # Member lookup on (narrowed) base type
                 assert isinstance(expr.right, uni.Name);
                 if isinstance(base_type, types.ModuleType) {
+                    # Foreign-source modules (JS/TS/asset/etc.) are opaque
+                    # to the Jac type system; any attribute access yields
+                    # gradual Any rather than looking up a symbol table
+                    # that doesn't (and can't) exist.
+                    if base_type.is_external {
+                        expr.right.type = types.AnyType();
+                        return expr.right.type;
+                    }
                     # getTypeOfMemberAccessWithBaseType()
                     if sym := type_utils.lookup_symtab(
                         base_type.symbol_table, expr.right.value, self.builtins_module
@@ -959,6 +983,14 @@ impl TypeEvaluator._get_type_of_expression_core(
                     return types.UnknownType();
                 } elif isinstance(base_type, types.TypeVarType) {
                     attr_name = expr.right.value;
+                    # ParamSpec.args / ParamSpec.kwargs -- the only attributes
+                    # a ParamSpec exposes (used in `*args: _P.args, **kwargs:
+                    # _P.kwargs` signatures). Full ParamSpecArgs/Kwargs
+                    # modelling is future work; returning AnyType is gradually
+                    # safe and silences bogus E1031 on typeshed stubs.
+                    if base_type.is_param_spec and attr_name in ("args", "kwargs") {
+                        return types.AnyType();
+                    }
                     # Constrained TypeVar - check all constraint types
                     if base_type.constraints {
                         found_member: Any = None;
@@ -2420,34 +2452,59 @@ impl TypeEvaluator.is_any_type(ty: TypeBase) -> bool {
     return False;
 }
 
+"""Match a typing special form loaded from any stdlib typing stub.
+
+Prefetch pins a single definition (e.g. typing.ParamSpec) but typeshed's
+typing_extensions.pyi declares its own ParamSpec/TypeVar/TypeVarTuple
+classes. Python unifies them at runtime; we match by canonical name
+constrained to stdlib stubs so user classes can't collide.
+"""
+impl TypeEvaluator._is_typing_special_form(ty: TypeBase, name: str) -> bool {
+    return (
+        isinstance(ty, types.ClassType)
+        and ty.shared is not None
+        and ty.shared.class_name == name
+        and ty.shared.is_from_stdlib_stub
+    );
+}
+
 """Check if a type is the TypeVar class itself (not a TypeVarType instance)."""
 impl TypeEvaluator.is_typevar_class(ty: TypeBase) -> bool {
-    return (
+    if (
         self.prefetch
         and self.prefetch.type_var_class
         and isinstance(ty, types.ClassType)
         and ty.shared == self.prefetch.type_var_class.shared
-    );
+    ) {
+        return True;
+    }
+    return self._is_typing_special_form(ty, "TypeVar");
 }
 
 """Check if a type is the ParamSpec class itself (not a TypeVarType instance)."""
 impl TypeEvaluator.is_paramspec_class(ty: TypeBase) -> bool {
-    return (
+    if (
         self.prefetch
         and self.prefetch.param_spec_class
         and isinstance(ty, types.ClassType)
         and ty.shared == self.prefetch.param_spec_class.shared
-    );
+    ) {
+        return True;
+    }
+    return self._is_typing_special_form(ty, "ParamSpec");
 }
 
 """Check if a type is the TypeVarTuple class itself (not a TypeVarType instance)."""
 impl TypeEvaluator.is_type_var_tuple_class(ty: TypeBase) -> bool {
-    return (
+    if (
         self.prefetch
         and self.prefetch.type_var_tuple_class
         and isinstance(ty, types.ClassType)
         and ty.shared == self.prefetch.type_var_tuple_class.shared
-    );
+    ) {
+        return True;
+    }
+    return self._is_typing_special_form(ty, "TypeVarTuple");
 }
 
 """Assign the source type to the destination type."""
@@ -2882,6 +2939,9 @@ impl TypeEvaluator._prefetch_types{
     self.prefetch.walker_class = get_jac_builtin_class("Walker");
     self.prefetch.jsx_element_class = get_jac_builtin_class("JsxElement");
     self.prefetch.html_common_props_class = get_jac_builtin_class("_HtmlCommonProps");
+    self.prefetch.jsx_intrinsic_elements_class = get_jac_builtin_class(
+        "_JsxIntrinsicElements"
+    );
     # Fixed-width numeric types
     self.prefetch.i8_class = get_jac_builtin_class("i8");
     self.prefetch.u8_class = get_jac_builtin_class("u8");

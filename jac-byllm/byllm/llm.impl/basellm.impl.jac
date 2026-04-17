@@ -9,22 +9,35 @@ def _is_prompt_caching_eligible(model_name: str) -> bool {
 }
 
 
-"""Add cache_control markers to the last system message and last tool."""
+"""Attach a cache_control marker to a message (string or list content)."""
+def _mark_message_for_caching(msg: dict) {
+    content = msg.get("content");
+    if isinstance(content, str) {
+        msg["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
+    } elif isinstance(content, list) and len(content) > 0 {
+        content[-1]["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
+    }
+}
+
+
+"""Mark cache breakpoints for Anthropic: last system, last non-system, last tool."""
 def _apply_prompt_caching(messages: list, tools: list | None) {
     last_sys_idx = -1;
+    last_nonsys_idx = -1;
     for (i, msg) in enumerate(messages) {
-        if isinstance(msg, dict) and msg.get("role") == "system" {
-            last_sys_idx = i;
+        if isinstance(msg, dict) {
+            if msg.get("role") == "system" {
+                last_sys_idx = i;
+            } else {
+                last_nonsys_idx = i;
+            }
         }
     }
     if last_sys_idx >= 0 {
-        msg = messages[last_sys_idx];
-        content = msg.get("content");
-        if isinstance(content, str) {
-            msg["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
-        } elif isinstance(content, list) and len(content) > 0 {
-            content[-1]["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
-        }
+        _mark_message_for_caching(messages[last_sys_idx]);
+    }
+    if last_nonsys_idx >= 0 {
+        _mark_message_for_caching(messages[last_nonsys_idx]);
     }
     if tools {
         tools[-1]["cache_control"] = _CACHE_CONTROL_EPHEMERAL;
@@ -334,6 +347,11 @@ impl BaseLLM.dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None]
     params.pop("api_key", None);
     response = self.model_call_with_stream(params);
     for chunk in response {
+        # Final chunk carries usage when stream_options.include_usage is set.
+        chunk_usage = getattr(chunk, "usage", None);
+        if chunk_usage {
+            self._usage_history.append(chunk_usage);
+        }
         if chunk?.choices and chunk?.choices?[0]?.delta {
             delta = chunk.choices[0].delta;
             yield delta.content or "";

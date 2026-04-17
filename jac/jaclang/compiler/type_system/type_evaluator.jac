@@ -86,7 +86,10 @@ import from jaclang.jac0core.diagnostics {
     E1102,
     E1103,
     E1104,
-    W1100
+    W1050,
+    W1100,
+    W1101,
+    W1102
 }
 
 """Types whose definitions are prefetched and cached by the type evaluator."""
@@ -129,6 +132,7 @@ obj PrefetchedTypes {
         jsx_element_class: types.ClassType | None = None,
         # Intrinsic element prop types (from dom_types.pyi)
         html_common_props_class: types.ClassType | None = None,
+        jsx_intrinsic_elements_class: types.ClassType | None = None,
         # Fixed-width numeric types
         i8_class: types.ClassType | None = None,
         u8_class: types.ClassType | None = None,
@@ -290,6 +294,9 @@ obj TypeEvaluator {
     def is_paramspec_class(ty: TypeBase) -> bool;
     # Check if a type is the TypeVarTuple class itself (not a TypeVarType instance).
     def is_type_var_tuple_class(ty: TypeBase) -> bool;
+    # Match a typing special form by canonical name from stdlib stubs so
+    # typing.X and typing_extensions.X (distinct classes in typeshed) both count.
+    def _is_typing_special_form(ty: TypeBase, name: str) -> bool;
     # Comments from pyright:
     # // Determines if the source type can be assigned to the dest type.
     # // If constraint are provided, type variables within the destType are
@@ -531,6 +538,7 @@ obj TypeEvaluator {
     ) -> None;
 
     def _validate_intrinsic_jsx_props(expr: uni.JsxElement, tag_name: str) -> None;
+    def _resolve_intrinsic_jsx_tag(part: uni.Name, tag_name: str) -> None;
     # -------------------------------------------------------------------------
     # TypeVar scope validation (Pyright: validateTypeVarUsage)
     # -------------------------------------------------------------------------
