@@ -497,96 +497,54 @@ def _generate_build_rs(tauri_dir: Path) {
 }
 
 """Generate default placeholder icons for Tauri."""
-def _generate_default_icons(tauri_dir: Path) -> None {
+def _generate_default_icons(tauri_dir: Path) {
     icons_dir = tauri_dir / "icons";
     icons_dir.mkdir(exist_ok=True);
-
-    # Create a 1024x1024 PNG icon as placeholder (AppImage requires square icons, 1024x1024 recommended)
-    # Try using PIL/Pillow first (most common), then fallback to subprocess with ImageMagick/convert,
-    # finally use a simple Python-based PNG generator
     icon_path = icons_dir / "icon.png";
 
-    # Method 1: Try using Python with PIL to generate icon
+    # Try Pillow in-process first (best quality, no subprocess overhead).
     try {
-        import subprocess;
-        # Use Python to create a 1024x1024 PNG using PIL if available
-        python_code = '''
-import sys
-try:
-    from PIL import Image, ImageDraw
-    size = 1024
-    img = Image.new("RGBA", (size, size), color=(66, 139, 202, 255))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([20, 20, size-20, size-20], outline=(255, 255, 255, 255), width=10)
-    img.save(sys.argv[1], "PNG")
-    sys.exit(0)
-except ImportError:
-    sys.exit(1)
-''';
-        result = subprocess.run(
-            ["python3", "-c", python_code, str(icon_path)],
-            capture_output=True,
-            check=True,
-            timeout=SUBPROCESS_TIMEOUT_SHORT
+        import from PIL { Image, ImageDraw }
+        size = 1024;
+        img = Image.new("RGBA", (size, size), color=(66, 139, 202, 255));
+        draw = ImageDraw.Draw(img);
+        draw.rectangle(
+            [20, 20, size - 20, size - 20], outline=(255, 255, 255, 255), width=10
         );
+        img.save(str(icon_path), "PNG");
         console.print("  ✔ Generated default icon (1024x1024)", style="success");
-        console.warning(
-            "  Note: Replace icons/icon.png with your app icon (1024x1024 PNG recommended)"
+    } except ImportError {
+        # Pillow not installed; use hand-crafted PNG as fallback.
+        _generate_fallback_png(icon_path);
+        console.print(
+            "  ✔ Generated default icon (1024x1024, fallback)", style="success"
         );
-        return;
-    } except (
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-        subprocess.TimeoutExpired
-    ) {
-    # PIL not available, try next method
+    } except Exception as e {
+        _generate_fallback_png(icon_path);
+        console.warning(f"  Pillow icon generation failed ({e}), used fallback");
     }
 
-    # Method 2: Try ImageMagick convert command
-    try {
-        import subprocess;
-        # Create a 1024x1024 solid blue PNG with alpha channel using ImageMagick
-        result = subprocess.run(
-            [
-                "convert",
-                "-size",
-                "1024x1024",
-                "xc:#428BCA",
-                "-alpha",
-                "set",
-                "-channel",
-                "RGBA",
-                str(icon_path)
-            ],
-            capture_output=True,
-            check=True,
-            timeout=SUBPROCESS_TIMEOUT_SHORT
-        );
-        console.print("  ✔ Generated default icon (1024x1024)", style="success");
-        console.warning(
-            "  Note: Replace icons/icon.png with your app icon (1024x1024 PNG recommended)"
-        );
-        return;
-    } except (
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-        subprocess.TimeoutExpired
-    ) {
-    # ImageMagick not available, try next method
-    }
+    console.warning(
+        "  Note: Replace icons/icon.png with your app icon (1024x1024 PNG recommended)"
+    );
 
-    # Method 3: Fallback - create a minimal but valid 1024x1024 PNG using Python
-    # This creates a simple solid color PNG
+    # Always generate platform-specific derivatives from whatever icon.png
+    # was created. Tauri requires .ico (Windows), .icns (macOS), and
+    # multiple PNG sizes (Linux).
+    _generate_platform_icons(icons_dir);
+}
+
+
+"""Create a minimal valid 1024x1024 RGBA PNG without any dependencies."""
+def _generate_fallback_png(icon_path: Path) {
     import struct;
     import zlib;
 
     width = 1024;
     height = 1024;
 
-    # PNG signature
     png = bytearray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
 
-    # IHDR chunk - RGBA, 8-bit per channel (color type 6 = RGBA)
     ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0);
     ihdr_crc = zlib.crc32(b"IHDR" + ihdr_data) & 0xffffffff;
     png.extend(struct.pack(">I", 13));
@@ -594,15 +552,8 @@ except ImportError:
     png.extend(ihdr_data);
     png.extend(struct.pack(">I", ihdr_crc));
 
-    # IDAT chunk - solid blue color with alpha (RGBA: 66, 139, 202, 255 = #428BCA)
-    # PNG scanlines: each row is prefixed with filter byte (0 = none)
-    row_size = width * 4;  # RGBA = 4 bytes per pixel
-    scanline = bytes([0]) + bytes(
-        [66, 139, 202, 255]
-    ) * width;  # Filter byte + RGBA data
+    scanline = bytes([0]) + bytes([66, 139, 202, 255]) * width;
     image_data = scanline * height;
-
-    # Compress
     compressed = zlib.compress(image_data, level=9);
     idat_crc = zlib.crc32(b"IDAT" + compressed) & 0xffffffff;
     png.extend(struct.pack(">I", len(compressed)));
@@ -610,21 +561,134 @@ except ImportError:
     png.extend(compressed);
     png.extend(struct.pack(">I", idat_crc));
 
-    # IEND chunk
     png.extend(struct.pack(">I", 0));
     png.extend(b"IEND");
     png.extend(struct.pack(">I", 0xAE426082));
 
-    # Write icon.png
     with open(icon_path, "wb") as f {
         f.write(png);
     }
+}
 
-    console.print("  ✔ Generated default icon (1024x1024)", style="success");
+
+"""Generate all platform icon formats from icon.png.
+
+Produces:
+  - icon.ico   (Windows NSIS/MSI bundler)
+  - icon.icns  (macOS .app bundler)
+  - 32x32.png, 128x128.png, 128x128@2x.png (Tauri standard sizes)
+
+Uses Pillow in-process first. Falls back to a subprocess invocation so a
+Pillow install in a different Python environment still works. If Pillow
+is completely unavailable, warns the user.
+"""
+def _generate_platform_icons(icons_dir: Path) -> None {
+    import sys;
+    png_path = icons_dir / "icon.png";
+
+    if not png_path.exists() {
+        return;
+    }
+
+    # Try Pillow in-process first (fast, best error messages).
+    try {
+        import from PIL { Image }
+        _generate_icons_with_pillow(icons_dir, Image);
+        return;
+    } except ImportError {
+    # Pillow not in this process; try subprocess fallback.
+    } except Exception as e {
+        console.warning(f"  Icon generation error: {e}");
+    }
+
+    # Subprocess fallback: call Python with Pillow from PATH.
+    try {
+        python_cmd = "python" if sys.platform == "win32" else "python3";
+        python_code = '''
+import sys, os
+try:
+    from PIL import Image
+    icons_dir = sys.argv[1]
+    png_path = os.path.join(icons_dir, "icon.png")
+    img = Image.open(png_path).convert("RGBA")
+
+    # ICO (Windows)
+    ico_sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)]
+    img.save(os.path.join(icons_dir, "icon.ico"), format="ICO", sizes=ico_sizes)
+
+    # ICNS (macOS)
+    try:
+        img.save(os.path.join(icons_dir, "icon.icns"), format="ICNS")
+    except Exception:
+        pass  # ICNS support is optional in some Pillow builds
+
+    # Tauri standard PNG sizes
+    for size in [32, 128, 256]:
+        resized = img.resize((size, size), Image.LANCZOS)
+        resized.save(os.path.join(icons_dir, f"{size}x{size}.png"))
+    # 128x128@2x is 256x256 pixels
+    img.resize((256, 256), Image.LANCZOS).save(
+        os.path.join(icons_dir, "128x128@2x.png")
+    )
+
+    sys.exit(0)
+except Exception as e:
+    print(str(e), file=sys.stderr)
+    sys.exit(1)
+''';
+        result = subprocess.run(
+            [python_cmd, "-c", python_code, str(icons_dir)],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT_SHORT
+        );
+        if result.returncode == 0 {
+            console.print(
+                "  ✔ Generated platform icons (ico, icns, png sizes)", style="success"
+            );
+            return;
+        } else {
+            console.warning(f"  Icon generation failed: {result.stderr}");
+        }
+    } except Exception as e {
+        console.warning(f"  Icon generation error: {e}");
+    }
+
     console.warning(
-        "  Note: Replace icons/icon.png with your app icon (1024x1024 PNG recommended)"
+        "  Could not generate platform icons. Install Pillow: pip install Pillow"
     );
 }
+
+
+"""Generate all icon formats using Pillow (in-process)."""
+def _generate_icons_with_pillow(icons_dir: Path, Image: type) {
+    png_path = icons_dir / "icon.png";
+    img = Image.open(str(png_path)).convert("RGBA");
+
+    # ICO (Windows) -- multiple sizes embedded in one file
+    ico_sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)];
+    img.save(str(icons_dir / "icon.ico"), format="ICO", sizes=ico_sizes);
+    console.print("  ✔ Generated icon.ico (Windows)", style="success");
+
+    # ICNS (macOS) -- Pillow handles the internal size table
+    try {
+        img.save(str(icons_dir / "icon.icns"), format="ICNS");
+        console.print("  ✔ Generated icon.icns (macOS)", style="success");
+    } except Exception as e {
+        # Some Pillow builds lack ICNS write support; not fatal.
+        console.warning(f"  Could not generate icon.icns: {e}");
+    }
+
+    # Tauri standard PNG sizes for Linux and general use
+    for size in [32, 128, 256] {
+        resized = img.resize((size, size), Image.LANCZOS);
+        resized.save(str(icons_dir / f"{size}x{size}.png"));
+    }
+    # 128x128@2x is a 256px image with @2x naming convention
+    img.resize((256, 256), Image.LANCZOS).save(str(icons_dir / "128x128@2x.png"));
+    console.print("  ✔ Generated PNG sizes (32, 128, 256, 128@2x)", style="success");
+}
+
 
 """Generate main.rs.
 
@@ -2074,7 +2138,8 @@ def _populate_icon_array(tauri_dir: Path, config: dict) {
         icon_files = [];
         if icons_dir.exists() {
             for icon_file in icons_dir.iterdir() {
-                if icon_file.is_file() and icon_file.suffix.lower() == ".png" {
+                if icon_file.is_file()
+                and icon_file.suffix.lower() in (".png", ".ico", ".icns") {
                     # Path relative to tauri.conf.json (which is in tauri_dir)
                     # So icons/icon.png is the correct relative path
                     icon_rel_path = icon_file.relative_to(tauri_dir);
