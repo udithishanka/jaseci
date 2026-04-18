@@ -171,25 +171,15 @@ impl DeclImplMatchPass.connect_impls(
             valid_decl.sym_tab.names_in_scope
         );
         valid_decl.sym_tab.names_in_scope = sym.decl.name_of.sym_tab.names_in_scope;
-        # For nested impls (e.g. impl app.addTodo), re-parent the impl's
-        # scope to the declaration's parent scope so that enclosing has
-        # variables (component state) are reachable via deep lookup.
-        if valid_decl.sym_tab.parent_scope
-        and valid_decl.sym_tab.parent_scope is not sym.decl.name_of.sym_tab.parent_scope {
-            impl_scope = sym.decl.name_of.sym_tab;
-            parent_scope = valid_decl.sym_tab.parent_scope;
-            impl_scope.parent_scope = parent_scope;
-            # Merge parent has-field symbols into the impl scope so that
-            # assignments to component state variables (e.g. todos = ...)
-            # resolve to the declared has variable rather than creating
-            # an untyped local shadow.
-            for (name, parent_sym) in parent_scope.names_in_scope.items() {
-                if (
-                    isinstance(parent_sym.decl.name_of, uni.HasVar)
-                    and name in impl_scope.names_in_scope
-                ) {
-                    impl_scope.names_in_scope[name] = parent_sym;
-                }
+        # SymTabBuildPass deferred assignment-target binding for impl bodies
+        # because it can't see the decl's scope chain. Now that decl_link is
+        # set and UniScopeNode.lookup follows it into the enclosing scope,
+        # run the same binding decision here — shared helper, single source
+        # of truth. Must run before _resolve_symbols_in_subtree because that
+        # skips Names whose sym is already set.
+        if isinstance(sym.decl.name_of, uni.ImplDef) {
+            for assignment in sym.decl.name_of.get_all_sub_nodes(uni.Assignment) {
+                bind_assignment_targets(assignment);
             }
         }
         self._resolve_symbols_in_subtree(sym.decl.name_of);
