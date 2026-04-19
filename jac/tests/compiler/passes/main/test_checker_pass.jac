@@ -886,9 +886,9 @@ test "root_type" {
     TypeCheckPass(ir_in=mod, prog=program);
     assert len(program.errors_had) == 1;
     expected_error = """
-            root ++> c;
-            x: str = root;  # <- error
-            ^^^^^^^^^^^^^^
+            root() ++> c;
+            x: str = root();  # <- error: cannot assign Root to str
+            ^^^^^^^^^^^^^^^^
             """;
     assert_error_pretty_found(expected_error, program.errors_had[0].pretty_print());
 }
@@ -3797,6 +3797,26 @@ test "component_impl_scope_resolves_has_vars" {
     )}:\n" + "\n---\n".join(e.pretty_print() for e in program.errors_had);
 }
 
+test "root_call_returns_root_type" {
+    # root() should be recognized as a builtin returning Root, so that
+    # root() spawn Walker() resolves the walker type and .reports is accessible.
+    path = os.path.join(CHECKER_FIXTURES, "checker_root_call_type.jac");
+    program = JacProgram();
+    mod = program.compile(path, options=NO_TC);
+    TypeCheckPass(ir_in=mod, prog=program);
+    assert len(program.errors_had) == 0 , f"Expected 0 errors, got {len(
+        program.errors_had
+    )}:\n" + "\n---\n".join(e.pretty_print() for e in program.errors_had);
+    w1051 = [
+        w
+        for w in program.warnings_had
+        if w.code.code == "W1051"
+    ];
+    assert len(w1051) == 0 , f"Expected no W1051 warnings for root() call, got {len(
+        w1051
+    )}:\n" + "\n---\n".join(w.pretty_print() for w in w1051);
+}
+
 test "compare_operator_validation" {
     # Validates that comparison operators are type-checked against operand types.
     # Previously, CompareExpr only evaluated operands for side effects and returned
@@ -3823,11 +3843,19 @@ test "compare_operator_validation" {
     all_errors_str = "\n".join(all_errors);
 
     # Verify E1110 diagnostics for ordered comparison errors
-    e1110_count = sum(1 for e in all_errors if "E1110" in e);
+    e1110_count = sum(
+        1
+        for e in all_errors
+        if "E1110" in e
+    );
     assert e1110_count >= 5 , f"Expected >= 5 E1110 errors, got {e1110_count}";
 
     # Verify E1111 diagnostics for membership test errors
-    e1111_count = sum(1 for e in all_errors if "E1111" in e);
+    e1111_count = sum(
+        1
+        for e in all_errors
+        if "E1111" in e
+    );
     assert e1111_count >= 2 , f"Expected >= 2 E1111 errors, got {e1111_count}";
     assert "__contains__" in all_errors_str;
 
@@ -3847,7 +3875,11 @@ test "undeclared_obj_attr_warns_w2080" {
 
     # Collect warnings
     all_warnings = [w.pretty_print() for w in program.warnings_had];
-    w2080_warnings = [w for w in all_warnings if "W2080" in w];
+    w2080_warnings = [
+        w
+        for w in all_warnings
+        if "W2080" in w
+    ];
 
     # Should have W2080 for: y (Foo.init), count (Bar.postinit),
     # label (Bar.postinit), cached (MyNode.postinit)
@@ -3864,13 +3896,25 @@ test "undeclared_obj_attr_warns_w2080" {
 
     # Verify no E1030 on resolved attributes (f.y, b.count, b.label should NOT error)
     all_errors = [e.pretty_print() for e in program.errors_had];
-    e1030_errors = [e for e in all_errors if "E1030" in e];
+    e1030_errors = [
+        e
+        for e in all_errors
+        if "E1030" in e
+    ];
     # Only Baz.secret (unannotated) should produce E1030
-    e1030_names = [e for e in e1030_errors if "secret" in e];
+    e1030_names = [
+        e
+        for e in e1030_errors
+        if "secret" in e
+    ];
     assert len(e1030_names) >= 1 , f"Expected E1030 for 'secret', got: {e1030_errors}";
     # No E1030 for count, label, cached (resolved via W2080 path)
     for attr in ["count", "label", "cached"] {
-        resolved_errors = [e for e in e1030_errors if attr in e];
+        resolved_errors = [
+            e
+            for e in e1030_errors
+            if attr in e
+        ];
         assert len(resolved_errors) == 0 , f"Attribute '{attr}' should be resolved, but got E1030: {resolved_errors}";
     }
 }
@@ -3884,7 +3928,11 @@ test "annotated_self_assign_no_false_e1001" {
     TypeCheckPass(ir_in=mod, prog=program);
 
     all_errors = [e.pretty_print() for e in program.errors_had];
-    e1001_errors = [e for e in all_errors if "E1001" in e];
+    e1001_errors = [
+        e
+        for e in all_errors
+        if "E1001" in e
+    ];
 
     # Must have the 2 real E1001 errors (str assigned to int)
     e1001_str = "\n".join(e1001_errors);
