@@ -847,6 +847,13 @@ impl JFastApiServer.init(
         ctx = JacRuntimeInterface.create_j_context(user_root=None);
         JacRuntime.set_request_context(ctx);
 
+        # Capture Authorization header for sv-to-sv auth propagation.
+        # See jac_scale.microservices.sv_auth_client.
+        import from jac_scale.microservices.sv_auth_client {
+            set_current_auth, reset_current_auth
+        }
+        auth_token = set_current_auth(request.headers.get('Authorization'));
+
         user_id = getattr(request.state, 'user_root_id', None)
             if request?.state
             else None;
@@ -877,6 +884,11 @@ impl JFastApiServer.init(
                 JacRuntime.clear_request_context();
             } except Exception as e {
                 logger.warning(f"Failed to clear request context: {e}", exc_info=True);
+            }
+            try {
+                reset_current_auth(auth_token);
+            } except Exception as e {
+                logger.warning(f"Failed to reset auth context: {e}", exc_info=True);
             }
         }
     }

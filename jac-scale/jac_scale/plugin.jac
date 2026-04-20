@@ -801,7 +801,17 @@ class JacScalePlugin {
             );
         }
 
+        # Register both:
+        #  1. Plain URL via sv_client.register — keeps default fallback working
+        #  2. AuthForwardingClient via register_test_client — forwards the
+        #     incoming request's Authorization header to downstream services.
+        #     sv_client.call checks _test_clients first, so our auth-aware
+        #     client takes precedence.
         sv_client.register(module_name, base_url);
+
+        import from jac_scale.microservices.sv_auth_client { AuthForwardingClient }
+        auth_client = AuthForwardingClient(base_url);
+        sv_client.register_test_client(module_name, auth_client);
 
         # Register cleanup
         import atexit;
