@@ -1792,6 +1792,48 @@ impl JacAPIServer.ensure_sv_service(module_name: str, base_path: str) -> None {
     sv_client.register(module_name, base_url);
 }
 
+"""Default sv-to-sv RPC transport: plain httpx.post, no auth, no retries.
+
+Plugins override this to inject auth forwarding, retries, circuit breakers,
+or tracing. The resolution order for the target (test client, registry,
+env var, ensure_sv_service) is handled by sv_client.call before this runs.
+"""
+impl JacAPIServer.sv_service_call
+(module_name: str, func_name: str, args: dict) -> Any {
+    import from jaclang.runtimelib { sv_client }
+
+    if module_name in sv_client._test_clients {
+        resp = sv_client._test_clients[module_name].post(f"/function/{func_name}", json=args);
+        data = resp.json();
+    } else {
+        url = sv_client.resolve_url(module_name);
+        try {
+            import httpx;
+        } except ImportError {
+            raise RuntimeError(
+                "httpx is required for sv-to-sv RPC calls. "
+                + "Install it via `pip install httpx`."
+            );
+        }
+        resp = httpx.post(f"{url}/function/{func_name}", json=args);
+        data = resp.json();
+    }
+
+    if isinstance(data, dict) and data.get("ok") {
+        result_envelope = data.get("data");
+        if isinstance(result_envelope, dict) and ("result" in result_envelope) {
+            return result_envelope["result"];
+        }
+        return result_envelope;
+    }
+
+    err = (data.get("error") if isinstance(data, dict) else None) or {};
+    msg = err.get("message") if isinstance(err, dict) else str(err);
+    raise RuntimeError(
+        f"sv-to-sv RPC '{module_name}.{func_name}' failed: {msg or 'unknown error'}"
+    );
+}
+
 """Create the API server instance.
 
 If the specified port is in use, tries subsequent ports up to max_retries times.

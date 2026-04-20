@@ -577,6 +577,25 @@ class JacAPIServer {
         """
     static def ensure_sv_service(module_name: str, base_path: str) -> None;
 
+    """Execute an sv-to-sv RPC call.
+
+        Called by sv_client.call() to perform the actual HTTP request to a
+        resolved provider URL. Plugins (e.g. jac-scale) can override this to
+        inject auth, retries, tracing, or a circuit breaker. The default
+        implementation does a plain httpx.post with no extra behavior.
+
+        Args:
+          module_name: the provider module being called.
+          func_name:   the exported function on that module.
+          args:        kwargs dict passed through as the JSON body.
+
+        Returns the unwrapped result from the TransportResponse envelope.
+        Raises RuntimeError on transport or application-level failure.
+        """
+    static def sv_service_call(
+        module_name: str, func_name: str, args: dict
+    ) -> Any;
+
     """Create the API server instance.
 
     If the specified port is in use, tries subsequent ports up to max_retries times.
