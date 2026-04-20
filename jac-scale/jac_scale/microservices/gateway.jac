@@ -12,7 +12,12 @@ import from jac_scale.microservices.impl.http_forward { raw_forward }
 glob logger = logging.getLogger(__name__),
      HOP_BY_HOP_HEADERS: set[str] = {"host", "transfer-encoding", "connection", "keep-alive"};
 
-"""API Gateway that routes requests to microservices by path prefix."""
+"""API Gateway that routes requests to microservices by path prefix.
+
+Request handling is split into named handlers so each responsibility is
+independently testable. `setup()` wires them into a single middleware
+dispatcher.
+"""
 obj MicroserviceGateway {
     has registry: ServiceRegistry,
         app: FastAPI | None = None,
@@ -26,6 +31,29 @@ obj MicroserviceGateway {
 
     """Build the target URL by stripping prefix and resolving walker/function path."""
     def resolve_target_url(service_entry: ServiceEntry, path: str, query: str) -> str;
+
+    # --- request handlers (each returns a Response or None to defer) ---
+
+    """Return the health summary response."""
+    def handle_health -> Response;
+
+    """Forward built-in jac-scale routes (/user/*, /walker/*, /function/* etc)
+       to any healthy service; returns None if path isn't a built-in."""
+    async def handle_builtin_passthrough(request: Request, path: str) -> Response | None;
+
+    """Handle admin UI routes; returns None if not an admin path."""
+    def handle_admin(path: str) -> Response | None;
+
+    """Proxy to the microservice matched by prefix; returns None if no match."""
+    async def handle_proxy(request: Request, path: str) -> Response | None;
+
+    """Serve static files or SPA fallback for GET requests; returns None if nothing found."""
+    def handle_static(request: Request, path: str) -> Response | None;
+
+    # --- helpers used by handlers ---
+
+    """Forward selected request headers to a target, stripping hop-by-hop headers."""
+    def build_forward_headers(request: Request) -> dict[str, str];
 
     """Serve a static file from the client dist directory. Returns None if not found."""
     def serve_static(file_path: str) -> Response | None;
