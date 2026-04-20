@@ -4,6 +4,7 @@ import time;
 import atexit;
 import logging;
 import from typing { Any }
+import from jaclang.cli.console { console }
 import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceEntry, ServiceStatus }
 import from jac_scale.microservices.process_manager { ServiceProcessManager }
 import from jac_scale.microservices.local_deployer { LocalDeployer }
@@ -64,14 +65,14 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
         index_file = dist_path / "index.html";
 
         if not index_file.exists() {
-            print(f"Building client from {client_entry}...");
+            console.print(f"  Building client from {client_entry}...");
             try {
                 build_result = subprocess.run(
                     ["jac", "build", client_entry],
                     timeout=120
                 );
                 if build_result.returncode == 0 {
-                    print("Client build complete");
+                    console.print("  Client build complete");
                 } else {
                     logger.warning("Client build failed — gateway will start without client UI");
                 }
@@ -135,21 +136,27 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
     client_config = ms_config.get("client", {});
     client_dist: str = str(dict(client_config).get("dist_dir", ".jac/client/dist")) if client_config else ".jac/client/dist";
 
-    print("\n" + "=" * 60);
-    print("  JAC MICROSERVICE MODE");
-    print("=" * 60);
-    print(f"\n  Gateway: http://{gateway_host}:{gateway_port}");
-    print(f"\n  Services:");
+    console.print();
+    console.print("[bold cyan]  Jac Microservice Mode[/bold cyan]");
+    console.print(f"  [bold]Gateway:[/bold] http://{gateway_host}:{gateway_port}");
+    console.print();
+    console.print("  [bold]Services[/bold]");
+    console.print(f"  [dim]{'─' * 48}[/dim]");
     for (name, entry) in registry.entries.items() {
-        status_icon = "OK" if entry.status == ServiceStatus.HEALTHY else "..";
-        print(f"    [{status_icon}] {name:12s} {entry.prefix:20s} -> {entry.url}");
+        if entry.status == ServiceStatus.HEALTHY {
+            icon = "[green]●[/green]";
+        } else {
+            icon = "[yellow]○[/yellow]";
+        }
+        console.print(f"  {icon} {name:18s} {entry.prefix:20s} -> {entry.url}");
     }
 
     if client_config and dict(client_config).get("entry") {
-        print(f"\n  Client: {dict(client_config)['entry']}");
-        print(f"  Static: {client_dist}");
+        console.print();
+        console.print(f"  [bold]Client:[/bold] {dict(client_config)['entry']}");
+        console.print(f"  [bold]Static:[/bold] {client_dist}");
     }
-    print("\n" + "=" * 60 + "\n");
+    console.print();
 
     # 5. Start gateway (blocking)
     gateway = MicroserviceGateway(

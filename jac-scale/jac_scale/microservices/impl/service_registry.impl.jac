@@ -46,18 +46,13 @@ impl ServiceRegistry.health_summary
     return result;
 }
 
-"""Rebuild the sorted prefix list after register/deregister."""
+"""Rebuild the sorted prefix list after register/deregister.
+
+Sorted by descending prefix length so match_route does longest-prefix match.
+"""
 impl ServiceRegistry._rebuild_prefix_index
 -> None {
     pairs: list[tuple[str, str]] = [(e.prefix, e.name) for e in self.entries.values()];
-    # Sort by prefix length descending (longest first) for longest-prefix matching
-    n = len(pairs);
-    for i in range(n) {
-        for j in range(i + 1, n) {
-            if len(pairs[i][0]) < len(pairs[j][0]) {
-                (pairs[i], pairs[j]) = (pairs[j], pairs[i]);
-            }
-        }
-    }
+    pairs.sort(key=lambda p: -len(p[0]));
     self._sorted_prefixes = pairs;
 }
