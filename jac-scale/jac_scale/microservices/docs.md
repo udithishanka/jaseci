@@ -47,6 +47,7 @@ my-app/
 ```
 
 **products_app.jac**:
+
 ```jac
 node Product {
     has id: str, name: str, price: float;
@@ -66,6 +67,7 @@ sv {
 ```
 
 **orders_app.jac** — consumes other services:
+
 ```jac
 sv import from cart_app { get_cart, clear_cart }
 sv import from products_app { get_product }
@@ -107,6 +109,7 @@ jac start main.jac
 ```
 
 Runtime automatically:
+
 1. Discovers providers from `sv import` statements (BFS traversal)
 2. Spawns each provider as a subprocess on auto-assigned port
 3. Starts gateway on :8000
@@ -140,6 +143,7 @@ jac scale destroy                        # stop everything
 ## Inter-Service Communication
 
 **With `sv import` (recommended)**:
+
 ```jac
 sv import from cart_app { get_cart, clear_cart }
 
@@ -149,6 +153,7 @@ clear_cart(user_id="u123");
 ```
 
 Under the hood:
+
 1. Compiler generates HTTP stub
 2. Stub calls `sv_client.call("cart_app", "get_cart", {user_id: "u123"})`
 3. jac-scale hook: reads auth from request context, forwards Authorization header
