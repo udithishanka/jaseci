@@ -9,6 +9,7 @@ import socket;
 import shutil;
 import sys;
 import from pathlib { Path }
+import from typing { Any }
 
 """Pick a free TCP port near `base + hash(name) % 1000` on 127.0.0.1.
 
@@ -50,4 +51,37 @@ def resolve_jac_binary -> str {
         return str(candidate);
     }
     return "jac";
+}
+
+"""Poll `base_url/healthz` until the service responds <500 or the deadline hits.
+
+`proc_alive` is called once per iteration; if it returns False, raises
+RuntimeError immediately (service died before becoming healthy). Returns
+True if healthy within the timeout, False otherwise.
+"""
+def wait_for_health(
+    base_url: str,
+    proc_alive: Any,
+    timeout: float = 15.0,
+    poll_interval: float = 0.1
+) -> bool {
+    import time;
+    import urllib.request;
+
+    deadline: float = time.time() + timeout;
+    while time.time() < deadline {
+        if not proc_alive() {
+            raise RuntimeError(f"service at {base_url} exited before becoming healthy");
+        }
+        try {
+            with urllib.request.urlopen(f"{base_url}/healthz", timeout=1) as resp {
+                if resp.status < 500 {
+                    return True;
+                }
+            }
+        } except Exception {
+            time.sleep(poll_interval);
+        }
+    }
+    return False;
 }

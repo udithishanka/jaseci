@@ -1,6 +1,7 @@
 """File covering plugin implementation."""
 import os;
 import pathlib;
+import from typing { Any }
 import from dotenv { load_dotenv }
 import from jaclang.cli.registry { get_registry }
 import from jaclang.cli.command { Arg, ArgKind, CommandPriority, HookContext }
@@ -687,12 +688,12 @@ class JacScalePlugin {
     @hookimpl
     static def ensure_sv_service(module_name: str, base_path: str) -> None {
         import os;
-        import time;
-        import urllib.request;
+        import atexit;
+        import subprocess;
         import from jaclang.runtimelib { sv_client }
         import from pathlib { Path }
         import from jac_scale.microservices._util {
-            pick_free_port, resolve_jac_binary
+            pick_free_port, resolve_jac_binary, wait_for_health
         }
 
         # Idempotent: skip if already registered
@@ -703,9 +704,6 @@ class JacScalePlugin {
             return;
         }
 
-        port: int = pick_free_port(module_name);
-
-        # Resolve module path: look for {module_name}.jac in base_path
         base_dir = Path(base_path);
         module_file = base_dir / f"{module_name}.jac";
         if not module_file.exists() {
@@ -714,21 +712,20 @@ class JacScalePlugin {
             );
         }
 
-        # Per-service data isolation: .jac/data/{module_name}/
+        port: int = pick_free_port(module_name);
+        base_url: str = f"http://127.0.0.1:{port}";
+
+        # Per-service data isolation + sibling env flag to prevent recursive
+        # orchestration when the child runs `jac start`.
         data_dir = base_dir / ".jac" / "data" / module_name;
         data_dir.mkdir(parents=True, exist_ok=True);
 
-        # Spawn subprocess with JAC_DATA_DIR for per-service data isolation
-        # and JAC_SV_SIBLING to prevent recursive orchestration
-        import subprocess;
         child_env = dict(os.environ);
         child_env["JAC_DATA_DIR"] = str(data_dir);
         child_env["JAC_SV_SIBLING"] = "1";
 
-        jac_bin: str = resolve_jac_binary();
-
         cmd = [
-            jac_bin, "start", str(module_file),
+            resolve_jac_binary(), "start", str(module_file),
             "--port", str(port), "--no_client"
         ];
 
@@ -740,55 +737,80 @@ class JacScalePlugin {
             cwd=str(base_dir)
         );
 
-        # Wait for service to become responsive
-        base_url = f"http://127.0.0.1:{port}";
-        deadline = time.time() + 15.0;
-        healthy = False;
-        while time.time() < deadline {
-            if proc.poll() is not None {
-                raise RuntimeError(
-                    f"sv-to-sv service '{module_name}' subprocess exited (code {proc.returncode})"
-                );
-            }
-            try {
-                with urllib.request.urlopen(f"{base_url}/healthz", timeout=1) as resp {
-                    if resp.status < 500 {
-                        healthy = True;
-                        break;
-                    }
-                }
-            } except Exception {
-                time.sleep(0.1);
-            }
-        }
-
-        if not healthy {
+        if not wait_for_health(base_url, lambda : proc.poll() is None) {
             proc.terminate();
             raise RuntimeError(
                 f"sv-to-sv service '{module_name}' did not become healthy at {base_url}"
             );
         }
 
-        # Register both:
-        #  1. Plain URL via sv_client.register — keeps default fallback working
-        #  2. AuthForwardingClient via register_test_client — forwards the
-        #     incoming request's Authorization header to downstream services.
-        #     sv_client.call checks _test_clients first, so our auth-aware
-        #     client takes precedence.
         sv_client.register(module_name, base_url);
 
-        import from jac_scale.microservices.sv_auth_client { AuthForwardingClient }
-        auth_client = AuthForwardingClient(base_url);
-        sv_client.register_test_client(module_name, auth_client);
-
-        # Register cleanup
-        import atexit;
         def _cleanup {
             if proc.poll() is None {
                 proc.terminate();
             }
         }
         atexit.register(_cleanup);
+    }
+
+    """Override core's sv_service_call to forward the request's Authorization
+    header to downstream services.
+
+    Reads the auth token from _auth_ctx (set by the FastAPI middleware in
+    jfast_api.impl.jac at the start of each inbound request) and attaches
+    it to the outgoing httpx.post. Falls back to core's default envelope
+    unwrapping.
+    """
+    @hookimpl
+    static def sv_service_call(
+        module_name: str, func_name: str, args: dict
+    ) -> Any {
+        import from jaclang.runtimelib { sv_client }
+        import from jac_scale.microservices._auth_ctx { get_current_auth }
+
+        # Test clients take precedence (matches core)
+        if module_name in sv_client._test_clients {
+            resp = sv_client._test_clients[module_name].post(
+                f"/function/{func_name}", json=args
+            );
+            data = resp.json();
+        } else {
+            url = sv_client.resolve_url(module_name);
+            try {
+                import httpx;
+            } except ImportError {
+                raise RuntimeError(
+                    "httpx is required for sv-to-sv RPC calls. "
+                    + "Install it via `pip install httpx`."
+                );
+            }
+
+            headers: dict[str, str] = {};
+            auth = get_current_auth();
+            if auth {
+                headers["Authorization"] = auth;
+            }
+
+            resp = httpx.post(
+                f"{url}/function/{func_name}", json=args, headers=headers
+            );
+            data = resp.json();
+        }
+
+        if isinstance(data, dict) and data.get("ok") {
+            result_envelope = data.get("data");
+            if isinstance(result_envelope, dict) and ("result" in result_envelope) {
+                return result_envelope["result"];
+            }
+            return result_envelope;
+        }
+
+        err = (data.get("error") if isinstance(data, dict) else None) or {};
+        msg = err.get("message") if isinstance(err, dict) else str(err);
+        raise RuntimeError(
+            f"sv-to-sv RPC '{module_name}.{func_name}' failed: {msg or 'unknown error'}"
+        );
     }
 }
 

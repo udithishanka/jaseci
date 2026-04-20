@@ -848,8 +848,9 @@ impl JFastApiServer.init(
         JacRuntime.set_request_context(ctx);
 
         # Capture Authorization header for sv-to-sv auth propagation.
-        # See jac_scale.microservices.sv_auth_client.
-        import from jac_scale.microservices.sv_auth_client {
+        # The sv_service_call hookimpl in plugin.jac reads this ContextVar
+        # and forwards the header to the downstream service.
+        import from jac_scale.microservices._auth_ctx {
             set_current_auth, reset_current_auth
         }
         auth_token = set_current_auth(request.headers.get('Authorization'));
