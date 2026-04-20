@@ -86,6 +86,10 @@ import from jaclang.jac0core.diagnostics {
     E1102,
     E1103,
     E1104,
+    E1110,
+    E1111,
+    W1050,
+    W1051,
     W1100,
     W1101,
     W1102
@@ -131,6 +135,7 @@ obj PrefetchedTypes {
         jsx_element_class: types.ClassType | None = None,
         # Intrinsic element prop types (from dom_types.pyi)
         html_common_props_class: types.ClassType | None = None,
+        jsx_intrinsic_elements_class: types.ClassType | None = None,
         # Fixed-width numeric types
         i8_class: types.ClassType | None = None,
         u8_class: types.ClassType | None = None,
@@ -235,6 +240,10 @@ obj TypeEvaluator {
         _flow_pending_symbols: set[int] by postinit,
         _flow_pending_keys: set[str] by postinit,
         _module_type_cache: dict[str, types.ModuleType] = {},
+        # Temporary type overrides for isinstance narrowing within AND conditions.
+        # Maps symbol id → narrowed type. Set during BoolExpr(and) evaluation so
+        # that RHS operands see the narrowed type from LHS isinstance checks.
+        _and_narrowing_overrides: dict[int, TypeBase] = {},
         # Stub modules - initialized in postinit
         typing_module: uni.Module by postinit,
         types_module: uni.Module by postinit,
@@ -344,6 +353,12 @@ obj TypeEvaluator {
     # type and inferred type, we're going to unify them (if it's required
     # in the future, we can refactor this).
     def _get_type_of_symbol(symbol: uni.Symbol) -> TypeBase;
+    # Return EnumMemberType if `node_` is the Name of an enum member
+    # declaration (either `RED = 1` target or bare `RED,` inside enum body).
+    # Returns None when the Name is not an enum member declaration.
+    def _get_enum_member_type_for_decl(
+        node_: uni.Name
+    ) -> (types.EnumMemberType | None);
     # gets member type and specializes it with class type_args
     def get_type_of_member(member: Any, class_type: types.ClassType) -> TypeBase;
     # Pyright: partiallySpecializeType - substitutes TypeVars using class type_args
@@ -364,6 +379,7 @@ obj TypeEvaluator {
 
     def resolve_imported_symbols(sym: uni.Symbol) -> uni.Symbol;
     def _set_symbol_to_expr(expr: uni.Expr, sym: uni.Symbol) -> TypeBase;
+    def _resolution_scope_for(expr: uni.UniNode) -> uni.UniScopeNode | None;
     def _is_expr_self(expr: uni.Expr) -> bool;
     def _is_expr_super(expr: uni.Expr) -> bool;
     def _get_enclosing_function(nd: uni.UniNode) -> uni.Ability | None;
@@ -536,6 +552,7 @@ obj TypeEvaluator {
     ) -> None;
 
     def _validate_intrinsic_jsx_props(expr: uni.JsxElement, tag_name: str) -> None;
+    def _resolve_intrinsic_jsx_tag(part: uni.Name, tag_name: str) -> None;
     # -------------------------------------------------------------------------
     # TypeVar scope validation (Pyright: validateTypeVarUsage)
     # -------------------------------------------------------------------------

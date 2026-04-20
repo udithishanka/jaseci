@@ -189,6 +189,7 @@ impl BaseLLM.make_model_params(mt_run: MTRuntime) -> dict {
     try {
         agent_metadata = {
             "jac_invocation_id": getattr(mt_run, '_invocation_id', None),
+            "jac_parent_invocation_id": getattr(mt_run, '_parent_invocation_id', None),
             "jac_caller_name": mt_run.mtir.caller.__name__ if mt_run.mtir else None,
 
         };
@@ -347,6 +348,11 @@ impl BaseLLM.dispatch_streaming(mt_run: MTRuntime) -> Generator[str, None, None]
     params.pop("api_key", None);
     response = self.model_call_with_stream(params);
     for chunk in response {
+        # Final chunk carries usage when stream_options.include_usage is set.
+        chunk_usage = getattr(chunk, "usage", None);
+        if chunk_usage {
+            self._usage_history.append(chunk_usage);
+        }
         if chunk?.choices and chunk?.choices?[0]?.delta {
             delta = chunk.choices[0].delta;
             yield delta.content or "";

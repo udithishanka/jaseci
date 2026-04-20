@@ -36,7 +36,7 @@ import from byllm.types {
     IterationContext
 }
 import from byllm.config_loader { get_byllm_config }
-import from byllm.telemetry { _emit_agent_telemetry }
+import from byllm.telemetry { _emit_agent_telemetry, _current_invocation_id }
 
 # Load configuration purely from jac.toml
 glob _byllm_config = get_byllm_config(),
@@ -111,7 +111,8 @@ obj ModelPool(BaseLLM) {
         strategy: str | None = None,
         num_retries: int | None = None,
         timeout: float | None = None,
-        _router: object = None;
+        _router: object = None,
+        _fallback_model_names: list = [];
 
     def postinit -> None;
     override def model_call_no_stream(params: dict) -> dict;
