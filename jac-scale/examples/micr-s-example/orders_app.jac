@@ -28,7 +28,7 @@ to sv:
 def:pub create_order() -> dict {
     # 1. Fetch cart from cart service via sv import (HTTP under the hood)
     cart = view_cart();
-    items = cart.get("items", []) if isinstance(cart, dict) else [];
+    items = cart.get("items", []) if cart else [];
 
     if not items {
         return {"error": "Cart is empty"};

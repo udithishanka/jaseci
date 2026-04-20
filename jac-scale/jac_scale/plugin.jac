@@ -744,8 +744,23 @@ class JacScalePlugin {
         child_env["JAC_MICROSERVICE_CHILD"] = "1";
         child_env["JAC_SV_SIBLING"] = "1";
 
+        # Resolve jac binary: try full path from current process, fall back to PATH lookup
+        import shutil;
+        import sys;
+        jac_bin: str = shutil.which("jac") or "";
+        if not jac_bin {
+            # Derive from python executable location (e.g., .../envs/jac/bin/python -> .../envs/jac/bin/jac)
+            py_dir = Path(sys.executable).parent;
+            candidate = py_dir / "jac";
+            if candidate.exists() {
+                jac_bin = str(candidate);
+            } else {
+                jac_bin = "jac";
+            }
+        }
+
         cmd = [
-            "jac", "start", str(module_file),
+            jac_bin, "start", str(module_file),
             "--port", str(port), "--no_client"
         ];
 

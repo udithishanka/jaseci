@@ -41,7 +41,22 @@ impl ServiceProcessManager.start_service
     entry = self.registry.entries[name];
     port = self._assign_port(entry);
 
-    cmd = ["jac", "start", entry.file, "--port", str(port), "--no_client"];
+    # Resolve jac binary
+    import shutil;
+    import sys;
+    import from pathlib { Path }
+    jac_bin: str = shutil.which("jac") or "";
+    if not jac_bin {
+        py_dir = Path(sys.executable).parent;
+        candidate = py_dir / "jac";
+        if candidate.exists() {
+            jac_bin = str(candidate);
+        } else {
+            jac_bin = "jac";
+        }
+    }
+
+    cmd = [jac_bin, "start", entry.file, "--port", str(port), "--no_client"];
     logger.info(f"Starting {name}: {' '.join(cmd)}");
 
     try {
