@@ -5,6 +5,10 @@ Commands:
   jac setup microservice --list   — show current config
   jac setup microservice --add <file>    — add a service
   jac setup microservice --remove <name> — remove a service
+
+Writes a v2 [plugins.scale.microservices.routes] table that maps module
+names to gateway prefixes. Services are discovered automatically via
+`sv import`; the routes table only controls public URL routing.
 """
 
 import os;
@@ -34,18 +38,24 @@ def scan_jac_files(project_root: str = ".") -> list[str] {
     return jac_files;
 }
 
-"""Derive a service name from a file path. orders_app.jac -> orders"""
-def derive_service_name(file_path: str) -> str {
-    name: str = Path(file_path).stem;
+"""Derive the module name from a file path — matches sv_import resolution.
+
+Returns the file stem: orders_app.jac -> orders_app, services/cart.jac -> cart.
+"""
+def derive_module_name(file_path: str) -> str {
+    return Path(file_path).stem;
+}
+
+"""Derive a gateway route prefix from a module name.
+
+Strips the conventional _app suffix so orders_app -> /api/orders.
+"""
+def derive_prefix(module_name: str) -> str {
+    name = module_name;
     if name.endswith("_app") {
         name = name[:-4];
     }
-    return name;
-}
-
-"""Derive a route prefix from a service name. orders -> /api/orders"""
-def derive_prefix(service_name: str) -> str {
-    return f"/api/{service_name}";
+    return f"/api/{name}";
 }
 
 """Run the interactive setup flow — scan project, prompt user, write TOML."""
@@ -121,14 +131,13 @@ def run_setup(project_root: str = ".") -> None {
     lines.append('gateway_host = "0.0.0.0"');
     lines.append("");
 
+    lines.append("[plugins.scale.microservices.routes]");
     for file_path in selected_files {
-        name = derive_service_name(file_path);
-        prefix = derive_prefix(name);
-        lines.append(f"[plugins.scale.microservices.services.{name}]");
-        lines.append(f'file = "{file_path}"');
-        lines.append(f'prefix = "{prefix}"');
-        lines.append("");
+        module = derive_module_name(file_path);
+        prefix = derive_prefix(module);
+        lines.append(f'{module} = "{prefix}"');
     }
+    lines.append("");
 
     if client_entry {
         lines.append("[plugins.scale.microservices.client]");
@@ -142,11 +151,11 @@ def run_setup(project_root: str = ".") -> None {
 
     print(f"\nAdded microservice config to jac.toml:");
     for file_path in selected_files {
-        name = derive_service_name(file_path);
-        print(f"  - {name:12s} -> {derive_prefix(name):20s} ({file_path})");
+        module = derive_module_name(file_path);
+        print(f"  - {module:18s} -> {derive_prefix(module):20s} ({file_path})");
     }
     if client_entry {
-        print(f"  - {'client':12s} -> {client_entry}");
+        print(f"  - {'client':18s} -> {client_entry}");
     }
     print(f"\nRun `jac start main.jac` to launch locally.");
 }
@@ -159,30 +168,44 @@ def add_service(project_root: str, file_path: str) -> None {
         return;
     }
 
-    name = derive_service_name(file_path);
-    prefix = derive_prefix(name);
+    module = derive_module_name(file_path);
+    prefix = derive_prefix(module);
 
     with open(str(toml_path), "rb") as f {
         doc = tomllib.load(f);
     }
     ms = doc.get("plugins", {}).get("scale", {}).get("microservices", {});
-    services = ms.get("services", {});
-    if name in services {
-        print(f"Service '{name}' already exists. Remove it first with --remove.");
+    routes = ms.get("routes", {});
+    if module in routes {
+        print(f"Route '{module}' already exists. Remove it first with --remove.");
         return;
     }
 
     content = toml_path.read_text();
-    content += f"\n[plugins.scale.microservices.services.{name}]\n";
-    content += f'file = "{file_path}"\n';
-    content += f'prefix = "{prefix}"\n';
+    # If [routes] table exists, append to it; otherwise create it.
+    header = "[plugins.scale.microservices.routes]";
+    if header in content {
+        # Insert after the header line
+        new_lines: list[str] = [];
+        inserted = False;
+        for line in content.split("\n") {
+            new_lines.append(line);
+            if (not inserted) and line.strip() == header {
+                new_lines.append(f'{module} = "{prefix}"');
+                inserted = True;
+            }
+        }
+        content = "\n".join(new_lines);
+    } else {
+        content += f'\n{header}\n{module} = "{prefix}"\n';
+    }
     toml_path.write_text(content);
 
-    print(f"Added service: {name} -> {prefix} ({file_path})");
+    print(f"Added route: {module} -> {prefix} ({file_path})");
 }
 
-"""Remove a service from config by name."""
-def remove_service(project_root: str, service_name: str) -> None {
+"""Remove a route from config by module name."""
+def remove_service(project_root: str, module_name: str) -> None {
     toml_path = Path(project_root) / "jac.toml";
     if not toml_path.exists() {
         print("No jac.toml found.");
@@ -190,31 +213,37 @@ def remove_service(project_root: str, service_name: str) -> None {
     }
 
     content = toml_path.read_text();
-    section_header = f"[plugins.scale.microservices.services.{service_name}]";
+    lines = content.split("\n");
+    in_routes = False;
+    found = False;
+    new_lines: list[str] = [];
+    for line in lines {
+        stripped = line.strip();
+        if stripped == "[plugins.scale.microservices.routes]" {
+            in_routes = True;
+            new_lines.append(line);
+            continue;
+        }
+        if in_routes and stripped.startswith("[") {
+            in_routes = False;
+        }
+        if in_routes and stripped.startswith(f"{module_name} =") {
+            found = True;
+            continue;
+        }
+        new_lines.append(line);
+    }
 
-    if section_header not in content {
-        print(f"Service '{service_name}' not found in config.");
+    if not found {
+        print(f"Route '{module_name}' not found in config.");
         return;
     }
 
-    new_lines: list[str] = [];
-    skip_section = False;
-    for line in content.split("\n") {
-        if line.strip() == section_header {
-            skip_section = True;
-        } elif line.strip().startswith("[") and skip_section {
-            skip_section = False;
-            new_lines.append(line);
-        } elif not skip_section {
-            new_lines.append(line);
-        }
-    }
-
     toml_path.write_text("\n".join(new_lines));
-    print(f"Removed service: {service_name}");
+    print(f"Removed route: {module_name}");
 }
 
-"""List currently configured services."""
+"""List currently configured routes."""
 def list_services(project_root: str) -> None {
     toml_path = Path(project_root) / "jac.toml";
     if not toml_path.exists() {
@@ -228,22 +257,19 @@ def list_services(project_root: str) -> None {
 
     ms = doc.get("plugins", {}).get("scale", {}).get("microservices", {});
     enabled = ms.get("enabled", False);
-    services = ms.get("services", {});
+    routes = ms.get("routes", {});
     client = ms.get("client", {});
 
     print(f"Microservice mode: {'ENABLED' if enabled else 'DISABLED'}");
     print(f"Gateway: {ms.get('gateway_host', '0.0.0.0')}:{ms.get('gateway_port', 8000)}");
 
-    if services {
-        print(f"\nServices ({len(services)}):");
-        for (name, config) in services.items() {
-            svc_dict: dict = dict(config);
-            file_str: str = str(svc_dict.get("file", "?"));
-            prefix_str: str = str(svc_dict.get("prefix", "?"));
-            print(f"  {name:12s} -> {prefix_str:20s} ({file_str})");
+    if routes {
+        print(f"\nRoutes ({len(routes)}):");
+        for (module, prefix) in routes.items() {
+            print(f"  {module:18s} -> {prefix}");
         }
     } else {
-        print("\nNo services configured.");
+        print("\nNo routes configured.");
     }
 
     if client.get("entry") {

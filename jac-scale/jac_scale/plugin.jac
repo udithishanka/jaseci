@@ -548,13 +548,12 @@ class JacCmd {
                 return 1;
             }
 
-            services_config = ms_config.get("services", {});
-            if not services_config {
-                console.print("[bold red]No services configured[/bold red]");
+            if not ms_config.get("routes", {}) {
+                console.print("[bold red]No routes configured in [plugins.scale.microservices.routes][/bold red]");
                 return 1;
             }
 
-            registry = build_registry(services_config);
+            registry = build_registry(ms_config);
             deployer = LocalDeployer(registry=registry, target="local");
 
             if action == "status" {
@@ -688,11 +687,13 @@ class JacScalePlugin {
     @hookimpl
     static def ensure_sv_service(module_name: str, base_path: str) -> None {
         import os;
-        import socket;
         import time;
         import urllib.request;
         import from jaclang.runtimelib { sv_client }
         import from pathlib { Path }
+        import from jac_scale.microservices._util {
+            pick_free_port, resolve_jac_binary
+        }
 
         # Idempotent: skip if already registered
         if module_name in sv_client._registry {
@@ -702,26 +703,7 @@ class JacScalePlugin {
             return;
         }
 
-        # Hash-based port: deterministic per module name, 100 retries
-        base_port = 18000 + (hash(module_name) % 1000);
-        port = base_port;
-        bind_ok = False;
-        for _ in range(100) {
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
-            try {
-                s.bind(('127.0.0.1', port));
-                s.close();
-                bind_ok = True;
-                break;
-            } except OSError {
-                s.close();
-                port = port + 1;
-            }
-        }
-        if not bind_ok {
-            raise RuntimeError(f"Could not find free port near {base_port}");
-        }
+        port: int = pick_free_port(module_name);
 
         # Resolve module path: look for {module_name}.jac in base_path
         base_dir = Path(base_path);
@@ -736,28 +718,14 @@ class JacScalePlugin {
         data_dir = base_dir / ".jac" / "data" / module_name;
         data_dir.mkdir(parents=True, exist_ok=True);
 
-        # Spawn subprocess with JAC_DATA_DIR, JAC_MICROSERVICE_CHILD,
+        # Spawn subprocess with JAC_DATA_DIR for per-service data isolation
         # and JAC_SV_SIBLING to prevent recursive orchestration
         import subprocess;
         child_env = dict(os.environ);
         child_env["JAC_DATA_DIR"] = str(data_dir);
-        child_env["JAC_MICROSERVICE_CHILD"] = "1";
         child_env["JAC_SV_SIBLING"] = "1";
 
-        # Resolve jac binary: try full path from current process, fall back to PATH lookup
-        import shutil;
-        import sys;
-        jac_bin: str = shutil.which("jac") or "";
-        if not jac_bin {
-            # Derive from python executable location (e.g., .../envs/jac/bin/python -> .../envs/jac/bin/jac)
-            py_dir = Path(sys.executable).parent;
-            candidate = py_dir / "jac";
-            if candidate.exists() {
-                jac_bin = str(candidate);
-            } else {
-                jac_bin = "jac";
-            }
-        }
+        jac_bin: str = resolve_jac_binary();
 
         cmd = [
             jac_bin, "start", str(module_file),

@@ -292,10 +292,10 @@ class JacScalePluginConfig {
                             "default": "0.0.0.0",
                             "description": "Gateway host"
                         },
-                        "services": {
+                        "routes": {
                             "type": "dict",
                             "default": {},
-                            "description": "Service declarations — each key is a service name with file, prefix, port, env, replicas"
+                            "description": "Module-name -> gateway-prefix map. Services are discovered via `sv import`; this only controls client-facing URL routing."
                         },
                         "client": {
                             "type": "dict",

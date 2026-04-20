@@ -146,49 +146,6 @@ impl MicroserviceGateway.serve_admin_asset
     return Response(content=target.read_bytes(), media_type=content_type);
 }
 
-"""Validate a JWT token. Returns decoded payload or None."""
-impl MicroserviceGateway.validate_token
-(token: str) -> dict | None {
-    try {
-        payload: dict = jwt.decode(token, GW_JWT_SECRET, algorithms=[GW_JWT_ALGORITHM]);
-        return payload;
-    } except jwt.ExpiredSignatureError {
-        logger.debug("Token expired");
-        return None;
-    } except jwt.InvalidTokenError as e {
-        logger.debug(f"Invalid token: {e}");
-        return None;
-    }
-}
-
-"""Create a short-lived internal service token for service-to-service calls."""
-impl MicroserviceGateway.create_internal_token
-(user_id: str, user_email: str) -> str {
-    import time;
-    exp_timestamp: int = int(time.time()) + self.internal_token_ttl;
-    payload = {
-        "user_id": user_id,
-        "email": user_email,
-        "type": "internal",
-        "exp": exp_timestamp
-    };
-    token: str = jwt.encode(payload, GW_JWT_SECRET, algorithm=GW_JWT_ALGORITHM);
-    return token;
-}
-
-"""Check if a path is public (no auth required)."""
-impl MicroserviceGateway.is_public_path
-(path: str) -> bool {
-    if path in PUBLIC_PATHS {
-        return True;
-    }
-    # Static assets, admin UI, and health don't require auth
-    if path.startswith(("/static/", "/assets/", "/admin", "/user/", "/sso/", "/docs", "/redoc")) {
-        return True;
-    }
-    return False;
-}
-
 """Create the FastAPI app and register routes."""
 impl MicroserviceGateway.setup -> FastAPI {
     self.app = FastAPI(title="Jac Microservice Gateway");

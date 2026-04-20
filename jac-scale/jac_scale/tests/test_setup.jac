@@ -1,4 +1,4 @@
-"""Tests for microservices setup CLI utilities."""
+"""Tests for microservices setup CLI utilities (v2 routes schema)."""
 
 import os;
 import tempfile;
@@ -6,7 +6,7 @@ import tomllib;
 import from pathlib { Path }
 import from jac_scale.microservices.setup {
     scan_jac_files,
-    derive_service_name,
+    derive_module_name,
     derive_prefix,
     add_service,
     remove_service,
@@ -17,19 +17,20 @@ import from jac_scale.microservices.setup {
 # Utility functions
 # =============================================================================
 
-test "derive_service_name strips _app suffix" {
-    assert derive_service_name("orders_app.jac") == "orders";
-    assert derive_service_name("payments_app.jac") == "payments";
+test "derive_module_name returns file stem" {
+    assert derive_module_name("orders_app.jac") == "orders_app";
+    assert derive_module_name("payments_app.jac") == "payments_app";
+    assert derive_module_name("services/orders.jac") == "orders";
 }
 
-test "derive_service_name keeps name without _app" {
-    assert derive_service_name("orders.jac") == "orders";
-    assert derive_service_name("services/orders.jac") == "orders";
+test "derive_prefix strips _app suffix" {
+    assert derive_prefix("orders_app") == "/api/orders";
+    assert derive_prefix("payments_app") == "/api/payments";
 }
 
-test "derive_prefix adds /api/ prefix" {
+test "derive_prefix passes non-_app names through" {
     assert derive_prefix("orders") == "/api/orders";
-    assert derive_prefix("payments") == "/api/payments";
+    assert derive_prefix("cart") == "/api/cart";
 }
 
 # =============================================================================
@@ -87,7 +88,7 @@ test "scan_jac_files finds nested files" {
 # add_service / remove_service / list_services
 # =============================================================================
 
-test "add_service appends to jac.toml" {
+test "add_service creates routes table and appends entry" {
     tmp = tempfile.mkdtemp();
     toml_path = Path(tmp) / "jac.toml";
     toml_path.write_text('[plugins.scale.microservices]\nenabled = true\n');
@@ -97,10 +98,26 @@ test "add_service appends to jac.toml" {
     with open(str(toml_path), "rb") as f {
         doc = tomllib.load(f);
     }
-    services = doc["plugins"]["scale"]["microservices"]["services"];
-    assert "orders" in services;
-    assert services["orders"]["file"] == "orders_app.jac";
-    assert services["orders"]["prefix"] == "/api/orders";
+    routes = doc["plugins"]["scale"]["microservices"]["routes"];
+    assert routes["orders_app"] == "/api/orders";
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "add_service appends to existing routes table" {
+    tmp = tempfile.mkdtemp();
+    toml_content = '[plugins.scale.microservices]\nenabled = true\n\n[plugins.scale.microservices.routes]\ncart_app = "/api/cart"\n';
+    (Path(tmp) / "jac.toml").write_text(toml_content);
+
+    add_service(tmp, "orders_app.jac");
+
+    with open(str(Path(tmp) / "jac.toml"), "rb") as f {
+        doc = tomllib.load(f);
+    }
+    routes = doc["plugins"]["scale"]["microservices"]["routes"];
+    assert routes["cart_app"] == "/api/cart";
+    assert routes["orders_app"] == "/api/orders";
 
     import shutil;
     shutil.rmtree(tmp);
@@ -108,32 +125,38 @@ test "add_service appends to jac.toml" {
 
 test "add_service rejects duplicate" {
     tmp = tempfile.mkdtemp();
-    toml_content = '[plugins.scale.microservices]\nenabled = true\n\n[plugins.scale.microservices.services.orders]\nfile = "orders_app.jac"\nprefix = "/api/orders"\n';
+    toml_content = '[plugins.scale.microservices]\nenabled = true\n\n[plugins.scale.microservices.routes]\norders_app = "/api/orders"\n';
     (Path(tmp) / "jac.toml").write_text(toml_content);
 
-    # Should print error, not crash
+    # Should print error, not crash, and leave content intact
     add_service(tmp, "orders_app.jac");
 
+    content = (Path(tmp) / "jac.toml").read_text();
+    assert content.count("orders_app =") == 1;
+
     import shutil;
     shutil.rmtree(tmp);
 }
 
-test "remove_service removes from jac.toml" {
+test "remove_service removes a route" {
     tmp = tempfile.mkdtemp();
-    toml_content = '[plugins.scale.microservices]\nenabled = true\n\n[plugins.scale.microservices.services.orders]\nfile = "orders_app.jac"\nprefix = "/api/orders"\n\n[plugins.scale.microservices.services.payments]\nfile = "payments_app.jac"\nprefix = "/api/payments"\n';
+    toml_content = '[plugins.scale.microservices]\nenabled = true\n\n[plugins.scale.microservices.routes]\norders_app = "/api/orders"\ncart_app = "/api/cart"\n';
     (Path(tmp) / "jac.toml").write_text(toml_content);
 
-    remove_service(tmp, "orders");
+    remove_service(tmp, "orders_app");
 
-    content = (Path(tmp) / "jac.toml").read_text();
-    assert "orders" not in content.lower() or "payments" in content;
-    assert "[plugins.scale.microservices.services.payments]" in content;
+    with open(str(Path(tmp) / "jac.toml"), "rb") as f {
+        doc = tomllib.load(f);
+    }
+    routes = doc["plugins"]["scale"]["microservices"]["routes"];
+    assert "orders_app" not in routes;
+    assert routes["cart_app"] == "/api/cart";
 
     import shutil;
     shutil.rmtree(tmp);
 }
 
-test "remove_service handles missing service" {
+test "remove_service handles missing route" {
     tmp = tempfile.mkdtemp();
     (Path(tmp) / "jac.toml").write_text('[plugins.scale.microservices]\nenabled = true\n');
 
@@ -146,7 +169,7 @@ test "remove_service handles missing service" {
 
 test "list_services shows config" {
     tmp = tempfile.mkdtemp();
-    toml_content = '[plugins.scale.microservices]\nenabled = true\ngateway_port = 8000\n\n[plugins.scale.microservices.services.orders]\nfile = "orders_app.jac"\nprefix = "/api/orders"\n';
+    toml_content = '[plugins.scale.microservices]\nenabled = true\ngateway_port = 8000\n\n[plugins.scale.microservices.routes]\norders_app = "/api/orders"\n';
     (Path(tmp) / "jac.toml").write_text(toml_content);
 
     # Should print without crashing

@@ -2,32 +2,17 @@
 
 """Assign a port to a service.
 
-Uses core's hash-based strategy (18000 + hash(module) % 1000, 100 retries)
-to match how `ensure_sv_service` assigns ports. This way `sv_client._registry`
-URLs and our deployer URLs are consistent when the same module is re-spawned.
+Delegates to `_util.pick_free_port` so our deployer URLs stay consistent
+with core's `ensure_sv_service` port strategy and with the plugin's own
+hookimpl. Respects a pre-assigned `service_entry.port` if > 0.
 """
 impl ServiceProcessManager._assign_port
 (service_entry: ServiceEntry) -> int {
     if service_entry.port > 0 {
         return service_entry.port;
     }
-    import socket;
-    base_port = 18000 + (hash(service_entry.name) % 1000);
-    port = base_port;
-    for _ in range(100) {
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
-        try {
-            s.bind(('127.0.0.1', port));
-            s.close();
-            return port;
-        } except OSError {
-            s.close();
-            port = port + 1;
-        }
-    }
-    logger.warning(f"Could not find free port near {base_port}, using fallback");
-    return base_port;
+    import from jac_scale.microservices._util { pick_free_port }
+    return pick_free_port(service_entry.name);
 }
 
 """Start a single service subprocess. Returns True on success."""
@@ -41,20 +26,8 @@ impl ServiceProcessManager.start_service
     entry = self.registry.entries[name];
     port = self._assign_port(entry);
 
-    # Resolve jac binary
-    import shutil;
-    import sys;
-    import from pathlib { Path }
-    jac_bin: str = shutil.which("jac") or "";
-    if not jac_bin {
-        py_dir = Path(sys.executable).parent;
-        candidate = py_dir / "jac";
-        if candidate.exists() {
-            jac_bin = str(candidate);
-        } else {
-            jac_bin = "jac";
-        }
-    }
+    import from jac_scale.microservices._util { resolve_jac_binary }
+    jac_bin: str = resolve_jac_binary();
 
     cmd = [jac_bin, "start", entry.file, "--port", str(port), "--no_client"];
     logger.info(f"Starting {name}: {' '.join(cmd)}");
