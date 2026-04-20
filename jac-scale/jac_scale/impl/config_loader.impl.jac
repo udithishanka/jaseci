@@ -332,16 +332,37 @@ impl JacScaleConfig.get_scheduler_config(self: JacScaleConfig) -> dict[str, Any]
     };
 }
 
-"""Get microservices configuration from jac.toml."""
+"""Get microservices configuration from jac.toml.
+
+Supports both:
+  - routes: {module_name: prefix}  (v2, sv import based)
+  - services: {name: {file, prefix}} (v1, legacy)
+
+The old services map is synthesized into routes for backwards compatibility
+so existing code paths (gateway prefix matching) keep working.
+"""
 impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, Any] {
     config = self.load();
     ms_config = config.get('microservices', {});
     client_config = ms_config.get('client', {});
+
+    # Merge legacy services into routes for backwards compatibility
+    routes: dict = dict(ms_config.get('routes', {}));
+    legacy_services = ms_config.get('services', {});
+    for (name, svc_cfg) in legacy_services.items() {
+        cfg_dict = dict(svc_cfg);
+        prefix = cfg_dict.get('prefix', f'/api/{name}');
+        if name not in routes {
+            routes[name] = prefix;
+        }
+    }
+
     return {
         'enabled': ms_config.get('enabled', False),
         'gateway_port': int(ms_config.get('gateway_port', 8000)),
         'gateway_host': ms_config.get('gateway_host', '0.0.0.0'),
-        'services': ms_config.get('services', {}),
+        'routes': routes,
+        'services': legacy_services,  # kept for backwards-compat
         'client': {
             'entry': client_config.get('entry', ''),
             'dist_dir': client_config.get('dist_dir', '.jac/client/dist'),

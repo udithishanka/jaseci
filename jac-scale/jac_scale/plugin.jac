@@ -23,46 +23,24 @@ import from jaclang.runtimelib.storage { Storage }
 
 """Pre-hook for jac start command to handle microservice mode and --scale flag."""
 def _scale_pre_hook(context: HookContext) -> None {
-    # Check for microservice mode first (before --scale)
+    # Microservice mode: services are spawned on-demand by core's BFS
+    # discovery + our ensure_sv_service hookimpl. The pre-hook only
+    # bootstraps the gateway for client-facing routing when enabled
+    # and we're NOT already running as an sv sibling child.
     scale_config = get_scale_config();
     ms_config = scale_config.get_microservices_config();
+    is_sv_sibling = os.environ.get("JAC_SV_SIBLING") == "1";
 
-    if ms_config.get("enabled", False) {
-        # Only trigger orchestrator when running the project entry-point,
-        # not when running a service file directly (avoids recursive spawning)
-        filename = context.get_arg("filename", "");
-        entry_point = scale_config.load().get("project", {}).get("entry-point", "");
-        started_file = os.path.basename(str(filename)) if filename else "";
-
-        # Also check: is the started file one of the declared services?
-        services = ms_config.get("services", {});
-        is_service_file = False;
-        for (svc_name, svc_cfg) in services.items() {
-            svc_file = os.path.basename(str(dict(svc_cfg).get("file", "")));
-            if svc_file and svc_file == started_file {
-                is_service_file = True;
-            }
+    if ms_config.get("enabled", False) and not is_sv_sibling {
+        scale_flag = context.get_arg("scale", False);
+        if not scale_flag {
+            import from jac_scale.microservices.orchestrator { start_microservice_mode }
+            start_microservice_mode(ms_config);
+            context.set_data("cancel_execution", True);
+            context.set_data("cancel_return_code", 0);
+            return;
         }
-
-        # Only orchestrate if: entry-point matches OR no entry-point set and not a service file
-        should_orchestrate = False;
-        if entry_point and started_file == entry_point {
-            should_orchestrate = True;
-        } elif not entry_point and not is_service_file {
-            should_orchestrate = True;
-        }
-
-        if should_orchestrate {
-            scale_flag = context.get_arg("scale", False);
-            if not scale_flag {
-                import from jac_scale.microservices.orchestrator { start_microservice_mode }
-                start_microservice_mode(ms_config);
-                context.set_data("cancel_execution", True);
-                context.set_data("cancel_return_code", 0);
-                return;
-            }
-            # If --scale is set with microservices enabled, fall through to K8s deploy
-        }
+        # If --scale is set with microservices enabled, fall through to K8s deploy
     }
 
     scale = context.get_arg("scale", False);
@@ -696,6 +674,128 @@ class JacScalePlugin {
     ) -> Storage {
         import from .factories.storage_factory { StorageFactory }
         return StorageFactory.get_default(base_path, create_dirs);
+    }
+
+    """Spawn a sibling sv-service as a subprocess via LocalDeployer.
+
+    Overrides core's default (which spawns an in-process thread). We spawn
+    as a subprocess so each service has its own ModuleIntrospector, graph,
+    and lifecycle — matching K8s pod semantics in production.
+
+    Called by sv_client._ensure_available when a consumer does
+    sv import from X and X is not yet registered.
+    """
+    @hookimpl
+    static def ensure_sv_service(module_name: str, base_path: str) -> None {
+        import os;
+        import socket;
+        import time;
+        import urllib.request;
+        import from jaclang.runtimelib { sv_client }
+        import from pathlib { Path }
+
+        # Idempotent: skip if already registered
+        if module_name in sv_client._registry {
+            return;
+        }
+        if module_name in sv_client._test_clients {
+            return;
+        }
+
+        # Hash-based port: deterministic per module name, 100 retries
+        base_port = 18000 + (hash(module_name) % 1000);
+        port = base_port;
+        bind_ok = False;
+        for _ in range(100) {
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
+            try {
+                s.bind(('127.0.0.1', port));
+                s.close();
+                bind_ok = True;
+                break;
+            } except OSError {
+                s.close();
+                port = port + 1;
+            }
+        }
+        if not bind_ok {
+            raise RuntimeError(f"Could not find free port near {base_port}");
+        }
+
+        # Resolve module path: look for {module_name}.jac in base_path
+        base_dir = Path(base_path);
+        module_file = base_dir / f"{module_name}.jac";
+        if not module_file.exists() {
+            raise RuntimeError(
+                f"sv-to-sv service '{module_name}': file not found at {module_file}"
+            );
+        }
+
+        # Per-service data isolation: .jac/data/{module_name}/
+        data_dir = base_dir / ".jac" / "data" / module_name;
+        data_dir.mkdir(parents=True, exist_ok=True);
+
+        # Spawn subprocess with JAC_DATA_DIR, JAC_MICROSERVICE_CHILD,
+        # and JAC_SV_SIBLING to prevent recursive orchestration
+        import subprocess;
+        child_env = dict(os.environ);
+        child_env["JAC_DATA_DIR"] = str(data_dir);
+        child_env["JAC_MICROSERVICE_CHILD"] = "1";
+        child_env["JAC_SV_SIBLING"] = "1";
+
+        cmd = [
+            "jac", "start", str(module_file),
+            "--port", str(port), "--no_client"
+        ];
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=child_env,
+            cwd=str(base_dir)
+        );
+
+        # Wait for service to become responsive
+        base_url = f"http://127.0.0.1:{port}";
+        deadline = time.time() + 15.0;
+        healthy = False;
+        while time.time() < deadline {
+            if proc.poll() is not None {
+                raise RuntimeError(
+                    f"sv-to-sv service '{module_name}' subprocess exited (code {proc.returncode})"
+                );
+            }
+            try {
+                with urllib.request.urlopen(f"{base_url}/healthz", timeout=1) as resp {
+                    if resp.status < 500 {
+                        healthy = True;
+                        break;
+                    }
+                }
+            } except Exception {
+                time.sleep(0.1);
+            }
+        }
+
+        if not healthy {
+            proc.terminate();
+            raise RuntimeError(
+                f"sv-to-sv service '{module_name}' did not become healthy at {base_url}"
+            );
+        }
+
+        sv_client.register(module_name, base_url);
+
+        # Register cleanup
+        import atexit;
+        def _cleanup {
+            if proc.poll() is None {
+                proc.terminate();
+            }
+        }
+        atexit.register(_cleanup);
     }
 }
 

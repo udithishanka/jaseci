@@ -12,21 +12,50 @@ import from jac_scale.config_loader { get_scale_config }
 
 glob logger = logging.getLogger(__name__);
 
-"""Build a ServiceRegistry from the TOML services config dict."""
-def build_registry(services_config: dict[str, Any]) -> ServiceRegistry {
+"""Build a ServiceRegistry from the TOML config.
+
+Accepts either:
+  - routes: {module_name: prefix}  (v2, sv import based)
+  - services: {name: {file, prefix}} (v1, legacy)
+
+Entries created from routes have file={module_name}.jac by convention.
+"""
+def build_registry(ms_config: dict[str, Any]) -> ServiceRegistry {
     registry = ServiceRegistry();
-    for (name, svc_config) in services_config.items() {
+
+    # Prefer new-style routes map
+    routes = ms_config.get("routes", {});
+    for (route_name, prefix) in routes.items() {
+        name_str: str = str(route_name);
+        svc_entry = ServiceEntry(
+            name=name_str,
+            file=f"{name_str}.jac",
+            prefix=str(prefix),
+            port=0
+        );
+        registry.register(svc_entry);
+        logger.info(f"Registered route: {name_str} -> {svc_entry.prefix}");
+    }
+
+    # Also support legacy services map
+    services_config = ms_config.get("services", {});
+    for (svc_name, svc_config) in services_config.items() {
+        svc_name_str: str = str(svc_name);
+        if svc_name_str in registry.entries {
+            continue;  # already registered from routes
+        }
         svc_dict: dict = dict(svc_config);
         svc_entry = ServiceEntry(
-            name=name,
-            file=str(svc_dict.get("file", "")),
-            prefix=str(svc_dict.get("prefix", f"/api/{name}")),
+            name=svc_name_str,
+            file=str(svc_dict.get("file", f"{svc_name_str}.jac")),
+            prefix=str(svc_dict.get("prefix", f"/api/{svc_name_str}")),
             port=int(svc_dict.get("port", 0)),
             replicas=int(svc_dict.get("replicas", 1))
         );
         registry.register(svc_entry);
-        logger.info(f"Registered service: {name} -> {svc_entry.prefix} ({svc_entry.file})");
+        logger.info(f"Registered service: {svc_name_str} -> {svc_entry.prefix} ({svc_entry.file})");
     }
+
     return registry;
 }
 
@@ -41,11 +70,12 @@ Bootstrap and run microservice mode locally.
 6. On shutdown: stops all services
 """
 def start_microservice_mode(ms_config: dict[str, Any]) -> None {
+    routes_config = ms_config.get("routes", {});
     services_config = ms_config.get("services", {});
 
-    if not services_config {
-        logger.error("No services declared in [plugins.scale.microservices.services]");
-        logger.error("Run `jac setup microservice` to configure services.");
+    if not routes_config and not services_config {
+        logger.error("No routes declared in [plugins.scale.microservices.routes]");
+        logger.error("Run `jac setup microservice` to configure.");
         return;
     }
 
@@ -82,8 +112,8 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
         }
     }
 
-    # 1. Build registry
-    registry = build_registry(services_config);
+    # 1. Build registry from routes (v2) + services (v1 legacy)
+    registry = build_registry(ms_config);
     logger.info(f"Registry: {len(registry.entries)} services");
 
     # 2. Start services via deployer

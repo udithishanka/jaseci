@@ -1,14 +1,33 @@
 """Implementation of ServiceProcessManager methods."""
 
-"""Assign a port to a service (auto-assign if port=0)."""
+"""Assign a port to a service.
+
+Uses core's hash-based strategy (18000 + hash(module) % 1000, 100 retries)
+to match how `ensure_sv_service` assigns ports. This way `sv_client._registry`
+URLs and our deployer URLs are consistent when the same module is re-spawned.
+"""
 impl ServiceProcessManager._assign_port
 (service_entry: ServiceEntry) -> int {
     if service_entry.port > 0 {
         return service_entry.port;
     }
-    port = self._next_port;
-    self._next_port += 1;
-    return port;
+    import socket;
+    base_port = 18000 + (hash(service_entry.name) % 1000);
+    port = base_port;
+    for _ in range(100) {
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM);
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1);
+        try {
+            s.bind(('127.0.0.1', port));
+            s.close();
+            return port;
+        } except OSError {
+            s.close();
+            port = port + 1;
+        }
+    }
+    logger.warning(f"Could not find free port near {base_port}, using fallback");
+    return base_port;
 }
 
 """Start a single service subprocess. Returns True on success."""
@@ -29,7 +48,14 @@ impl ServiceProcessManager.start_service
         import os;
         import from pathlib { Path }
         child_env = dict(os.environ);
-        child_env["JAC_MICROSERVICE_CHILD"] = "1";
+        # Prevent child process from re-triggering the orchestrator
+        child_env["JAC_SV_SIBLING"] = "1";
+
+        # Isolate data per service so shelf DBs don't clash.
+        # Each subprocess writes to .jac/data/{name}/ instead of sharing .jac/data/.
+        data_dir = Path(".jac/data") / name;
+        data_dir.mkdir(parents=True, exist_ok=True);
+        child_env["JAC_DATA_DIR"] = str(data_dir.resolve());
 
         # Write service logs to .jac/logs/{name}.log
         log_dir = Path(".jac/logs");
@@ -51,6 +77,10 @@ impl ServiceProcessManager.start_service
         entry.url = f"http://127.0.0.1:{port}";
         entry.status = ServiceStatus.STARTING;
         self._failure_counts[name] = 0;
+
+        # Register URL in sv_client so sv import calls can resolve it
+        import from jaclang.runtimelib { sv_client }
+        sv_client.register(name, entry.url);
 
         logger.info(f"Started {name} (pid={proc.pid}, port={port})");
         return True;
@@ -94,6 +124,10 @@ impl ServiceProcessManager.stop_service
         entry.status = ServiceStatus.STOPPED;
         entry.pid = None;
     }
+
+    # Unregister from sv_client so sv import calls get fresh resolution
+    import from jaclang.runtimelib { sv_client }
+    sv_client.unregister(name);
 
     logger.info(f"Stopped {name}");
     return True;

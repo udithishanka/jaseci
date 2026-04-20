@@ -15,7 +15,7 @@ import from jac_scale.microservices.process_manager {
 # Port assignment
 # =============================================================================
 
-test "auto assigns ports starting from 8001" {
+test "auto assigns hash-based ports in 18000-18999 range" {
     reg = ServiceRegistry();
     reg.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
     reg.register(ServiceEntry(name="payments", file="payments.jac", prefix="/api/payments"));
@@ -25,8 +25,28 @@ test "auto assigns ports starting from 8001" {
     port1 = pm._assign_port(reg.entries["orders"]);
     port2 = pm._assign_port(reg.entries["payments"]);
 
-    assert port1 == 8001;
-    assert port2 == 8002;
+    # Hash-based: 18000 + hash(name) % 1000 (with retries for conflicts)
+    assert 18000 <= port1 < 19100;
+    assert 18000 <= port2 < 19100;
+    # Different services should get different ports
+    assert port1 != port2;
+}
+
+test "auto assigned port is deterministic for same service name" {
+    reg1 = ServiceRegistry();
+    reg1.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
+    pm1 = ServiceProcessManager(registry=reg1);
+    port1 = pm1._assign_port(reg1.entries["orders"]);
+
+    reg2 = ServiceRegistry();
+    reg2.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
+    pm2 = ServiceProcessManager(registry=reg2);
+    port2 = pm2._assign_port(reg2.entries["orders"]);
+
+    # Same module name should produce same base port (deterministic hashing)
+    # Note: Python's hash() is randomized per-process unless PYTHONHASHSEED is set,
+    # but within a single test run both calls use the same seed.
+    assert port1 == port2;
 }
 
 test "uses explicit port when set" {
@@ -59,7 +79,8 @@ test "start service launches subprocess" {
         assert "orders" in pm.processes;
         assert reg.entries["orders"].pid == 12345;
         assert reg.entries["orders"].status == ServiceStatus.STARTING;
-        assert reg.entries["orders"].url == "http://127.0.0.1:8001";
+        # Hash-based port in 18000-18999 range
+        assert reg.entries["orders"].url.startswith("http://127.0.0.1:18");
     }
 }
 

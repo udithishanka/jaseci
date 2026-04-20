@@ -2,14 +2,26 @@
 
 import shutil;
 
-"""Build the target URL by stripping prefix and forwarding the rest."""
+"""Build the target URL by stripping prefix and forwarding the rest.
+
+Resolution order:
+  1. sv_client._registry[module] — URL set by ensure_sv_service hook
+  2. service_entry.url — URL from our process manager
+  3. Fallback: error (no known URL)
+"""
 impl MicroserviceGateway.resolve_target_url
 (service_entry: ServiceEntry, path: str, query: str) -> str {
+    import from jaclang.runtimelib { sv_client }
+
+    # Prefer sv_client registry (populated by ensure_sv_service hookimpl
+    # or by consumer module imports). Falls back to our registry entry.
+    base_url: str = sv_client._registry.get(service_entry.name, service_entry.url);
+
     remaining: str = path[len(service_entry.prefix):];
     if not remaining {
         remaining = "/";
     }
-    target: str = f"{service_entry.url}{remaining}";
+    target: str = f"{base_url}{remaining}";
     if query {
         target = f"{target}?{query}";
     }

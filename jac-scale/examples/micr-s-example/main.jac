@@ -1,30 +1,22 @@
 """jac-shop — E-Commerce Microservice App.
 
-In microservice mode (jac.toml microservices.enabled = true):
-  - Products, Orders, Cart each run as separate service processes
-  - Gateway serves client UI and proxies API calls to services
-  - Run: jac start main.jac (launches gateway + 3 services)
+Microservice architecture:
+  - products_app.jac: catalog functions (list_products, get_product)
+  - cart_app.jac: cart functions (view_cart, add_to_cart, clear_cart)
+  - orders_app.jac: order functions; sv imports cart_app for inter-service calls
+  - main.jac: this file — client UI + gateway entry point
 
-In monolith mode (microservices.enabled = false):
-  - All endpoints run in a single process
-  - Run: jac start main.jac
+Run: jac start main.jac
+  Gateway on :8000
+  Services auto-spawn on-demand via sv import (hash-based ports in 18xxx)
 """
 
-# Server-side endpoints — all walkers registered for monolith mode
-sv {
-    import from endpoints {
-        Products, Product, ListProducts, GetProduct, SearchProducts,
-        Order, PlaceOrder, ListOrders, GetOrder, CancelOrder,
-        Cart, AddToCart, ViewCart, RemoveFromCart, ClearCart
-    }
-}
+# Client-side UI — served as static SPA by the gateway
+to cl:
 
-# Client-side UI
-cl {
-    import from .frontend { app as ClientApp }
+import from .frontend { app as ClientApp }
 
-    def:pub app -> any {
-        return
-            <ClientApp />;
-    }
+def:pub app -> any {
+    return
+        <ClientApp />;
 }

@@ -1,9 +1,9 @@
 """Implementations for the Jac Shop frontend.
 
-In microservice mode, the client calls the gateway API directly:
-  /api/products/walker/ListProducts
-  /api/cart/walker/AddToCart
-  /api/orders/walker/PlaceOrder
+In microservice mode, the client calls gateway function endpoints:
+  /api/products/function/list_products
+  /api/cart/function/add_to_cart
+  /api/orders/function/create_order
 """
 
 impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
@@ -16,19 +16,20 @@ impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
         }
     };
     options["body"] = JSON.stringify(body or {});
-    resp = await fetch(f"/api/{service}/walker/{endpoint}", options);
+    resp = await fetch(f"/api/{service}/function/{endpoint}", options);
     return await resp.json();
 }
 
 impl app.fetchProducts -> None {
     loading = True;
-    data = await apiCall("products", "ListProducts", {});
-    products = data.data.reports[0] if data.data and data.data.reports else [];
+    data = await apiCall("products", "list_products", {});
+    # Function response envelope: { ok, data: { result: [...] } }
+    products = data.data.result if data.data and data.data.result else [];
     loading = False;
 }
 
 impl app.addToCart(productId: str, name: str, price: float) -> None {
-    await apiCall("cart", "AddToCart", {
+    await apiCall("cart", "add_to_cart", {
         "product_id": productId,
         "product_name": name,
         "price": price,
@@ -38,20 +39,18 @@ impl app.addToCart(productId: str, name: str, price: float) -> None {
 }
 
 impl app.fetchCart -> None {
-    data = await apiCall("cart", "ViewCart", {});
-    cart = data.data.reports[0] if data.data and data.data.reports else {"items": [], "total": 0};
+    data = await apiCall("cart", "view_cart", {});
+    cart = data.data.result if data.data and data.data.result else {"items": [], "total": 0};
 }
 
 impl app.placeOrder -> None {
-    # PlaceOrder handles everything server-side:
-    # orders service → calls cart service (ViewCart) → creates order → calls cart service (ClearCart)
-    token = localStorage.getItem("jac_token");
-    result = await apiCall("orders", "PlaceOrder", {"auth_token": "Bearer " + (token or "")});
-    data = result.data if result.data else {};
-    reports = data.reports[0] if data.reports else {};
+    # create_order handles everything server-side via sv import:
+    # orders_app -> view_cart() on cart_app -> creates order -> clear_cart()
+    result = await apiCall("orders", "create_order", {});
+    order = result.data.result if result.data and result.data.result else {};
 
-    if reports.error {
-        console.log("Order error:", reports.error);
+    if order.error {
+        console.log("Order error:", order.error);
         return;
     }
 
@@ -61,8 +60,8 @@ impl app.placeOrder -> None {
 }
 
 impl app.fetchOrders -> None {
-    data = await apiCall("orders", "ListOrders", {});
-    orders = data.data.reports[0] if data.data and data.data.reports else [];
+    data = await apiCall("orders", "list_orders", {});
+    orders = data.data.result if data.data and data.data.result else [];
 }
 
 impl app.handleLogin -> None {
