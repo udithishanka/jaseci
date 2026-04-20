@@ -9,8 +9,15 @@ enum Category { WORK, PERSONAL, SHOPPING, HEALTH, OTHER }
 def categorize(title: str) -> Category by llm();
 
 def:pub add_todo(title: str) -> Todo {
-    category = str(categorize(title)).split(".")[-1].lower();
-    return (root() ++> Todo(title=title, category=category))[0];
+    try {
+        result = categorize(title);
+        category = str(result).split(".")[-1].lower();
+    } except Exception {
+        category = "other (setup AI key)";
+    }
+    todo = Todo(title=title, category=category);
+    root() ++> todo;
+    return todo;
 }
 
 def:pub get_todos -> list[Todo] {
@@ -38,18 +45,10 @@ cl def:pub app -> JsxElement {
             <input
                 value={text}
                 onChange={lambda e: ChangeEvent { text = e.target.value;}}
-                onKeyPress={lambda e: KeyboardEvent { if e.key == "Enter" {
-                    add();
-                }}}
+                onKeyPress={lambda e: KeyboardEvent { if e.key == "Enter" { add(); }}}
                 placeholder="Add a todo..."
             />
-            <button onClick={add}>
-                Add
-            </button>
-            {[
-                <p key={jid(t)}>
-                    {t.title} ({t.category})
-                </p> for t in todos
-            ]}
+            <button onClick={add}>Add</button>
+            {[<p key={jid(t)}>{t.title} ({t.category})</p> for t in todos]}
         </div>;
 }
