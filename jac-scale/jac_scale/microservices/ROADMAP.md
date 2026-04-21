@@ -26,8 +26,8 @@ Work top-to-bottom. Each row maps 1:1 to an interface that
 | Order | Task | Why it gates K8s | Production parallel |
 |-------|------|-------------------|---------------------|
 | P1 ✓ | **URL construction on `ServiceDeployer`** - `url_for(service_entry) -> str` is now the single source of truth. `LocalDeployer.url_for` returns loopback; `ServiceProcessManager` got a `deployer` field and `_url_for` that dispatches through it (with loopback fallback for tests that instantiate `pm` directly). Peer-URL env builder and `entry.url` assignment both go through this. 4 new unit tests + e2e check that every `/health` URL matches the loopback shape | K8sDeployer overrides `url_for` to return `http://{svc}.{ns}.svc.cluster.local:{port}`. No call-site changes needed in K8s | Same interface, different impl |
-| P2 | **Shared storage backend via MongoDB** - verify microservice mode honors `MONGODB_URI` and every service uses the same external store. Gap-fix if it doesn't. Update example to show a `docker run mongo` local quickstart | K8s pods get `MONGODB_URI` pointing at the cluster Mongo Service. Local dev points at a docker Mongo. Graph state is consistent either way | Identical code path; env var flip |
-| P3 | **`get_sv_registry()` hookspec in jaclang core** - public API for the service-URL lookup. Gateway + peer-URL env builder both call `JacRuntime.get_sv_registry()` instead of poking `sv_client._registry` | K8sDeployer's hookimpl populates the registry from K8s Service DNS (or overrides the getter). Gateway doesn't know or care | Same getter, different producer |
+| P2 skip | *Deferred to K8s bring-up* - `MONGODB_URI` subprocess path isn't independently verified. If it's broken, we'll find out while standing up minikube. Trade: saves ~30 min now, accepts "K8s debug includes storage path" risk | Same env var, same code path in theory | Verification postponed |
+| P3 ✓ | **`get_sv_registry()` hookspec in jaclang core** - `JacAPIServer.get_sv_registry -> dict[str, str]` added as a public hookspec. Default impl returns `dict(sv_client._registry)` (snapshot, not a live view). Gateway's `resolve_target_url` now calls `jaclang.JacRuntime.get_sv_registry()` instead of poking `sv_client._registry` directly. 3 new unit tests (dispatch prefers registry over entry.url, fallback to entry.url when unregistered, snapshot semantics) | K8sDeployer's hookimpl populates the registry from K8s Service DNS. Gateway doesn't know or care | Same getter, different producer |
 | P4 | **Cross-process CLI state via pidfile** - `.jac/run/{service}.pid` per service. `jac scale status/stop/restart/logs` work from a separate shell. Replace the in-process `pm.processes` lookup in `scale_cmd` with pidfile-backed `psutil.pid_exists` | K8sDeployer backs the same CLI with `kubectl get pod` / `kubectl delete pod`. User invokes the same commands, different deployer answers | Same CLI shape, different state source |
 | P5 | **Retry with exponential backoff** in `sv_service_call` hookimpl (row 4d) - N retries, backoff, connect+read timeouts. Applies to both local and K8s transports | K8s networking has pod restarts and transient DNS resolution failures. Retry in the hookimpl means every sv-import call gets resilience for free | Same hookimpl, same behavior |
 | P6 | **Circuit breaker** in `sv_service_call` (row 4e) - per-provider half-open/open/closed state with a trip threshold. Fails fast when a downstream is unhealthy instead of piling up stuck requests | Prevents cascade failures when one K8s pod is unhealthy. Essential in prod; a local simulation tests the failure semantics | Same code |
@@ -52,14 +52,14 @@ After P1-P12, the K8s work is bounded:
 | # | Scope | Status | Commit / file |
 |---|-------|--------|---------------|
 | 0 | `sv_service_call` hookspec in jaclang core | done | `8e09549c3`, `jac/jaclang/jac0core/runtime.jac` |
-| 0b | `get_sv_registry()` hookspec (→ P3) | not started | gateway still reads `sv_client._registry` directly |
+| 0b | `get_sv_registry()` hookspec (→ P3) | done | `jac/jaclang/jac0core/runtime.jac` hookspec + default impl returning `dict(sv_client._registry)`. Gateway uses `jaclang.JacRuntime.get_sv_registry()` |
 | 1 | `ServiceDeployer` abstract + `LocalDeployer` | done | `microservices/deployer.jac`, `local_deployer.jac` |
 | 1a | Hash-based port assignment (`18000 + hash % 1000`) | done | `microservices/_util.jac:pick_free_port` |
 | 1b | Shared anchor store across all services | done locally | single `.jac/data/anchor_store.db`; each service imports shared node classes so deserialize resolves. See `examples/micr-s-example/shared/models.jac`. K8s uses shared external Mongo (→ P2) |
 | 1c | `/healthz` polling on startup | done | `_util.jac:wait_for_health` |
 | 1d | Peer-URL env (`JAC_SV_{NAME}_URL`) injected into children so sv-imports resolve without grandchild spawns | done | `process_manager.impl.jac:start_service` + `start_all` pre-assign |
 | 1e | URL construction abstraction (→ P1) | done | `ServiceDeployer.url_for` in `deployer.jac`; `LocalDeployer.url_for` returns loopback; `process_manager._url_for` dispatches via injected deployer |
-| 1f | Shared Mongo storage verification (→ P2) | not started | `MONGODB_URI` path not exercised in microservice mode |
+| 1f | Shared Mongo storage verification (→ P2) | deferred | Skipped before K8s by choice; will surface in PR 15 if there's a subprocess-env gap |
 | 2 | `MicroserviceGateway` FastAPI reverse proxy | done | `microservices/gateway.jac` + `impl/gateway.impl.jac` |
 | 2a | Path-based routing (`/api/{service}/*`) | done | `handle_proxy` handler |
 | 2b | Static file serving + SPA fallback | done | `handle_static` handler |
@@ -99,14 +99,14 @@ After P1-P12, the K8s work is bounded:
 
 ## Test coverage
 
-115 tests green across 9 suites:
+118 tests green across 9 suites:
 
 | Suite | Count | What it covers |
 |-------|-------|----------------|
 | `test_microservices_registry.jac` | 14 | prefix matching, register/deregister, rebuild |
 | `test_process_manager.jac` | 15 | subprocess start/stop/restart, health, port pick |
 | `test_deployer.jac` | 16 | `ServiceDeployer` interface, `LocalDeployer`, `url_for` dispatch + pm wiring |
-| `test_gateway.jac` | 28 | all 5 middleware handlers, static, admin, proxy errors |
+| `test_gateway.jac` | 31 | all 5 middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch |
 | `test_orchestrator.jac` | 4 | `build_registry`, config routing |
 | `test_setup.jac` | 13 | CLI utilities, add/remove/list, TOML write |
 | `test_sv_auth_forward.jac` | 5 | sv_service_call auth forwarding, envelope errors |

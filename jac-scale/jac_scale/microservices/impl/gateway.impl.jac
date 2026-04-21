@@ -5,17 +5,20 @@ import shutil;
 """Build the target URL by stripping prefix and forwarding the rest.
 
 Resolution order:
-  1. sv_client._registry[module] - URL set by ensure_sv_service hook
+  1. JacRuntime.get_sv_registry()[module] - public hookspec (plugins can
+     override; KubernetesDeployer will return K8s DNS names here)
   2. service_entry.url - URL from our process manager
   3. Fallback: error (no known URL)
 """
 impl MicroserviceGateway.resolve_target_url
 (service_entry: ServiceEntry, path: str, query: str) -> str {
-    import from jaclang.runtimelib { sv_client }
+    import jaclang;
 
-    # Prefer sv_client registry (populated by ensure_sv_service hookimpl
-    # or by consumer module imports). Falls back to our registry entry.
-    base_url: str = sv_client._registry.get(service_entry.name, service_entry.url);
+    # Use the public hookspec; plugins can swap the URL source without
+    # the gateway knowing (jaclang core returns sv_client._registry by
+    # default; jac-scale's KubernetesDeployer will return DNS URLs).
+    registry: dict[str, str] = jaclang.JacRuntime.get_sv_registry();
+    base_url: str = registry.get(service_entry.name, service_entry.url);
 
     remaining: str = path[len(service_entry.prefix):];
     if not remaining {

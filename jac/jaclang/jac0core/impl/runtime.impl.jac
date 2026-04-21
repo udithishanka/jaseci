@@ -1843,6 +1843,17 @@ impl JacAPIServer.sv_service_call
     );
 }
 
+"""Default sv-service registry: a snapshot of sv_client._registry.
+
+Plugins (e.g. jac-scale's KubernetesDeployer) override this to source
+URLs from a different authority without touching the gateway or other
+callers that consume the registry.
+"""
+impl JacAPIServer.get_sv_registry -> dict[str, str] {
+    import from jaclang.runtimelib { sv_client }
+    return dict(sv_client._registry);
+}
+
 """Create the API server instance.
 
 If the specified port is in use, tries subsequent ports up to max_retries times.

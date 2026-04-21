@@ -82,6 +82,69 @@ test "resolve no query string omits question mark" {
 }
 
 # =============================================================================
+# get_sv_registry hookspec dispatch (ROADMAP P3)
+# =============================================================================
+
+test "resolve_target_url prefers the sv_registry URL over service_entry.url" {
+    # Simulates KubernetesDeployer: the registry says the service lives
+    # somewhere that differs from whatever our local ServiceEntry knows.
+    # Gateway MUST honor the registry (the hookspec) - otherwise K8s DNS
+    # URLs would be ignored and local loopback would win.
+    import from jaclang.runtimelib { sv_client }
+
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+
+    sv_client.register("orders", "http://override.test.local:9999");
+    try {
+        svc = reg.entries["orders"];
+        url = gw.resolve_target_url(svc, "/api/orders/walker/list", "");
+        assert url == "http://override.test.local:9999/walker/list";
+    } finally {
+        sv_client.unregister("orders");
+    }
+}
+
+test "resolve_target_url falls back to service_entry.url when sv_registry has no entry" {
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+
+    svc = reg.entries["orders"];
+    # sv_client registry has nothing for "orders"; fallback must kick in
+    url = gw.resolve_target_url(svc, "/api/orders/walker/list", "");
+    assert url == "http://127.0.0.1:8001/walker/list";
+}
+
+test "JacRuntime.get_sv_registry returns a snapshot, not a live view" {
+    # Default core impl returns dict(sv_client._registry). Mutating the
+    # returned dict must not leak into the real registry, or future
+    # KubernetesDeployer hookimpls that do expensive DNS lookups per call
+    # would become a cache-coherency problem.
+    import jaclang;
+    import from jaclang.runtimelib { sv_client }
+
+    sv_client.register("snapshot_test", "http://a.test:1");
+    try {
+        snap = jaclang.JacRuntime.get_sv_registry();
+        assert snap.get("snapshot_test") == "http://a.test:1";
+        snap["snapshot_test"] = "http://mutated.test:2";
+        # Real registry unchanged
+        fresh = jaclang.JacRuntime.get_sv_registry();
+        assert fresh.get("snapshot_test") == "http://a.test:1";
+    } finally {
+        sv_client.unregister("snapshot_test");
+    }
+}
+
+# =============================================================================
 # Setup
 # =============================================================================
 

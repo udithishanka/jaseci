@@ -209,6 +209,12 @@ print(' '.join(v.get('url','') for v in d.get('services',{}).values()))
 check "every service.url was constructed by LocalDeployer.url_for" \
   bash -c 'for u in '"$URLS"'; do [[ "$u" =~ ^http://127\.0\.0\.1:[0-9]+$ ]] || exit 1; done'
 
+# The get_sv_registry hookspec (roadmap P3) is transitively exercised
+# by every /api/{service}/* proxy call: resolve_target_url calls
+# JacRuntime.get_sv_registry() to look up base URLs. If the hookspec
+# broke, auth-forwarding tests below and the authenticated proxy would
+# fail immediately. No standalone check needed.
+
 # Shared anchor store at .jac/data/anchor_store.db (all services + gateway
 # share one graph, consistent with the monolith model). Per-service node
 # class registration lives in examples/.../shared/models.jac.

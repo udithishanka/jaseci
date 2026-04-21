@@ -596,6 +596,20 @@ class JacAPIServer {
         module_name: str, func_name: str, args: dict
     ) -> Any;
 
+    """Return the current sv-service registry as a {module_name: base_url} dict.
+
+        Public accessor for the sv-service URL table. Callers (e.g. a
+        microservice gateway) should use this instead of reaching into
+        `sv_client._registry` directly. Plugins can override to source URLs
+        from a different authority - jac-scale's KubernetesDeployer will
+        return K8s Service DNS names instead of localhost loopbacks, with
+        no change required at the call site.
+
+        The returned dict is a snapshot; callers must not mutate it and
+        should call again for fresh data.
+        """
+    static def get_sv_registry -> dict[str, str];
+
     """Create the API server instance.
 
     If the specified port is in use, tries subsequent ports up to max_retries times.
