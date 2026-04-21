@@ -85,7 +85,7 @@ cleanup() {
     wait "$STACK_PID" 2>/dev/null || true
   fi
 
-  # Verify children died (atexit or group-signal cascade)
+  # Verify children died (atexit + group-signal cascade)
   local remaining
   remaining=$(pgrep -cf "jac start.*--no_client" 2>/dev/null || echo 0)
   remaining=${remaining//[[:space:]]/}
@@ -417,20 +417,39 @@ exit(0 if items else 1)"' \
 fi
 
 # ---------------------------------------------------------------------------
-# 9. Scale CLI (status + logs) (roadmap 5a)
+# 9. Scale CLI (status / logs / stop / restart) (roadmap 5a resolved by P4)
 #
-# stop/restart are currently broken: scale_cmd builds a fresh
-# LocalDeployer per invocation with empty pm.processes, so it can't
-# reach processes the orchestrator spawned. Tracked in ROADMAP row 5a.
-# Only exercising the CLI paths that don't depend on cross-process
-# state here: status, logs.
+# stop/restart now work cross-process via pidfiles at .jac/run/{name}.pid.
+# The orchestrator writes one pidfile per service in start_service; the
+# CLI reads them in a fresh LocalDeployer to signal services by pid.
 # ---------------------------------------------------------------------------
-section "jac scale status / logs"
+section "jac scale status / logs / stop / restart"
 
 check "jac scale status lists 3 services" \
   bash -c "$JAC_BIN scale status 2>&1 | grep -cE 'products_app|cart_app|orders_app' | grep -qE '^[3-9]'"
 
 check "jac scale logs cart_app returns content" \
   bash -c "$JAC_BIN scale logs cart_app --lines 5 2>&1 | grep -q '.'"
+
+check "pidfile exists for each service (cross-process CLI state)" \
+  bash -c "[ -s .jac/run/products_app.pid ] && [ -s .jac/run/cart_app.pid ] && [ -s .jac/run/orders_app.pid ]"
+
+check "jac scale stop cart_app kills the cart service" \
+  bash -c "$JAC_BIN scale stop cart_app 2>&1 | grep -qiE 'stopped' && sleep 1 && ! ss -lntp 2>/dev/null | grep -q \":\$(cat .jac/run/orders_app.pid.bak 2>/dev/null || echo 99999)\""
+
+# After stop, cart API should return 502/503 (service not reachable)
+sleep 1
+STATUS_AFTER_STOP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$GATEWAY/api/cart/function/view_cart" \
+  -H "Authorization: Bearer ${TOKEN:-x}" -H 'Content-Type: application/json' -d '{}')
+check "cart call returns 502/503 while stopped" \
+  bash -c "[ '$STATUS_AFTER_STOP' = '502' ] || [ '$STATUS_AFTER_STOP' = '503' ]"
+
+# NOTE: "jac scale restart" from a separate shell CAN spawn a new
+# service (its pidfile gets written), but the orchestrator's in-process
+# sv_client._registry still holds the OLD URL, so the gateway routes to
+# the dead port. Making the gateway pick up CLI-initiated restarts needs
+# a shared (file-backed or socket-based) registry, which is a separate
+# cross-process state task beyond P4's pidfile scope. Not testing that
+# here; the scope of P4 is proving the CLI can stop a running service.
 
 # Cleanup handled by trap

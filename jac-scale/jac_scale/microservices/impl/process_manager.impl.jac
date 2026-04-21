@@ -1,5 +1,76 @@
 """Implementation of ServiceProcessManager methods."""
 
+import from pathlib { Path as _Path }
+
+"""Path to the pidfile for a service.
+
+We use `.jac/run/{name}.pid` so `jac scale stop/restart/destroy` can
+find running processes from a fresh CLI invocation, where
+`self.processes` is always empty (each `jac` command runs in its own
+Python process).
+"""
+def _pidfile_path(name: str) -> _Path {
+    return _Path(".jac/run") / f"{name}.pid";
+}
+
+"""Write a service's pid to its pidfile."""
+def _write_pidfile(name: str, pid: int) -> None {
+    run_dir = _Path(".jac/run");
+    run_dir.mkdir(parents=True, exist_ok=True);
+    _pidfile_path(name).write_text(str(pid));
+}
+
+"""Read a service's recorded pid, or None if no pidfile or unreadable."""
+def _read_pidfile(name: str) -> int | None {
+    path = _pidfile_path(name);
+    try {
+        if not path.exists() {
+            return None;
+        }
+        content: str = path.read_text().strip();
+        if not content {
+            return None;
+        }
+        return int(content);
+    } except (ValueError, OSError) {
+        return None;
+    }
+}
+
+"""Remove a service's pidfile (idempotent)."""
+def _remove_pidfile(name: str) -> None {
+    path = _pidfile_path(name);
+    try {
+        if path.exists() {
+            path.unlink();
+        }
+    } except OSError {
+        ;
+    }
+}
+
+"""Check whether a pid refers to a live process.
+
+Uses `os.kill(pid, 0)`, which delivers no signal but raises
+ProcessLookupError if the pid doesn't exist. Returns False for
+invalid pids or permission errors (both indicate "can't signal it,
+treat as dead from our point of view").
+"""
+def _pid_alive(pid: int) -> bool {
+    import os;
+    if pid <= 0 {
+        return False;
+    }
+    try {
+        os.kill(pid, 0);
+        return True;
+    } except ProcessLookupError {
+        return False;
+    } except OSError {
+        return False;
+    }
+}
+
 """Resolve a service's base URL via the owning deployer.
 
 Falls back to the loopback shape used by LocalDeployer so tests that
@@ -93,6 +164,11 @@ impl ServiceProcessManager.start_service
         entry.status = ServiceStatus.STARTING;
         self._failure_counts[name] = 0;
 
+        # Persist the pid so future `jac scale stop/restart/destroy`
+        # invocations (each of which runs in a separate Python process
+        # with an empty self.processes) can still signal the service.
+        _write_pidfile(name, proc.pid);
+
         # Register URL in sv_client so sv import calls can resolve it
         import from jaclang.runtimelib { sv_client }
         sv_client.register(name, entry.url);
@@ -149,27 +225,77 @@ impl ServiceProcessManager.start_all
     }
 }
 
-"""Stop a single service (graceful SIGTERM, then SIGKILL)."""
+"""Stop a single service (graceful SIGTERM, then SIGKILL).
+
+Works in two modes:
+
+  In-process (orchestrator called us): we have the Popen handle in
+  `self.processes`, use it directly. subprocess.Popen.terminate() +
+  wait() is cleaner than raw os.kill because it reaps the child.
+
+  Cross-process (`jac scale stop <name>` in a separate shell): no
+  Popen handle; read the pidfile and os.kill the recorded pid. Clean
+  up the pidfile either way so stale state doesn't accumulate.
+"""
 impl ServiceProcessManager.stop_service
 (name: str) -> bool {
-    proc = self.processes.get(name);
-    if not proc {
-        return False;
-    }
+    import os;
+    import time;
+    import signal;
 
     entry = self.registry.entries.get(name);
-    logger.info(f"Stopping {name} (pid={proc.pid})...");
+    proc = self.processes.get(name);
 
-    proc.terminate();
-    try {
-        proc.wait(timeout=10);
-    } except subprocess.TimeoutExpired {
-        logger.warning(f"{name} did not exit gracefully, force killing");
-        proc.kill();
-        proc.wait();
+    if proc {
+        # In-process: use the Popen handle (reaps the zombie too).
+        logger.info(f"Stopping {name} (pid={proc.pid})...");
+        proc.terminate();
+        try {
+            proc.wait(timeout=10);
+        } except subprocess.TimeoutExpired {
+            logger.warning(f"{name} did not exit gracefully, force killing");
+            proc.kill();
+            proc.wait();
+        }
+        del self.processes[name];
+    } else {
+        # Cross-process: read pidfile and signal by pid.
+        pid = _read_pidfile(name);
+        if pid is None {
+            logger.warning(f"Cannot stop {name}: no pidfile at .jac/run/{name}.pid");
+            return False;
+        }
+        if not _pid_alive(pid) {
+            logger.info(f"{name} pid {pid} is not running (stale pidfile); cleaning up");
+            _remove_pidfile(name);
+            if entry {
+                entry.status = ServiceStatus.STOPPED;
+                entry.pid = None;
+            }
+            return True;
+        }
+        logger.info(f"Stopping {name} (pid={pid}) via pidfile...");
+        try {
+            os.kill(pid, int(signal.SIGTERM));
+        } except ProcessLookupError {
+            ;  # already dead between the alive check and now
+        }
+        deadline = time.time() + 10.0;
+        while time.time() < deadline and _pid_alive(pid) {
+            time.sleep(0.2);
+        }
+        if _pid_alive(pid) {
+            logger.warning(f"{name} did not exit gracefully, force killing");
+            try {
+                os.kill(pid, int(signal.SIGKILL));
+            } except ProcessLookupError {
+                ;
+            }
+        }
     }
 
-    del self.processes[name];
+    _remove_pidfile(name);
+
     if entry {
         entry.status = ServiceStatus.STOPPED;
         entry.pid = None;

@@ -244,7 +244,7 @@ test "check all health resets failure count on success" {
     }
     assert pm._failure_counts["orders"] == 1;
 
-    # Succeed — resets count
+    # Succeed - resets count
     with unittest.mock.patch.object(pm, "check_health", return_value=True) {
         pm.check_all_health();
     }
@@ -276,5 +276,116 @@ test "restart stops then starts service" {
         assert result;
         assert pm.processes["orders"] == new_proc;
         mock_proc.terminate.assert_called_once();
+    }
+}
+
+# =============================================================================
+# Pidfile-backed cross-process stop (ROADMAP P4)
+# =============================================================================
+
+test "stop_service with pidfile only kills by pid when Popen handle is absent" {
+    # Simulates `jac scale stop` running in a fresh CLI process: the pm
+    # was just constructed and has no Popen handle, but a pidfile from a
+    # previous orchestrator run still points at a (mock) live process.
+    import os;
+    import tempfile;
+    import from pathlib { Path }
+
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
+    pm = ServiceProcessManager(registry=reg);
+
+    # Use a dedicated tempdir as cwd so we don't stomp on any real pidfile
+    tmp = tempfile.mkdtemp();
+    original_cwd = os.getcwd();
+    os.chdir(tmp);
+
+    try {
+        run_dir = Path(".jac/run");
+        run_dir.mkdir(parents=True, exist_ok=True);
+        (run_dir / "orders.pid").write_text("424242");
+
+        # os.kill must be called with the pidfile's pid (not via a Popen
+        # handle, since pm.processes is empty). Side-effect sequence:
+        #   call 1: pre-kill alive check  -> None (pid is alive)
+        #   call 2: SIGTERM dispatch      -> None (signal delivered)
+        #   call 3: wait-loop alive check -> ProcessLookupError (died)
+        #   call 4: post-loop alive check -> ProcessLookupError (no SIGKILL)
+        # The ProcessLookupErrors keep the test from burning the full
+        # 10s kill-timeout on a mocked process.
+        with unittest.mock.patch(
+            "os.kill",
+            side_effect=[
+                None, None, ProcessLookupError(), ProcessLookupError()
+            ]
+        ) {
+            result = pm.stop_service("orders");
+        }
+
+        assert result;
+        # Pidfile was cleaned up after stop
+        assert not (run_dir / "orders.pid").exists();
+        # Entry marked stopped
+        assert reg.entries["orders"].status == ServiceStatus.STOPPED;
+    } finally {
+        os.chdir(original_cwd);
+        import shutil;
+        shutil.rmtree(tmp, ignore_errors=True);
+    }
+}
+
+test "stop_service returns false when neither pidfile nor Popen handle exist" {
+    import os;
+    import tempfile;
+
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
+    pm = ServiceProcessManager(registry=reg);
+
+    tmp = tempfile.mkdtemp();
+    original_cwd = os.getcwd();
+    os.chdir(tmp);
+
+    try {
+        result = pm.stop_service("orders");
+        assert not result;
+    } finally {
+        os.chdir(original_cwd);
+        import shutil;
+        shutil.rmtree(tmp, ignore_errors=True);
+    }
+}
+
+test "stop_service cleans up stale pidfile when pid is already dead" {
+    # ProcessLookupError from os.kill(pid, 0) means the recorded pid is
+    # no longer alive. stop_service should treat this as success and
+    # remove the stale pidfile instead of erroring out.
+    import os;
+    import tempfile;
+    import from pathlib { Path }
+
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
+    pm = ServiceProcessManager(registry=reg);
+
+    tmp = tempfile.mkdtemp();
+    original_cwd = os.getcwd();
+    os.chdir(tmp);
+
+    try {
+        run_dir = Path(".jac/run");
+        run_dir.mkdir(parents=True, exist_ok=True);
+        (run_dir / "orders.pid").write_text("999999");
+
+        with unittest.mock.patch("os.kill", side_effect=ProcessLookupError()) {
+            result = pm.stop_service("orders");
+        }
+
+        assert result;
+        assert not (run_dir / "orders.pid").exists();
+    } finally {
+        os.chdir(original_cwd);
+        import shutil;
+        shutil.rmtree(tmp, ignore_errors=True);
     }
 }
