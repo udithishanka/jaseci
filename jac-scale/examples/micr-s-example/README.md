@@ -1,105 +1,183 @@
-# jac-shop - E-Commerce Microservice Example
+# jac-shop: E-Commerce Microservice Example
 
-A small e-commerce app built with 3 microservices behind an API gateway. Can also run as a monolith.
+Three-service e-commerce app demonstrating jac-scale microservice mode.
+`orders_app` does `sv import from cart_app` to place orders, exercising
+the inter-service auth-forwarding path end-to-end.
 
-## Project Structure
+## Layout
 
 ```
 micr-s-example/
-├── main.jac                    # entry point (sv {} + cl {})
-├── endpoints.sv.jac            # all walkers registered (monolith mode)
-├── jac.toml                    # microservice config
-├── services/
-│   ├── products.jac            # product catalog walkers
-│   ├── products_app.jac        # products service entry (sv {})
-│   ├── orders.jac              # order management walkers
-│   ├── orders_app.jac          # orders service entry (sv {})
-│   ├── cart.jac                # shopping cart walkers
-│   └── cart_app.jac            # cart service entry (sv {})
-├── frontend.cl.jac             # React-like UI
-├── frontend.impl.jac           # UI action implementations
-└── components/                 # reusable UI components
+  main.jac              client UI entry (cl block only)
+  jac.toml              [plugins.scale.microservices] config
+  products_app.jac      public: list_products, get_product
+  cart_app.jac          public: add_to_cart, view_cart, remove_from_cart, clear_cart
+  orders_app.jac        public: create_order, list_orders, get_order, cancel_order
+                        sv imports cart_app.{view_cart, clear_cart}
+  frontend.cl.jac       SPA view
+  frontend.impl.jac     SPA action handlers
+  components/           reusable UI components
 ```
 
-## Services
+## Architecture
 
-### Products (`/api/products`)
+```
+Client (browser / curl)
+      |
+      v
+Gateway :8000
+  /health, /admin/, static SPA, /api/{service}/function/{name}
+      |
+      +--> products_app  (auto-port in 18000-18999 range)
+      +--> cart_app      (auto-port)
+      +--> orders_app    (auto-port)
+                |
+                +-- sv import from cart_app  (HTTP under the hood,
+                    auth forwarded from the inbound request)
+```
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /walker/SeedCatalog` | Seed sample products |
-| `POST /walker/ListProducts` | Browse catalog |
-| `POST /walker/GetProduct` | Get product by ID |
-| `POST /walker/SearchProducts` | Search by name |
+## Manual test walkthrough
 
-### Orders (`/api/orders`)
+### 0. Pre-flight
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /walker/PlaceOrder` | Place order from cart items |
-| `POST /walker/ListOrders` | List user's orders |
-| `POST /walker/GetOrder` | Get order details |
-| `POST /walker/CancelOrder` | Cancel an order |
+```bash
+cd jac-scale/examples/micr-s-example
+pip list 2>/dev/null | grep -E "jac-scale|aiohttp|httpx|pyjwt"
+rm -rf .jac/data .jac/logs
+```
 
-### Cart (`/api/cart`)
+### 1. CLI config commands (no services needed)
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /walker/AddToCart` | Add product to cart |
-| `POST /walker/ViewCart` | View cart with total |
-| `POST /walker/RemoveFromCart` | Remove item |
-| `POST /walker/ClearCart` | Empty cart |
+```bash
+jac setup microservice --list
+```
 
-## Running
+Should print the routes map from `jac.toml` with `products_app`,
+`cart_app`, `orders_app`.
 
-### Monolith mode
+### 2. Bring the stack up
+
+Terminal A:
 
 ```bash
 jac start main.jac
-# All endpoints on :8000, Swagger at http://localhost:8000/docs
 ```
 
-### Microservice mode (after Day 9 orchestrator)
+Wait for the banner. Three services should be marked green (healthy).
+In terminal B, verify isolation:
 
 ```bash
-jac start main.jac
-# Gateway on :8000
-# Products on :8001 → /api/products/walker/*
-# Orders on :8002 → /api/orders/walker/*
-# Cart on :8003 → /api/cart/walker/*
+ps -ef | grep "jac start" | grep -v grep    # 3 child subprocesses
+ls .jac/data                                  # one dir per service
+ls .jac/logs                                  # one .log per service
 ```
 
-### Testing services standalone
+### 3. Gateway and static surface
 
 ```bash
-# Each service can be tested independently
-jac start services/products_app.jac --port 8001 --no-client
-jac start services/orders_app.jac --port 8002 --no-client
-jac start services/cart_app.jac --port 8003 --no-client
+curl -s http://localhost:8000/health | python3 -m json.tool
+curl -sI http://localhost:8000/          | head -3   # SPA index
+curl -sI http://localhost:8000/admin/    | head -3   # admin UI
 ```
 
-## Example Flow
+### 4. Public function proxy (no auth required for products)
 
 ```bash
-# 1. Seed products
-curl -X POST http://localhost:8001/walker/SeedCatalog
-
-# 2. Browse catalog
-curl -X POST http://localhost:8001/walker/ListProducts
-
-# 3. Add to cart
-curl -X POST http://localhost:8003/walker/AddToCart \
-  -H "Content-Type: application/json" \
-  -d '{"product_id": "prod_1", "product_name": "Wireless Headphones", "price": 49.99}'
-
-# 4. View cart
-curl -X POST http://localhost:8003/walker/ViewCart
-
-# 5. Place order
-curl -X POST http://localhost:8002/walker/PlaceOrder \
-  -H "Content-Type: application/json" \
-  -d '{"items": [{"product_id": "prod_1", "product_name": "Wireless Headphones", "qty": 1, "price": 49.99}]}'
-
-# 6. View orders
-curl -X POST http://localhost:8002/walker/ListOrders
+curl -s -X POST http://localhost:8000/api/products/function/list_products \
+  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
 ```
+
+### 5. Built-in passthrough (register + login)
+
+`/user/*` is proxied to whichever service exposes the endpoint. Exercises
+the "try every healthy service" loop.
+
+```bash
+curl -s -X POST http://localhost:8000/user/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@test.com","password":"hunter2"}'
+
+TOKEN=$(curl -s -X POST http://localhost:8000/user/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"alice@test.com","password":"hunter2"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+echo "$TOKEN"
+```
+
+### 6. Auth-forwarding on inter-service `sv import` (the critical path)
+
+`orders_app.create_order` calls `cart_app.view_cart` and
+`cart_app.clear_cart` via `sv import`. The user's JWT must reach
+cart_app on that inner hop.
+
+```bash
+# Add a product to alice's cart via the cart service directly
+curl -s -X POST http://localhost:8000/api/cart/function/add_to_cart \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"product_id":"prod_1","product_name":"Wireless Headphones","price":49.99,"qty":2}' \
+  | python3 -m json.tool
+
+# Verify cart has the item
+curl -s -X POST http://localhost:8000/api/cart/function/view_cart \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' \
+  | python3 -m json.tool
+
+# Place order: orders_app -> sv_import -> cart_app (auth must propagate)
+curl -s -X POST http://localhost:8000/api/orders/function/create_order \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' \
+  | python3 -m json.tool
+
+# Confirm the cart was cleared (proves clear_cart() ran under alice's auth)
+curl -s -X POST http://localhost:8000/api/cart/function/view_cart \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' \
+  | python3 -m json.tool
+```
+
+**Negative test** (no auth -> downstream sv call should reject):
+
+```bash
+# Refill cart
+curl -s -X POST http://localhost:8000/api/cart/function/add_to_cart \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"product_id":"prod_1","product_name":"x","price":1,"qty":1}' >/dev/null
+
+# Call create_order with NO Authorization header
+curl -s -X POST http://localhost:8000/api/orders/function/create_order \
+  -H 'Content-Type: application/json' -d '{}' | python3 -m json.tool
+# expected: error envelope; cart NOT cleared
+```
+
+### 7. Service-management CLI
+
+Terminal C (with stack still running):
+
+```bash
+jac scale status                          # bullets per service
+jac scale logs cart_app --lines 20        # tail the per-service log
+jac scale stop cart_app                   # kill cart
+# Now cart calls should fail:
+curl -s -X POST http://localhost:8000/api/cart/function/view_cart \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
+jac scale restart cart_app                # bring it back
+```
+
+### 8. Graceful shutdown
+
+Ctrl-C in terminal A, then:
+
+```bash
+ps -ef | grep "jac start" | grep -v grep    # should be empty
+```
+
+If any subprocess survives, `atexit` did not fire and that is a bug.
+
+## What this example does NOT exercise
+
+The following are deferred (see
+[`../../jac_scale/microservices/ROADMAP.md`](../../jac_scale/microservices/ROADMAP.md)):
+
+- Retry / circuit-breaker on sv_service_call (roadmap 4d, 4e)
+- X-Trace-Id propagation (roadmap 4f, 9)
+- Gateway metrics (roadmap 10)
+- Unified `/docs` Swagger across services (roadmap 12)
+- Kubernetes deployment (roadmap 14, 15)
