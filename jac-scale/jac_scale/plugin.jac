@@ -750,64 +750,109 @@ class JacScalePlugin {
         atexit.register(_cleanup);
     }
 
-    """Override core's sv_service_call to forward the request's Authorization
-    header to downstream services.
+    """Override core's sv_service_call with auth forwarding + retry.
 
     Reads the auth token from _auth_ctx (set by the FastAPI middleware in
     jfast_api.impl.jac at the start of each inbound request) and attaches
-    it to the outgoing httpx.post. Falls back to core's default envelope
-    unwrapping.
+    it to the outgoing httpx.post.
+
+    Retries transport-level failures (connect errors, timeouts) with
+    exponential backoff: 0.1s, 0.2s, 0.4s (3 attempts total). Does NOT
+    retry on successful HTTP responses that carry application errors in
+    the envelope (ok=false) - those are deterministic and a retry won't
+    change them. 4xx/5xx HTTP statuses surface as envelope errors in
+    jac-scale's server, so they also don't retry.
+
+    In K8s, this covers the common transient failures: pod restarts
+    mid-request, DNS propagation lag, brief network blips.
     """
     @hookimpl
     static def sv_service_call(
         module_name: str, func_name: str, args: dict
     ) -> Any {
+        import time;
         import from jaclang.runtimelib { sv_client }
         import from jac_scale.microservices._auth_ctx { get_current_auth }
 
-        # Test clients take precedence (matches core)
+        # Test clients take precedence (matches core) and bypass retry -
+        # they're in-process TestClient instances; transient transport
+        # errors are not a concern.
         if module_name in sv_client._test_clients {
             resp = sv_client._test_clients[module_name].post(
                 f"/function/{func_name}", json=args
             );
             data = resp.json();
-        } else {
-            url = sv_client.resolve_url(module_name);
-            try {
-                import httpx;
-            } except ImportError {
-                raise RuntimeError(
-                    "httpx is required for sv-to-sv RPC calls. "
-                    + "Install it via `pip install httpx`."
-                );
-            }
+            return _unwrap_sv_envelope(data, module_name, func_name);
+        }
 
-            headers: dict[str, str] = {};
-            auth = get_current_auth();
-            if auth {
-                headers["Authorization"] = auth;
-            }
-
-            resp = httpx.post(
-                f"{url}/function/{func_name}", json=args, headers=headers
+        url = sv_client.resolve_url(module_name);
+        try {
+            import httpx;
+        } except ImportError {
+            raise RuntimeError(
+                "httpx is required for sv-to-sv RPC calls. "
+                + "Install it via `pip install httpx`."
             );
-            data = resp.json();
         }
 
-        if isinstance(data, dict) and data.get("ok") {
-            result_envelope = data.get("data");
-            if isinstance(result_envelope, dict) and ("result" in result_envelope) {
-                return result_envelope["result"];
+        headers: dict[str, str] = {};
+        auth = get_current_auth();
+        if auth {
+            headers["Authorization"] = auth;
+        }
+
+        max_attempts: int = 3;
+        backoff: float = 0.1;  # doubles each attempt: 0.1, 0.2, 0.4
+        last_err: Exception | None = None;
+
+        for attempt in range(max_attempts) {
+            try {
+                resp = httpx.post(
+                    f"{url}/function/{func_name}",
+                    json=args,
+                    headers=headers,
+                    timeout=10.0
+                );
+                data = resp.json();
+                return _unwrap_sv_envelope(data, module_name, func_name);
+            } except (httpx.RequestError, httpx.TimeoutException) as e {
+                # Transport-level error: connect refused, read timeout,
+                # DNS failure. Worth retrying - the downstream pod may
+                # still be coming up or the network blip will clear.
+                last_err = e;
+                if attempt < max_attempts - 1 {
+                    time.sleep(backoff);
+                    backoff = backoff * 2.0;
+                }
             }
-            return result_envelope;
         }
 
-        err = (data.get("error") if isinstance(data, dict) else None) or {};
-        msg = err.get("message") if isinstance(err, dict) else str(err);
         raise RuntimeError(
-            f"sv-to-sv RPC '{module_name}.{func_name}' failed: {msg or 'unknown error'}"
+            f"sv-to-sv RPC '{module_name}.{func_name}' failed after "
+            + f"{max_attempts} attempts: {last_err}"
         );
     }
+}
+
+"""Unwrap a TransportResponse envelope from an sv-service RPC response.
+
+Shared between the retry and test-client paths in sv_service_call so
+both observe the same error semantics. Raises RuntimeError with the
+envelope's error message when ok=false.
+"""
+def _unwrap_sv_envelope(data: Any, module_name: str, func_name: str) -> Any {
+    if isinstance(data, dict) and data.get("ok") {
+        result_envelope = data.get("data");
+        if isinstance(result_envelope, dict) and ("result" in result_envelope) {
+            return result_envelope["result"];
+        }
+        return result_envelope;
+    }
+    err = (data.get("error") if isinstance(data, dict) else None) or {};
+    msg = err.get("message") if isinstance(err, dict) else str(err);
+    raise RuntimeError(
+        f"sv-to-sv RPC '{module_name}.{func_name}' failed: {msg or 'unknown error'}"
+    );
 }
 
 # Pluggy's varnames() puts parameters with defaults into kwargnames, not argnames.

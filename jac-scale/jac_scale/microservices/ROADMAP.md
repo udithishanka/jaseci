@@ -29,7 +29,7 @@ Work top-to-bottom. Each row maps 1:1 to an interface that
 | P2 skip | *Deferred to K8s bring-up* - `MONGODB_URI` subprocess path isn't independently verified. If it's broken, we'll find out while standing up minikube. Trade: saves ~30 min now, accepts "K8s debug includes storage path" risk | Same env var, same code path in theory | Verification postponed |
 | P3 ✓ | **`get_sv_registry()` hookspec in jaclang core** - `JacAPIServer.get_sv_registry -> dict[str, str]` added as a public hookspec. Default impl returns `dict(sv_client._registry)` (snapshot, not a live view). Gateway's `resolve_target_url` now calls `jaclang.JacRuntime.get_sv_registry()` instead of poking `sv_client._registry` directly. 3 new unit tests (dispatch prefers registry over entry.url, fallback to entry.url when unregistered, snapshot semantics) | K8sDeployer's hookimpl populates the registry from K8s Service DNS. Gateway doesn't know or care | Same getter, different producer |
 | P4 ~ | **Cross-process CLI state via pidfile** - `.jac/run/{service}.pid` per service. `process_manager.start_service` writes pidfile; `stop_service` dual-mode: Popen handle when in-process, `os.kill`+pid when cross-process. Stop from a separate shell now works. 3 new unit tests (pidfile path, stale-pidfile cleanup, no-pidfile return-False). **Restart deferred**: CLI can spawn a new service but the orchestrator's in-process `sv_client._registry` still holds the old URL, so the gateway routes to the dead port. Fixing that needs a shared (file-backed or socket-based) registry writer, which is a cross-process state task beyond P4's pidfile scope. Tracked as a follow-up | K8sDeployer backs the same CLI with `kubectl get pod` / `kubectl delete pod`; K8s doesn't have the registry-sync gap because K8s Service DNS is the authority | Same CLI shape, different state source |
-| P5 | **Retry with exponential backoff** in `sv_service_call` hookimpl (row 4d) - N retries, backoff, connect+read timeouts. Applies to both local and K8s transports | K8s networking has pod restarts and transient DNS resolution failures. Retry in the hookimpl means every sv-import call gets resilience for free | Same hookimpl, same behavior |
+| P5 ✓ | **Retry with exponential backoff** in `sv_service_call` hookimpl - 3 attempts, 0.1s -> 0.2s -> 0.4s backoff, 10s connect+read timeout on each. Retries on transport errors (`httpx.RequestError`, `TimeoutException`) but NOT on application-level `ok=false` envelope errors (those are deterministic). Test clients bypass retry (in-process, no transport). Refactored envelope unwrap into `_unwrap_sv_envelope` helper so both retry and test-client paths share it. 3 new unit tests (transient-then-success, persistent failure exhausts attempts, app-error skips retry) | K8s pod restarts + DNS propagation lag + network blips all covered. Same hookimpl, same behavior | Same code |
 | P6 | **Circuit breaker** in `sv_service_call` (row 4e) - per-provider half-open/open/closed state with a trip threshold. Fails fast when a downstream is unhealthy instead of piling up stuck requests | Prevents cascade failures when one K8s pod is unhealthy. Essential in prod; a local simulation tests the failure semantics | Same code |
 | P7 | **`X-Trace-Id` propagation** (rows 4f + 9) - generate at gateway ingress, thread through `build_forward_headers` for proxy calls and the `sv_service_call` hookimpl via a ContextVar next to `_auth_ctx`. Log it on each service | Tracing is the primary observability tool in K8s. Same header flows through local and prod | Same code; K8s just adds Jaeger/Tempo collector |
 | P8 | **Gateway + per-service metrics** (row 10) - `/metrics` Prometheus endpoint on the gateway. Per-service request count, error rate, p50/p95/p99 latency histograms. Reuse jac-scale's existing `monitoring` config | K8s pod gets scraped by Prometheus. Local simulation runs prom scraping against `http://localhost:8000/metrics`. Identical metric shape | Same exposition format |
@@ -77,7 +77,7 @@ After P1-P12, the K8s work is bounded:
 | 4a | Auth extraction from request ContextVar | done | `microservices/_auth_ctx.jac` |
 | 4b | Forward `Authorization` header on sv RPC | done | `plugin.jac:sv_service_call` |
 | 4c | `TransportResponse` envelope unwrap | done | `plugin.jac:sv_service_call` |
-| 4d | Retry with exponential backoff (→ P5) | not started | |
+| 4d | Retry with exponential backoff (→ P5) | done | `plugin.jac:sv_service_call` retries 3x on transport errors with 0.1s/0.2s/0.4s backoff; does not retry on application envelope errors |
 | 4e | Circuit breaker (→ P6) | not started | |
 | 4f | `X-Trace-Id` propagation (→ P7) | not started | |
 | 5 | `jac setup microservice` CLI | done | `microservices/setup.jac` |
@@ -100,7 +100,7 @@ After P1-P12, the K8s work is bounded:
 
 ## Test coverage
 
-121 tests green across 9 suites:
+124 tests green across 9 suites:
 
 | Suite | Count | What it covers |
 |-------|-------|----------------|
@@ -110,7 +110,7 @@ After P1-P12, the K8s work is bounded:
 | `test_gateway.jac` | 31 | all 5 middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch |
 | `test_orchestrator.jac` | 4 | `build_registry`, config routing |
 | `test_setup.jac` | 13 | CLI utilities, add/remove/list, TOML write |
-| `test_sv_auth_forward.jac` | 5 | sv_service_call auth forwarding, envelope errors |
+| `test_sv_auth_forward.jac` | 8 | sv_service_call auth forwarding, envelope errors, retry on transport failure, no-retry on app error, max-attempts exhaustion |
 | `test_microservice.jac` | 6 | sv_client contract tests (pre-existing) |
 | `test_eager_spawn.jac` | 9 | BFS provider discovery (pre-existing) |
 | `examples/micr-s-example/test_e2e.sh` | 36 | end-to-end: stack boot, deployer invariants (incl. url_for shape), gateway surface, auth, sv-import auth forwarding, CLI (incl. pidfile + cross-process stop) |
