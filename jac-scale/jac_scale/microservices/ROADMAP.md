@@ -13,6 +13,7 @@ lands; not an aspirational planning doc.
 | 1a | Hash-based port assignment (`18000 + hash % 1000`) | done | `microservices/_util.jac:pick_free_port` |
 | 1b | Per-service data isolation via `JAC_DATA_DIR` | done | `plugin.jac:ensure_sv_service` |
 | 1c | `/healthz` polling on startup | done | `_util.jac:wait_for_health` |
+| 1d | Peer-URL env (`JAC_SV_{NAME}_URL`) injected into children so sv-imports resolve without grandchild spawns | done | `process_manager.impl.jac:start_service` + `start_all` pre-assign |
 | 2 | `MicroserviceGateway` FastAPI reverse proxy | done | `microservices/gateway.jac` + `impl/gateway.impl.jac` |
 | 2a | Path-based routing (`/api/{service}/*`) | done | `handle_proxy` handler |
 | 2b | Static file serving + SPA fallback | done | `handle_static` handler |

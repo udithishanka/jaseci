@@ -45,6 +45,17 @@ impl ServiceProcessManager.start_service
         data_dir.mkdir(parents=True, exist_ok=True);
         child_env["JAC_DATA_DIR"] = str(data_dir.resolve());
 
+        # Inject peer URLs so children resolve sv-imported siblings via
+        # sv_client._ensure_available's JAC_SV_{NAME}_URL fast-path
+        # instead of falling through to ensure_sv_service and spawning
+        # duplicate grandchildren.
+        for (peer_name, peer_entry) in self.registry.entries.items() {
+            if peer_name != name and peer_entry.port > 0 {
+                peer_url = peer_entry.url or f"http://127.0.0.1:{peer_entry.port}";
+                child_env[f"JAC_SV_{peer_name.upper()}_URL"] = peer_url;
+            }
+        }
+
         # Write service logs to .jac/logs/{name}.log
         log_dir = Path(".jac/logs");
         log_dir.mkdir(parents=True, exist_ok=True);
@@ -79,9 +90,21 @@ impl ServiceProcessManager.start_service
     }
 }
 
-"""Start all registered services."""
+"""Start all registered services.
+
+Pre-assigns a port to every service first so the peer-URL env-var loop
+in start_service sees a complete picture. Without this, the first
+service would spawn with no peer URLs, and its own sv imports would
+fall through to ensure_sv_service and spawn grandchildren.
+"""
 impl ServiceProcessManager.start_all
 -> None {
+    for (name, entry) in self.registry.entries.items() {
+        if entry.port == 0 {
+            entry.port = self._assign_port(entry);
+            entry.url = f"http://127.0.0.1:{entry.port}";
+        }
+    }
     for name in self.registry.entries {
         self.start_service(name);
     }
