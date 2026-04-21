@@ -1,19 +1,11 @@
-"""Products Service — catalog management.
+"""Products Service - catalog management.
 
 Exposes public functions for browsing products. Callable via:
   - HTTP: POST /api/products/function/{name}
   - sv import: `sv import from products_app { list_products, get_product }`
 """
 
-node Products {}
-
-node Product {
-    has id: str,
-        name: str,
-        price: float,
-        description: str = "",
-        stock: int = 0;
-}
+import from shared.models { Products, Product, Cart, Order }
 
 glob CATALOG: list[dict] = [
     {"id": "prod_1", "name": "Wireless Headphones", "price": 49.99, "stock": 25, "description": "Bluetooth over-ear headphones"},

@@ -39,12 +39,6 @@ impl ServiceProcessManager.start_service
         # Prevent child process from re-triggering the orchestrator
         child_env["JAC_SV_SIBLING"] = "1";
 
-        # Isolate data per service so shelf DBs don't clash.
-        # Each subprocess writes to .jac/data/{name}/ instead of sharing .jac/data/.
-        data_dir = Path(".jac/data") / name;
-        data_dir.mkdir(parents=True, exist_ok=True);
-        child_env["JAC_DATA_DIR"] = str(data_dir.resolve());
-
         # Inject peer URLs so children resolve sv-imported siblings via
         # sv_client._ensure_available's JAC_SV_{NAME}_URL fast-path
         # instead of falling through to ensure_sv_service and spawning
@@ -92,21 +86,44 @@ impl ServiceProcessManager.start_service
 
 """Start all registered services.
 
-Pre-assigns a port to every service first so the peer-URL env-var loop
-in start_service sees a complete picture. Without this, the first
-service would spawn with no peer URLs, and its own sv imports would
-fall through to ensure_sv_service and spawn grandchildren.
+Two passes:
+
+  1. Pre-assign a port + URL to every service so the peer-URL env-var
+     loop in start_service sees a complete picture. Without this, the
+     first service would spawn with no peer URLs, and its own sv
+     imports would fall through to ensure_sv_service and spawn
+     grandchildren.
+
+  2. Spawn each service sequentially and wait for /healthz before the
+     next. Serializing startup avoids CREATE TABLE races on the shared
+     identity_users sqlite table when every service's SQLAlchemy
+     engine calls create_all() simultaneously.
 """
 impl ServiceProcessManager.start_all
 -> None {
+    import from jac_scale.microservices._util { wait_for_health }
+
     for (name, entry) in self.registry.entries.items() {
         if entry.port == 0 {
             entry.port = self._assign_port(entry);
             entry.url = f"http://127.0.0.1:{entry.port}";
         }
     }
+
     for name in self.registry.entries {
         self.start_service(name);
+        entry = self.registry.entries[name];
+        proc = self.processes.get(name);
+        if proc and entry.url {
+            ok = wait_for_health(
+                entry.url, lambda : proc.poll() is None, timeout=20.0
+            );
+            if not ok {
+                logger.warning(
+                    f"{name} did not become healthy within 20s; proceeding"
+                );
+            }
+        }
     }
 }
 

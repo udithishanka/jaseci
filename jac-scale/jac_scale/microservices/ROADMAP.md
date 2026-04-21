@@ -11,7 +11,7 @@ lands; not an aspirational planning doc.
 | 0b | `get_sv_registry()` hookspec in jaclang core | not started | gateway still reads `sv_client._registry` directly |
 | 1 | `ServiceDeployer` abstract + `LocalDeployer` | done | `microservices/deployer.jac`, `local_deployer.jac` |
 | 1a | Hash-based port assignment (`18000 + hash % 1000`) | done | `microservices/_util.jac:pick_free_port` |
-| 1b | Per-service data isolation via `JAC_DATA_DIR` | done | `plugin.jac:ensure_sv_service` |
+| 1b | Shared anchor store across all services | done | single `.jac/data/anchor_store.db`; each service imports shared node classes so deserialize resolves. See `examples/micr-s-example/shared/models.jac` for the pattern |
 | 1c | `/healthz` polling on startup | done | `_util.jac:wait_for_health` |
 | 1d | Peer-URL env (`JAC_SV_{NAME}_URL`) injected into children so sv-imports resolve without grandchild spawns | done | `process_manager.impl.jac:start_service` + `start_all` pre-assign |
 | 2 | `MicroserviceGateway` FastAPI reverse proxy | done | `microservices/gateway.jac` + `impl/gateway.impl.jac` |
@@ -34,7 +34,7 @@ lands; not an aspirational planning doc.
 | 4e | Circuit breaker | not started | |
 | 4f | `X-Trace-Id` propagation | not started | |
 | 5 | `jac setup microservice` CLI | done | `microservices/setup.jac` |
-| 5a | `jac scale status/stop/restart/logs/destroy` | done | `plugin.jac:scale_cmd` |
+| 5a | `jac scale status/stop/restart/logs/destroy` | **partial / known bug** | `plugin.jac:scale_cmd` builds a fresh `LocalDeployer` per CLI invocation with empty `pm.processes`. `stop/restart` silently fail because the target process isn't in that dict. Needs pidfile- or psutil-based state lookup. `status` and `logs` work (they read from registry + log files) |
 | 6 | E-commerce example app | done | `examples/micr-s-example/` |
 | 6a | 3 services: products, cart, orders | done | |
 | 6b | Inter-service via `sv import` | done | `orders_app.jac` imports `cart_app` |
@@ -67,10 +67,11 @@ lands; not an aspirational planning doc.
 
 ## Highest-value next steps
 
-1. **`get_sv_registry()` hookspec** (row 0b) - cheap, removes the last direct access to `sv_client._registry` private state
-2. **`KubernetesDeployer`** (row 14) - the one missing piece for the dev/prod story
-3. **Retry + trace-id in `sv_service_call`** (4d, 4f) - small additions to the existing hookimpl
-4. **Unified `/docs` Swagger** (row 12) - aggregates OpenAPI schemas across services
+1. **Fix `jac scale stop/restart`** (row 5a) - per-invocation state gap means the CLI can't actually stop a running service. Needs pidfile or `psutil.pid_exists()` check against ports/names so the CLI can kill processes the orchestrator spawned
+2. **`get_sv_registry()` hookspec** (row 0b) - cheap, removes the last direct access to `sv_client._registry` private state
+3. **`KubernetesDeployer`** (row 14) - the one missing piece for the dev/prod story
+4. **Retry + trace-id in `sv_service_call`** (4d, 4f) - small additions to the existing hookimpl
+5. **Unified `/docs` Swagger** (row 12) - aggregates OpenAPI schemas across services
 
 ## How this file is maintained
 

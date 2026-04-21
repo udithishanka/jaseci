@@ -715,13 +715,9 @@ class JacScalePlugin {
         port: int = pick_free_port(module_name);
         base_url: str = f"http://127.0.0.1:{port}";
 
-        # Per-service data isolation + sibling env flag to prevent recursive
-        # orchestration when the child runs `jac start`.
-        data_dir = base_dir / ".jac" / "data" / module_name;
-        data_dir.mkdir(parents=True, exist_ok=True);
-
+        # JAC_SV_SIBLING prevents the child's _scale_pre_hook from re-entering
+        # microservice orchestration (it would try to spawn peers again).
         child_env = dict(os.environ);
-        child_env["JAC_DATA_DIR"] = str(data_dir);
         child_env["JAC_SV_SIBLING"] = "1";
 
         cmd = [

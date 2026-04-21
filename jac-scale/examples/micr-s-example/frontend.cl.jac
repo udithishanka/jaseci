@@ -1,4 +1,4 @@
-"""Jac Shop — Client-Side UI."""
+"""Jac Shop - Client-Side UI."""
 
 import from "@jac/runtime" { jacSignup, jacLogin, jacLogout, jacIsLoggedIn }
 
@@ -58,7 +58,7 @@ def:pub app -> any {
             </div>;
     }
 
-    # Logged in — Shop UI
+    # Logged in - Shop UI
     if isLoggedIn {
         return
             <div style={{
@@ -183,7 +183,7 @@ def:pub app -> any {
             </div>;
     }
 
-    # Not logged in — Auth Form
+    # Not logged in - Auth Form
     return
         <AuthForm
             isSignup={isSignup}

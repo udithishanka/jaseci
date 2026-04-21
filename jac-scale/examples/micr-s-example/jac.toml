@@ -28,7 +28,7 @@ base_route_app = "app"
 
 [plugins.client]
 
-# Microservice mode — services are auto-discovered from `sv import`.
+# Microservice mode - services are auto-discovered from `sv import`.
 # The gateway only needs to know which module name maps to which URL prefix
 # for client-facing routing.
 [plugins.scale.microservices]
