@@ -34,6 +34,46 @@ test "local deployer creates process manager on first use" {
 }
 
 # =============================================================================
+# url_for: LocalDeployer is the single source of service URL construction
+# =============================================================================
+
+test "local deployer url_for returns loopback URL" {
+    reg = ServiceRegistry();
+    deployer = LocalDeployer(registry=reg);
+    entry = ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders", port=18042);
+    assert deployer.url_for(entry) == "http://127.0.0.1:18042";
+}
+
+test "local deployer url_for tracks port mutations" {
+    reg = ServiceRegistry();
+    deployer = LocalDeployer(registry=reg);
+    entry = ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders", port=0);
+    # Pre-spawn: port=0 yields a well-formed but non-listening URL; the
+    # method doesn't short-circuit on port==0 because start_all's pre-pass
+    # sets the port before start_service reads URLs via this method.
+    assert deployer.url_for(entry) == "http://127.0.0.1:0";
+    entry.port = 18999;
+    assert deployer.url_for(entry) == "http://127.0.0.1:18999";
+}
+
+test "process manager wires deployer reference via _ensure_pm" {
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(name="orders", file="orders.jac", prefix="/api/orders"));
+    deployer = LocalDeployer(registry=reg);
+    pm = deployer._ensure_pm();
+    # _url_for must dispatch through the owning deployer, not the fallback
+    assert pm.deployer is deployer;
+}
+
+test "process manager _url_for uses deployer.url_for when wired" {
+    reg = ServiceRegistry();
+    deployer = LocalDeployer(registry=reg);
+    pm = deployer._ensure_pm();
+    entry = ServiceEntry(name="cart", file="cart.jac", prefix="/api/cart", port=18123);
+    assert pm._url_for(entry) == "http://127.0.0.1:18123";
+}
+
+# =============================================================================
 # Deploy / Stop / Restart
 # =============================================================================
 

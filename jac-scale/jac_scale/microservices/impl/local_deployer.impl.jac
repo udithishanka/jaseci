@@ -1,11 +1,25 @@
-"""Implementation of LocalDeployer — subprocess-based service management."""
+"""Implementation of LocalDeployer - subprocess-based service management."""
 
-"""Initialize the process manager if needed."""
+"""Initialize the process manager if needed.
+
+Injects `self` into the ServiceProcessManager so its URL construction
+(both for `entry.url` and for peer `JAC_SV_{NAME}_URL` env vars) routes
+through `LocalDeployer.url_for`, matching the interface K8sDeployer
+will override with DNS names.
+"""
 impl LocalDeployer._ensure_pm -> ServiceProcessManager {
     if self.process_manager is None {
-        self.process_manager = ServiceProcessManager(registry=self.registry);
+        self.process_manager = ServiceProcessManager(
+            registry=self.registry, deployer=self
+        );
     }
     return self.process_manager;
+}
+
+"""Loopback URL for a service running as a local subprocess."""
+impl LocalDeployer.url_for
+(service_entry: ServiceEntry) -> str {
+    return f"http://127.0.0.1:{service_entry.port}";
 }
 
 """Deploy a single service as a subprocess."""
@@ -34,7 +48,7 @@ impl LocalDeployer.restart_service(name: str) -> bool {
     return pm.restart_service(name);
 }
 
-"""Scale is not supported locally — always 1 replica."""
+"""Scale is not supported locally - always 1 replica."""
 impl LocalDeployer.scale_service(name: str, replicas: int) -> bool {
     if replicas != 1 {
         logger.warning(f"Local deployer only supports 1 replica per service (requested {replicas})");
@@ -75,7 +89,7 @@ impl LocalDeployer.status -> dict[str, dict] {
     return result;
 }
 
-"""Get logs for a service — reads from .jac/logs/{name}.log."""
+"""Get logs for a service - reads from .jac/logs/{name}.log."""
 impl LocalDeployer.get_logs(name: str, lines: int = 50) -> str {
     import from pathlib { Path }
 

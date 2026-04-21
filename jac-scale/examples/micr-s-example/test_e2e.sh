@@ -197,6 +197,18 @@ print(' '.join(str(v.get('port','')) for v in d.get('services',{}).values()))
 check "ports are in 18000-18999 range (hash-based)" \
   bash -c 'for p in '"$PORTS"'; do [ "$p" -ge 18000 ] && [ "$p" -le 18999 ] || exit 1; done'
 
+# Every service URL came from ServiceDeployer.url_for. LocalDeployer's
+# impl returns http://127.0.0.1:{port}; verifying this URL shape at the
+# edge is how we prove K8sDeployer will swap in DNS names without any
+# call site change (roadmap P1).
+URLS=$(echo "$(curl -s $GATEWAY/health)" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(' '.join(v.get('url','') for v in d.get('services',{}).values()))
+")
+check "every service.url was constructed by LocalDeployer.url_for" \
+  bash -c 'for u in '"$URLS"'; do [[ "$u" =~ ^http://127\.0\.0\.1:[0-9]+$ ]] || exit 1; done'
+
 # Shared anchor store at .jac/data/anchor_store.db (all services + gateway
 # share one graph, consistent with the monolith model). Per-service node
 # class registration lives in examples/.../shared/models.jac.

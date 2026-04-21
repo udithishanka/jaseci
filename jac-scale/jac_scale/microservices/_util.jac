@@ -55,9 +55,11 @@ def resolve_jac_binary -> str {
 
 """Poll `base_url/healthz` until the service responds <500 or the deadline hits.
 
-`proc_alive` is called once per iteration; if it returns False, raises
-RuntimeError immediately (service died before becoming healthy). Returns
-True if healthy within the timeout, False otherwise.
+`proc_alive` is called once per iteration; if it returns False, the
+caller's process died before becoming healthy and wait_for_health
+returns False immediately. Returns True if healthy within the timeout,
+False otherwise (timeout or early exit). The caller decides how to
+react (log a warning, raise, restart, etc.).
 """
 def wait_for_health(
     base_url: str,
@@ -71,7 +73,7 @@ def wait_for_health(
     deadline: float = time.time() + timeout;
     while time.time() < deadline {
         if not proc_alive() {
-            raise RuntimeError(f"service at {base_url} exited before becoming healthy");
+            return False;
         }
         try {
             with urllib.request.urlopen(f"{base_url}/healthz", timeout=1) as resp {

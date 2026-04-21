@@ -1,5 +1,26 @@
 """Implementation of ServiceProcessManager methods."""
 
+"""Resolve a service's base URL via the owning deployer.
+
+Falls back to the loopback shape used by LocalDeployer so tests that
+instantiate ServiceProcessManager directly (without a deployer wired
+in) keep working without a mock. K8sDeployer callers will always go
+through the deployer branch.
+"""
+impl ServiceProcessManager._url_for
+(service_entry: ServiceEntry) -> str {
+    if self.deployer is not None {
+        # `deployer` is typed `Any | None` to avoid a circular import with
+        # deployer.jac; getattr dispatches to the concrete url_for impl.
+        url_fn = getattr(self.deployer, "url_for", None);
+        if url_fn is not None {
+            result: str = url_fn(service_entry);
+            return result;
+        }
+    }
+    return f"http://127.0.0.1:{service_entry.port}";
+}
+
 """Assign a port to a service.
 
 Delegates to `_util.pick_free_port` so our deployer URLs stay consistent
@@ -42,10 +63,11 @@ impl ServiceProcessManager.start_service
         # Inject peer URLs so children resolve sv-imported siblings via
         # sv_client._ensure_available's JAC_SV_{NAME}_URL fast-path
         # instead of falling through to ensure_sv_service and spawning
-        # duplicate grandchildren.
+        # duplicate grandchildren. Peer URLs come from the deployer so
+        # K8s siblings will get DNS names automatically.
         for (peer_name, peer_entry) in self.registry.entries.items() {
             if peer_name != name and peer_entry.port > 0 {
-                peer_url = peer_entry.url or f"http://127.0.0.1:{peer_entry.port}";
+                peer_url: str = peer_entry.url or self._url_for(peer_entry);
                 child_env[f"JAC_SV_{peer_name.upper()}_URL"] = peer_url;
             }
         }
@@ -67,7 +89,7 @@ impl ServiceProcessManager.start_service
         self.processes[name] = proc;
         entry.pid = proc.pid;
         entry.port = port;
-        entry.url = f"http://127.0.0.1:{port}";
+        entry.url = self._url_for(entry);
         entry.status = ServiceStatus.STARTING;
         self._failure_counts[name] = 0;
 
@@ -106,7 +128,7 @@ impl ServiceProcessManager.start_all
     for (name, entry) in self.registry.entries.items() {
         if entry.port == 0 {
             entry.port = self._assign_port(entry);
-            entry.url = f"http://127.0.0.1:{entry.port}";
+            entry.url = self._url_for(entry);
         }
     }
 
