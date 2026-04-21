@@ -4,7 +4,7 @@ Split your Jac app into independent services using `sv import`.
 
 ## How It Works
 
-Write `sv import` — the compiler handles the rest:
+Write `sv import` - the compiler handles the rest:
 
 ```jac
 # orders_app.jac
@@ -19,7 +19,7 @@ def:pub create_order(user_id: str) -> dict {
 ```
 
 ```jac
-# cart_app.jac — exposes functions via sv {}
+# cart_app.jac - exposes functions via sv {}
 sv {
     def:pub get_cart(user_id: str) -> dict { ... }
     def:pub clear_cart(user_id: str) -> bool { ... }
@@ -66,7 +66,7 @@ sv {
 }
 ```
 
-**orders_app.jac** — consumes other services:
+**orders_app.jac** - consumes other services:
 
 ```jac
 sv import from cart_app { get_cart, clear_cart }
@@ -99,7 +99,7 @@ orders_app = "/api/orders"
 entry = "main.jac"
 ```
 
-Services are NOT declared individually — `sv import` handles discovery.
+Services are NOT declared individually - `sv import` handles discovery.
 The TOML only maps module names to gateway prefixes.
 
 ### 3. Start
@@ -147,7 +147,7 @@ jac scale destroy                        # stop everything
 ```jac
 sv import from cart_app { get_cart, clear_cart }
 
-# Just call it like a normal function — auth propagated automatically
+# Just call it like a normal function - auth propagated automatically
 cart = get_cart(user_id="u123");
 clear_cart(user_id="u123");
 ```
@@ -203,7 +203,7 @@ Client --> Gateway (:8000) --> /api/products/* --> products_app (:18342)
                            --> /api/cart/*     --> cart_app     (:18103)
                            --> Static files, Admin UI
 
-Inter-service (sv import, direct — no gateway hop):
+Inter-service (sv import, direct - no gateway hop):
   orders_app (:18567) --sv_client.call()--> cart_app (:18103)
 ```
 

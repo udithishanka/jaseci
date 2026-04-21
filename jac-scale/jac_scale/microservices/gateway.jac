@@ -1,4 +1,4 @@
-"""API Gateway — path-based reverse proxy for microservices."""
+"""API Gateway - path-based reverse proxy for microservices."""
 
 import logging;
 import mimetypes;
@@ -61,7 +61,7 @@ obj MicroserviceGateway {
     """Serve index.html for SPA fallback. Returns None if no index.html exists."""
     def serve_spa_fallback -> Response | None;
 
-    """Bootstrap admin UI — copy pre-built bundle to admin_dist_dir if needed."""
+    """Bootstrap admin UI - copy pre-built bundle to admin_dist_dir if needed."""
     def bootstrap_admin -> None;
 
     """Serve an admin asset by path. Returns None if not found."""

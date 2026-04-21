@@ -275,7 +275,7 @@ class JacScalePluginConfig {
                 "microservices": {
                     "type": "dict",
                     "default": {},
-                    "description": "Microservice mode — run declared Jac files as independent service processes behind an API gateway",
+                    "description": "Microservice mode - run declared Jac files as independent service processes behind an API gateway",
                     "nested": {
                         "enabled": {
                             "type": "bool",

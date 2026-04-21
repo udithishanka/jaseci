@@ -14,7 +14,7 @@ glob logger = logging.getLogger(__name__);
 
 """Build a ServiceRegistry from a `routes` map: {module_name: prefix}.
 
-Entries have `file = {module_name}.jac` by convention — the same file the
+Entries have `file = {module_name}.jac` by convention - the same file the
 `sv import` machinery resolves on cold start.
 """
 def build_registry(ms_config: dict[str, Any]) -> ServiceRegistry {
@@ -74,7 +74,7 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
                 if build_result.returncode == 0 {
                     console.print("  Client build complete");
                 } else {
-                    logger.warning("Client build failed — gateway will start without client UI");
+                    logger.warning("Client build failed - gateway will start without client UI");
                 }
             } except subprocess.TimeoutExpired {
                 logger.warning("Client build timed out");

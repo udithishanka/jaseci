@@ -142,7 +142,7 @@ def _print_deployment_status(status_data: dict) -> None {
     error = status_data.get('error');
 
     console.print();
-    console.print("[bold cyan]  Jac Scale — Deployment Status[/bold cyan]");
+    console.print("[bold cyan]  Jac Scale - Deployment Status[/bold cyan]");
     console.print(
         f"  [bold]App:[/bold] {app_name}   [bold]Namespace:[/bold] {namespace}"
     );
@@ -176,7 +176,7 @@ def _print_deployment_status(status_data: dict) -> None {
         total = comp.get('total', 0);
         icon = status_display.get(s, s);
         if s in ['not_deployed', 'unknown'] {
-            pods_str = '—';
+            pods_str = '-';
         } else {
             pods_str = f"{ready}/{total}";
         }
@@ -447,7 +447,7 @@ class JacCmd {
 
         @registry.command(
             name="setup",
-            help="Configure microservice mode — select which Jac files become services",
+            help="Configure microservice mode - select which Jac files become services",
             args=[
                 Arg.create(
                     "subcommand", kind=ArgKind.POSITIONAL,
@@ -467,7 +467,7 @@ class JacCmd {
                 ),
             ],
             examples=[
-                ("jac setup microservice", "Interactive setup — select files, write config"),
+                ("jac setup microservice", "Interactive setup - select files, write config"),
                 ("jac setup microservice --list", "Show current microservice config"),
                 ("jac setup microservice --add orders_app.jac", "Add a service"),
                 ("jac setup microservice --remove orders", "Remove a service"),
@@ -507,7 +507,7 @@ class JacCmd {
 
         @registry.command(
             name="scale",
-            help="Manage microservice deployments — status, stop, restart, logs",
+            help="Manage microservice deployments - status, stop, restart, logs",
             args=[
                 Arg.create(
                     "action", kind=ArgKind.POSITIONAL,
@@ -680,7 +680,7 @@ class JacScalePlugin {
 
     Overrides core's default (which spawns an in-process thread). We spawn
     as a subprocess so each service has its own ModuleIntrospector, graph,
-    and lifecycle — matching K8s pod semantics in production.
+    and lifecycle - matching K8s pod semantics in production.
 
     Called by sv_client._ensure_available when a consumer does
     sv import from X and X is not yet registered.

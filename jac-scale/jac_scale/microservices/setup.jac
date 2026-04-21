@@ -1,10 +1,10 @@
 """Interactive CLI for configuring microservice mode.
 
 Commands:
-  jac setup microservice          — interactive setup
-  jac setup microservice --list   — show current config
-  jac setup microservice --add <file>    — add a service
-  jac setup microservice --remove <name> — remove a service
+  jac setup microservice          - interactive setup
+  jac setup microservice --list   - show current config
+  jac setup microservice --add <file>    - add a service
+  jac setup microservice --remove <name> - remove a service
 
 Writes a v2 [plugins.scale.microservices.routes] table that maps module
 names to gateway prefixes. Services are discovered automatically via
@@ -38,7 +38,7 @@ def scan_jac_files(project_root: str = ".") -> list[str] {
     return jac_files;
 }
 
-"""Derive the module name from a file path — matches sv_import resolution.
+"""Derive the module name from a file path - matches sv_import resolution.
 
 Returns the file stem: orders_app.jac -> orders_app, services/cart.jac -> cart.
 """
@@ -58,7 +58,7 @@ def derive_prefix(module_name: str) -> str {
     return f"/api/{name}";
 }
 
-"""Run the interactive setup flow — scan project, prompt user, write TOML."""
+"""Run the interactive setup flow - scan project, prompt user, write TOML."""
 def run_setup(project_root: str = ".") -> None {
     toml_path = Path(project_root) / "jac.toml";
 

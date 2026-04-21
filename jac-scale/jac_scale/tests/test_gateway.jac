@@ -440,7 +440,7 @@ test "admin index served at /admin/" {
 }
 
 # =============================================================================
-# Auth — gateway is a pure passthrough; services handle auth via /user/login
+# Auth - gateway is a pure passthrough; services handle auth via /user/login
 # =============================================================================
 
 test "api request to unreachable service returns 502" {
@@ -455,7 +455,7 @@ test "api request to unreachable service returns 502" {
     import from fastapi.testclient { TestClient }
     client = TestClient(gw.app);
 
-    # Gateway proxies to service — service is not running so 502
+    # Gateway proxies to service - service is not running so 502
     resp = client.get("/api/orders/walker/list");
     assert resp.status_code == 502;
 }

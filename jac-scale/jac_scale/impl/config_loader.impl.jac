@@ -334,7 +334,7 @@ impl JacScaleConfig.get_scheduler_config(self: JacScaleConfig) -> dict[str, Any]
 
 """Get microservices configuration from jac.toml.
 
-Schema: `routes: {module_name: prefix}` — services are discovered via
+Schema: `routes: {module_name: prefix}` - services are discovered via
 `sv import`; the routes table only controls public URL routing on the
 gateway.
 """

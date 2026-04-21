@@ -1,4 +1,4 @@
-# jac-shop — E-Commerce Microservice Example
+# jac-shop - E-Commerce Microservice Example
 
 A small e-commerce app built with 3 microservices behind an API gateway. Can also run as a monolith.
 

@@ -6,7 +6,7 @@ and the sv_service_call hookimpl in plugin.jac reads it back when
 forwarding to a downstream service.
 
 This avoids threading a token argument through every sv-imported
-function call — propagation happens automatically.
+function call - propagation happens automatically.
 """
 
 import from contextvars { ContextVar }

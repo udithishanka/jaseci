@@ -5,8 +5,8 @@ import shutil;
 """Build the target URL by stripping prefix and forwarding the rest.
 
 Resolution order:
-  1. sv_client._registry[module] — URL set by ensure_sv_service hook
-  2. service_entry.url — URL from our process manager
+  1. sv_client._registry[module] - URL set by ensure_sv_service hook
+  2. service_entry.url - URL from our process manager
   3. Fallback: error (no known URL)
 """
 impl MicroserviceGateway.resolve_target_url
@@ -69,7 +69,7 @@ impl MicroserviceGateway.serve_spa_fallback
     return None;
 }
 
-"""Bootstrap admin UI — copy pre-built bundle to admin_dist_dir if needed.
+"""Bootstrap admin UI - copy pre-built bundle to admin_dist_dir if needed.
 
 Skips when the destination index.html is at least as new as the source,
 so normal restarts don't re-copy. Refreshes on package upgrade (source
@@ -176,7 +176,7 @@ impl MicroserviceGateway.build_forward_headers
     return fwd;
 }
 
-"""Health endpoint — returns registry summary."""
+"""Health endpoint - returns registry summary."""
 impl MicroserviceGateway.handle_health -> Response {
     return JSONResponse(
         status_code=200,
@@ -225,7 +225,7 @@ impl MicroserviceGateway.handle_builtin_passthrough
     return JSONResponse(status_code=404, content={"error": "Not found on any service", "path": path});
 }
 
-"""Admin UI routes — /admin redirects, /admin/* serves assets."""
+"""Admin UI routes - /admin redirects, /admin/* serves assets."""
 impl MicroserviceGateway.handle_admin
 (path: str) -> Response | None {
     if path == "/admin" {
