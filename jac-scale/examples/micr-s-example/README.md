@@ -36,6 +36,17 @@ Gateway :8000
                     auth forwarded from the inbound request)
 ```
 
+## Automated e2e test
+
+```bash
+./test_e2e.sh
+```
+
+Starts the stack, runs every feature below as a pass/fail check, tears
+down on exit. Exit 0 if all green. The PASS/FAIL blocks map 1:1 to
+intended future pytest cases. Add a new `check "..."` line whenever a
+new feature lands.
+
 ## Manual test walkthrough
 
 ### 0. Pre-flight
