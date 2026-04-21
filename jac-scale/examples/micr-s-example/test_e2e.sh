@@ -171,7 +171,36 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. CLI (roadmap 5)
+# 2. ServiceDeployer / LocalDeployer (roadmap 1, 1a, 1b, 1c, 13)
+# ---------------------------------------------------------------------------
+section "ServiceDeployer / LocalDeployer"
+
+# Three subprocess children spawned (one per service) = subprocess isolation
+CHILDREN=$(pgrep -f "jac start.*--no_client" 2>/dev/null | wc -l)
+check "3 service subprocesses running (one per service)" \
+  bash -c "[ '$CHILDREN' -eq 3 ]"
+
+# Ports land in 18000-18999 (hash-based), read from /health
+PORTS=$(echo "$(curl -s $GATEWAY/health)" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(' '.join(str(v.get('port','')) for v in d.get('services',{}).values()))
+")
+check "ports are in 18000-18999 range (hash-based)" \
+  bash -c 'for p in '"$PORTS"'; do [ "$p" -ge 18000 ] && [ "$p" -le 18999 ] || exit 1; done'
+
+# Per-service data isolation: .jac/data/{name}/ exists for each
+check "per-service data dir exists (products_app)" bash -c "[ -d .jac/data/products_app ]"
+check "per-service data dir exists (cart_app)"     bash -c "[ -d .jac/data/cart_app ]"
+check "per-service data dir exists (orders_app)"   bash -c "[ -d .jac/data/orders_app ]"
+
+# Per-service log files at .jac/logs/{name}.log (roadmap 13)
+check "per-service log file exists (products_app)" bash -c "[ -s .jac/logs/products_app.log ]"
+check "per-service log file exists (cart_app)"     bash -c "[ -s .jac/logs/cart_app.log ]"
+check "per-service log file exists (orders_app)"   bash -c "[ -s .jac/logs/orders_app.log ]"
+
+# ---------------------------------------------------------------------------
+# 3. CLI (roadmap 5)
 # ---------------------------------------------------------------------------
 section "CLI (jac setup / jac scale)"
 
@@ -182,7 +211,7 @@ check "jac scale status shows 3 services" \
   bash -c 'jac scale status 2>&1 | grep -cE "products_app|cart_app|orders_app" | grep -qE "^[3-9]"'
 
 # ---------------------------------------------------------------------------
-# 3. Gateway surface (roadmap 2)
+# 4. Gateway surface (roadmap 2)
 # ---------------------------------------------------------------------------
 section "Gateway surface"
 
@@ -206,7 +235,7 @@ check "/nonexistent returns 404" \
   bash -c "curl -s -o /dev/null -w '%{http_code}' $GATEWAY/this-path-does-not-exist | grep -q '^404$'"
 
 # ---------------------------------------------------------------------------
-# 4. Public function proxy (roadmap 2a)
+# 5. Public function proxy (roadmap 2a)
 # ---------------------------------------------------------------------------
 section "Public proxy (/api/products/function/list_products)"
 
@@ -222,7 +251,7 @@ check "list_products returns non-empty catalog" \
   "$PROD_RESP"
 
 # ---------------------------------------------------------------------------
-# 5. Built-in passthrough: /user/register + /user/login (roadmap 8)
+# 6. Built-in passthrough: /user/register + /user/login (roadmap 8)
 # ---------------------------------------------------------------------------
 section "Built-in passthrough (/user/*)"
 
@@ -251,7 +280,7 @@ if [ -z "$TOKEN" ]; then
   log "skipping auth-gated checks (no token)"
 else
   # -------------------------------------------------------------------------
-  # 6. sv import auth forwarding (roadmap 4a/4b: THE critical path)
+  # 7. sv import auth forwarding (roadmap 4a/4b: THE critical path)
   # -------------------------------------------------------------------------
   section "sv_service_call auth forwarding"
 
@@ -292,7 +321,7 @@ exit(0 if not items else 1)"' \
     "$VIEW2_RESP"
 
   # -------------------------------------------------------------------------
-  # 7. Negative: no auth -> downstream sv call should reject
+  # 8. Negative: no auth -> downstream sv call should reject
   # -------------------------------------------------------------------------
   section "Negative: create_order without auth"
 
@@ -325,7 +354,7 @@ exit(0 if items else 1)"' \
 fi
 
 # ---------------------------------------------------------------------------
-# 8. Scale CLI (stop/restart) (roadmap 5a)
+# 9. Scale CLI (stop/restart) (roadmap 5a)
 # ---------------------------------------------------------------------------
 section "jac scale stop/restart"
 
