@@ -8,6 +8,7 @@ import from fastapi { FastAPI, Request }
 import from fastapi.responses { HTMLResponse, JSONResponse, Response }
 import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceEntry, ServiceStatus }
 import from jac_scale.microservices.impl.http_forward { raw_forward }
+import from typing { Any }
 
 glob logger = logging.getLogger(__name__),
      HOP_BY_HOP_HEADERS: set[str] = {"host", "transfer-encoding", "connection", "keep-alive"};
@@ -24,7 +25,13 @@ obj MicroserviceGateway {
         port: int = 8000,
         host: str = "0.0.0.0",
         client_dist_dir: str = ".jac/client/dist",
-        admin_dist_dir: str = ".jac/admin";
+        admin_dist_dir: str = ".jac/admin",
+        # Prometheus metrics registry + collectors. None when
+        # prometheus_client isn't installed; the dispatcher no-ops
+        # instrumentation in that case.
+        _metrics_registry: Any = None,
+        _metrics_requests: Any = None,
+        _metrics_duration: Any = None;
 
     """Create the FastAPI app and register routes."""
     def setup -> FastAPI;
@@ -49,6 +56,10 @@ obj MicroserviceGateway {
 
     """Serve static files or SPA fallback for GET requests; returns None if nothing found."""
     def handle_static(request: Request, path: str) -> Response | None;
+
+    """Serve the Prometheus exposition for this gateway's metrics registry.
+       Returns 503 if prometheus_client isn't available."""
+    def handle_metrics -> Response;
 
     # --- helpers used by handlers ---
 

@@ -266,6 +266,14 @@ check "/ (SPA root) returns 200 or 404 (not 5xx)" \
 check "/nonexistent returns 404" \
   bash -c "curl -s -o /dev/null -w '%{http_code}' $GATEWAY/this-path-does-not-exist | grep -q '^404$'"
 
+# Prometheus /metrics (ROADMAP P8). Gateway exposes per-service
+# counters + latency histograms in its own registry.
+METRICS_BODY=$(curl -s "$GATEWAY/metrics")
+check "/metrics returns Prometheus exposition" \
+  bash -c "echo '$METRICS_BODY' | grep -q 'jac_scale_gateway_requests_total'"
+check "/metrics records /health hit under __health__ label" \
+  bash -c "echo '$METRICS_BODY' | grep -q 'service=\"__health__\"'"
+
 # ---------------------------------------------------------------------------
 # 5. Public function proxy (roadmap 2a)
 # list_products requires auth (def:pub != unauthenticated in jac-scale).

@@ -193,6 +193,68 @@ test "unmatched path returns 404" {
     assert resp.status_code == 404;
 }
 
+# =============================================================================
+# Prometheus metrics (ROADMAP P8)
+# =============================================================================
+
+test "build_gateway_metrics returns a fresh registry with both collectors" {
+    import from jac_scale.microservices._metrics { build_gateway_metrics }
+    (registry, requests, duration) = build_gateway_metrics();
+    assert registry is not None;
+    assert requests is not None;
+    assert duration is not None;
+}
+
+test "classify_outcome maps status codes to label values" {
+    import from jac_scale.microservices._metrics { classify_outcome }
+    assert classify_outcome(200) == "2xx";
+    assert classify_outcome(302) == "3xx";
+    assert classify_outcome(404) == "4xx";
+    assert classify_outcome(503) == "5xx";
+    assert classify_outcome(0) == "err";
+}
+
+test "gateway /metrics returns Prometheus exposition after a request" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    # Make one request so the counter observes a sample
+    client.get("/health");
+
+    resp = client.get("/metrics");
+    assert resp.status_code == 200;
+    body = resp.text;
+    # Counter + Histogram should both appear in the exposition
+    assert "jac_scale_gateway_requests_total" in body;
+    assert "jac_scale_gateway_request_duration_seconds" in body;
+    # /health request should have been recorded under the __health__ label
+    assert "__health__" in body;
+}
+
+test "gateway /metrics is its own route - not proxied to a service" {
+    # Before P8, /metrics fell through to handle_builtin_passthrough.
+    # With gateway-level metrics, /metrics is dispatched directly.
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/metrics");
+    # Must succeed (200) without attempting a service passthrough;
+    # a pre-P8 gateway would 502 here (orders service unreachable).
+    assert resp.status_code == 200;
+    assert "jac_scale_gateway_requests_total" in resp.text;
+}
+
 test "unhealthy service returns 503" {
     reg = ServiceRegistry();
     reg.register(ServiceEntry(

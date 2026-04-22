@@ -163,7 +163,7 @@ glob _BUILTIN_PREFIXES: tuple = (
     "/jobs/", "/graph/"
 ),
      _BUILTIN_EXACT: set[str] = {
-         "/user", "/healthz", "/graph", "/metrics",
+         "/user", "/healthz", "/graph",
          "/docs", "/openapi.json", "/redoc"
      };
 
@@ -295,6 +295,25 @@ impl MicroserviceGateway.handle_proxy
     return Response(status_code=status_code, headers=resp_headers, content=resp_body);
 }
 
+"""Serve the Prometheus exposition for this gateway's registry.
+
+Returns 503 when prometheus_client is not installed (the 'monitoring'
+extra wasn't pulled in). Path routing lands here when
+`monitoring.enabled` is set in jac.toml; otherwise /metrics falls
+through to passthrough as before.
+"""
+impl MicroserviceGateway.handle_metrics -> Response {
+    import from jac_scale.microservices._metrics { render_metrics }
+    (body, ctype) = render_metrics(self._metrics_registry);
+    if not body {
+        return JSONResponse(
+            status_code=503,
+            content={"error": "metrics not available (install prometheus_client)"}
+        );
+    }
+    return Response(content=body, media_type=ctype);
+}
+
 """Serve static files or SPA fallback for GET requests."""
 impl MicroserviceGateway.handle_static
 (request: Request, path: str) -> Response | None {
@@ -319,6 +338,7 @@ impl MicroserviceGateway.handle_static
 
 """Create the FastAPI app and register the dispatcher middleware."""
 impl MicroserviceGateway.setup -> FastAPI {
+    import time;
     self.app = FastAPI(title="Jac Microservice Gateway");
     gw = self;
 
@@ -332,6 +352,20 @@ impl MicroserviceGateway.setup -> FastAPI {
     }
     install_trace_log_filter();
 
+    # Build Prometheus metrics (no-ops when prometheus_client is not
+    # installed). Only initialized once per gateway instance; spawning
+    # a fresh gateway in tests gets a fresh registry to avoid
+    # "Duplicated timeseries" errors.
+    import from jac_scale.microservices._metrics { build_gateway_metrics }
+    import from jac_scale.config_loader { get_scale_config }
+    mon_cfg = get_scale_config().get_monitoring_config();
+    (self._metrics_registry, self._metrics_requests, self._metrics_duration) = (
+        build_gateway_metrics(
+            namespace=mon_cfg.get("namespace", "jac_scale"),
+            histogram_buckets=mon_cfg.get("histogram_buckets")
+        )
+    );
+
     @self.app.middleware("http")
     async def dispatcher(request: Request, call_next: object) -> Response {
         path: str = request.url.path;
@@ -344,20 +378,44 @@ impl MicroserviceGateway.setup -> FastAPI {
         trace_id = ensure_trace_id(request.headers.get("X-Trace-Id"));
         tok = set_current_trace(trace_id);
 
+        start = time.time();
+        svc_label: str = "__unmatched__";
         try {
             resp: Response | None = None;
             if path == "/health" {
+                svc_label = "__health__";
                 resp = gw.handle_health();
+            } elif path == "/metrics" {
+                svc_label = "__metrics__";
+                resp = gw.handle_metrics();
             } else {
-                resp = await gw.handle_builtin_passthrough(request, path);
-                if resp is None {
-                    resp = gw.handle_admin(path);
-                }
-                if resp is None {
+                # Prefix-match first so we can label the service name on
+                # proxy hits even before handle_proxy gets the Response.
+                matched = gw.registry.match_route(path);
+                if matched {
+                    svc_label = matched.name;
                     resp = await gw.handle_proxy(request, path);
                 }
                 if resp is None {
-                    resp = gw.handle_static(request, path);
+                    builtin = await gw.handle_builtin_passthrough(request, path);
+                    if builtin is not None {
+                        svc_label = "__builtin__";
+                        resp = builtin;
+                    }
+                }
+                if resp is None {
+                    admin = gw.handle_admin(path);
+                    if admin is not None {
+                        svc_label = "__admin__";
+                        resp = admin;
+                    }
+                }
+                if resp is None {
+                    static_resp = gw.handle_static(request, path);
+                    if static_resp is not None {
+                        svc_label = "__static__";
+                        resp = static_resp;
+                    }
                 }
                 if resp is None {
                     resp = JSONResponse(
@@ -369,6 +427,17 @@ impl MicroserviceGateway.setup -> FastAPI {
             # Echo trace id so clients can correlate and our e2e can
             # verify end-to-end propagation across the gateway hop.
             resp.headers["X-Trace-Id"] = trace_id;
+            # Prometheus metrics (no-op when prometheus_client absent).
+            if gw._metrics_requests is not None {
+                import from jac_scale.microservices._metrics { classify_outcome }
+                outcome = classify_outcome(resp.status_code);
+                gw._metrics_requests.labels(
+                    service=svc_label, method=request.method, outcome=outcome
+                ).inc();
+                gw._metrics_duration.labels(
+                    service=svc_label, method=request.method
+                ).observe(time.time() - start);
+            }
             return resp;
         } finally {
             reset_current_trace(tok);
