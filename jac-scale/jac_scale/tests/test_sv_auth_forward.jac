@@ -477,10 +477,6 @@ test "sv_service_call does NOT retry on application error envelope" {
 }
 
 
-# =============================================================================
-# Per-service RPC timeout override (ROADMAP P14)
-# =============================================================================
-
 test "sv_service_call uses the default 10s timeout when no per-service override" {
     captured: dict = {};
 
@@ -505,7 +501,6 @@ test "sv_service_call uses the default 10s timeout when no per-service override"
     try {
         sv_client.register("default_to_mod", "http://demo.invalid");
         JacScalePlugin.sv_service_call("default_to_mod", "run", {});
-        # No override for this module in jac.toml -> default 10s.
         assert captured["timeout"] == 10.0;
     } finally {
         httpx.post = original_post;
@@ -536,10 +531,7 @@ test "sv_service_call honors per-service rpc_timeout from config" {
     }
     httpx.post = capturing_post;
 
-    # Patch _sv_rpc_timeout so we don't need a jac.toml fixture - the
-    # unit under test is "sv_service_call passes the resolved timeout
-    # through to httpx.post", not "config loading works end-to-end"
-    # (that's covered by config_loader tests separately).
+    # Patch _sv_rpc_timeout to avoid depending on a jac.toml fixture.
     original_resolver = getattr(plugin_mod, "_sv_rpc_timeout");
     def fake_resolver(module_name: str) -> float {
         return 75.5 if module_name == "slow_mod" else 10.0;
@@ -560,8 +552,6 @@ test "sv_service_call honors per-service rpc_timeout from config" {
 
 test "_sv_rpc_timeout returns default when config lookup fails" {
     import from jac_scale.plugin { _sv_rpc_timeout }
-    # Any module name works - the default is returned whenever the
-    # services config has no entry (or the config is unavailable).
     t: float = _sv_rpc_timeout("module_that_has_no_override");
     assert t == 10.0;
 }

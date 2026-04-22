@@ -20,9 +20,7 @@ cd "$SCRIPT_DIR"
 # (e.g. conda envs without activation):  JAC_BIN=/path/to/jac ./test_e2e.sh
 JAC_BIN="${JAC_BIN:-jac}"
 
-# Resolve the Python interpreter that lives alongside JAC_BIN (same
-# env has `websockets`, httpx, etc. installed). Falls back to system
-# python3 for envs where JAC_BIN is a wrapper without a sibling python.
+# Python sibling to JAC_BIN so `websockets` / httpx from the conda env are picked up.
 _JAC_DIR="$(dirname "$(command -v "$JAC_BIN" 2>/dev/null || echo "$JAC_BIN")")"
 if [ -x "$_JAC_DIR/python" ]; then
   ENV_PYTHON="$_JAC_DIR/python"
@@ -461,11 +459,6 @@ exit(0 if not items else 1)"' \
   # -------------------------------------------------------------------------
   # 7c. WebSocket proxying (ROADMAP P15)
   # -------------------------------------------------------------------------
-  # The gateway's `_install_ws_catchall` handler matches `/api/{svc}/ws/{rest}`
-  # via the registry and pipes bidirectionally to the service's
-  # ws://host/ws/{rest}. products_app ships an `@restspec(WEBSOCKET)`
-  # EchoMessage walker; we send a message through the gateway and verify
-  # the service's echo comes back end-to-end.
   section "WebSocket proxy (P15)"
 
   "$ENV_PYTHON" -c "
@@ -495,9 +488,7 @@ except Exception as e:
       bash -c "[ '$ws_rc' = '0' ]"
   fi
 
-  # Unmatched WS path should close cleanly (1008 policy violation), not
-  # hang or 403. Proves `_install_ws_catchall` is wired and uvicorn
-  # honors the close code.
+  # Unmatched path closes with 1008 - proves the catch-all is wired.
   "$ENV_PYTHON" -c "
 import asyncio, sys
 try:
@@ -512,7 +503,7 @@ async def main():
                 await asyncio.wait_for(ws.recv(), timeout=1)
             except Exception:
                 pass
-        sys.exit(0)  # if we reach here at all, handshake completed
+        sys.exit(0)
     except (ConnectionClosedOK, ConnectionClosedError) as e:
         sys.exit(0 if e.code == 1008 else 1)
     except Exception:
@@ -561,21 +552,9 @@ exit(0 if items else 1)"' \
 fi
 
 # ---------------------------------------------------------------------------
-# 8b. Graceful drain (ROADMAP P13)
-#
-# On SIGTERM the service should:
-#   (a) flip its drain flag (drain log line appears in the service log)
-#   (b) begin uvicorn graceful shutdown (listen socket closes, existing
-#       connections drained via in-flight completion)
-#   (c) exit within timeout_graceful_shutdown (default 10s)
-#
-# Uvicorn closes idle keep-alive connections during shutdown so the
-# drain middleware's 503 path is only reachable when a new request
-# arrives on a connection that was mid-cycle - hard to hit
-# deterministically from the outside. That code path is covered by the
-# test_drain.jac + test_gateway.jac unit suites. Here we verify the
-# uvicorn-level graceful-shutdown contract and the drain-log side
-# effect - the observable bits of P13 in a running process.
+# 8b. Graceful drain (ROADMAP P13). Verifies SIGTERM -> drain log line +
+# port closed within the graceful-shutdown window. The drain-503 path
+# on keep-alive connections is covered by unit tests.
 # ---------------------------------------------------------------------------
 section "Graceful drain on SIGTERM (P13)"
 
@@ -595,12 +574,8 @@ check "products_app healthz returns 200 before SIGTERM" \
 
 kill -TERM "$PRODUCTS_PID" 2>/dev/null || true
 
-# Wait until the listening port is gone (uvicorn's graceful shutdown
-# closed the socket and the process exited). `kill -0` is unreliable
-# here because the orchestrator parent doesn't reap children promptly,
-# leaving them as zombies whose PID still exists. Port-closed is the
-# operationally correct signal: new TCP connections get refused once
-# uvicorn shuts down, whether or not the zombie is reaped.
+# Poll port-closed rather than pid-gone: the orchestrator doesn't reap
+# children promptly so the pid lingers as a zombie past exit.
 deadline=$(( $(date +%s) + 15 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   if ! curl -s -o /dev/null --connect-timeout 1 "http://127.0.0.1:$PRODUCTS_PORT/healthz"; then
@@ -612,9 +587,6 @@ done
 check "products_app port is closed within graceful shutdown window" \
   bash -c "! curl -s -o /dev/null --connect-timeout 1 http://127.0.0.1:$PRODUCTS_PORT/healthz"
 
-# The drain hook wrote a log line before uvicorn's own shutdown - proof
-# the SIGTERM-to-drain wiring (install_signal_drain -> start_drain) ran
-# in the service subprocess.
 check "drain log line appears in service log after SIGTERM" \
   bash -c "grep -q 'drain: started' .jac/logs/products_app.log"
 

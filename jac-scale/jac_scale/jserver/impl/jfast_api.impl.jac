@@ -111,14 +111,8 @@ impl JFastApiServer.run_server(
         },
 
     };
-    # Drain setup (P13). The service subprocess gets SIGTERM both from
-    # the local orchestrator (`jac scale stop`) and from the K8s
-    # kubelet at pod termination. Switching from uvicorn.run to
-    # Config+Server lets us wrap `handle_exit` with the drain flag
-    # before the event loop starts; the drain middleware then 503s
-    # new requests that arrive on existing keep-alive connections
-    # while uvicorn drains. `timeout_graceful_shutdown` caps how long
-    # uvicorn waits for active connections to close.
+    # P13: wrap handle_exit so SIGTERM flips the drain flag before
+    # uvicorn begins its own graceful shutdown.
     import from jac_scale.microservices._drain { install_signal_drain }
     import from jac_scale.config_loader { get_scale_config }
     ms_cfg = get_scale_config().get_microservices_config();
@@ -1215,13 +1209,8 @@ impl JFastApiServer.init(
     self.app.middleware('http')(request_context_middleware);
     self.app.middleware('http')(jwt_validation_middleware);
 
-    # Drain middleware (P13). Registered last so it sits at index 0 =
-    # outermost = runs FIRST. During a SIGTERM drain window, new
-    # requests short-circuit with 503 + Retry-After before JWT
-    # validation or context setup runs - no wasted state, no trace id
-    # burned on a response the client will retry against another pod.
-    # In the non-drain path it just counts in-flight requests so a
-    # drain triggered mid-request can observe and wait for them.
+    # P13: drain registered last -> outermost, so a 503 short-circuits
+    # before JWT/context setup runs during graceful shutdown.
     import from jac_scale.microservices._drain { build_drain_middleware }
     self.app.middleware('http')(build_drain_middleware("service"));
 }

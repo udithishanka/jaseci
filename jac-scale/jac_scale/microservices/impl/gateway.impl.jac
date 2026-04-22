@@ -1,33 +1,17 @@
 """Implementation of MicroserviceGateway methods."""
 
 import shutil;
-# Module-scope imports for names used in type annotations of handlers
-# registered inside this file. Jac compiles `.jac` -> `.py` with
-# `from __future__ import annotations` (PEP 563), which turns ALL
-# parameter annotations into strings. FastAPI resolves those strings
-# back to types via `get_type_hints(endpoint)`, which uses
-# `endpoint.__globals__` = this module's globals. If `WebSocket` is
-# only imported inside a helper function, the annotation `WebSocket`
-# on a nested def can't be resolved, FastAPI fails to detect the
-# WebSocket dependency, no WebSocket gets injected, and the WS route
-# closes before accepting -> uvicorn logs HTTP 403. Keeping the
-# import here makes the type visible to FastAPI's runtime
-# introspection regardless of where the endpoint is declared.
+# WebSocket import must stay at module scope. Jac emits
+# `from __future__ import annotations`; FastAPI's WS dependency
+# detection does `get_type_hints(endpoint)` against the endpoint's
+# `__globals__`, so the `WebSocket` name needs to be resolvable here,
+# not just inside `_install_ws_catchall`.
 import from fastapi { WebSocket }
 
 
-"""Register the WebSocket catch-all proxy on a gateway's FastAPI app
-(ROADMAP P15).
-
-Placed at module scope (not inside `setup()`) primarily for clarity;
-the critical reason WS works is that `WebSocket` is imported at
-module scope above - FastAPI's PEP-563 annotation resolution depends
-on that. The handler dispatches via `gw.registry.match_route`, sends
-the appropriate close code (1012 draining / 1008 no-route / 1013
-unhealthy) when rejecting, or pipes bidirectionally via
-`websocket_forward` when matched. URL scheme is rewritten http->ws
-inside `websocket_forward`.
-"""
+"""Register the WebSocket catch-all proxy that dispatches via the
+registry (matching prefix -> upstream URL). Close codes: 1012 drain,
+1008 no route, 1013 unhealthy."""
 def _install_ws_catchall(gw: object) -> None {
     import from jac_scale.microservices._ws_forward { websocket_forward }
     import from jac_scale.microservices._drain { is_draining }
@@ -36,21 +20,19 @@ def _install_ws_catchall(gw: object) -> None {
     @gw.app.websocket("/{ws_path:path}")
     async def ws_proxy(websocket: WebSocket, ws_path: str) -> None {
         if is_draining() {
-            # 1012 = service restart
             await websocket.close(code=1012);
             return;
         }
         full_path: str = "/" + ws_path;
         matched = gw.registry.match_route(full_path);
         if not matched or not matched.url {
-            # 1008 = policy violation (our "no matching route").
             await websocket.accept();
             await websocket.close(code=1008);
             return;
         }
         if matched.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
             await websocket.accept();
-            await websocket.close(code=1013);  # try again later
+            await websocket.close(code=1013);
             return;
         }
         remaining: str = full_path[len(matched.prefix):] or "/";
@@ -60,10 +42,7 @@ def _install_ws_catchall(gw: object) -> None {
             target_http = f"{target_http}?{query}";
         }
         await websocket.accept();
-        req_headers: dict[str, str] = {};
-        for (k, v) in websocket.headers.items() {
-            req_headers[k] = v;
-        }
+        req_headers: dict[str, str] = dict(websocket.headers.items());
         logger.info(f"ws proxy: {full_path} -> {target_http}");
         await websocket_forward(websocket, target_http, req_headers);
     }
@@ -322,16 +301,9 @@ impl MicroserviceGateway.handle_admin
     return None;
 }
 
-"""Proxy a request to the microservice matched by prefix.
-
-Uses `stream_forward` (P15) so upstream SSE / chunked / large bodies
-pass through to the client as a StreamingResponse instead of being
-buffered at the gateway. The aiohttp session stays alive while the
-client reads; closing the response iterator tears down the session.
-
-Returns None if no service prefix matches, 503 if the matched service
-is not healthy, 502 on forwarding failure.
-"""
+"""Proxy to the matched microservice. Returns None if no match, 503 if
+unhealthy, 502 on transport failure. Streams the response (SSE /
+chunked / large bodies pass through)."""
 impl MicroserviceGateway.handle_proxy
 (request: Request, path: str) -> Response | None {
     svc = self.registry.match_route(path);
@@ -539,38 +511,19 @@ impl MicroserviceGateway.setup -> FastAPI {
         }
     }
 
-    # WebSocket catch-all (P15). Delegated to the module-level helper
-    # because placing @self.app.websocket(...) directly inside this
-    # impl method silently fails in a way that makes uvicorn 403 every
-    # WS upgrade. See `_install_ws_catchall` docstring.
     _install_ws_catchall(self);
 
-    # Drain middleware (P13). Starlette's middleware('http') does
-    # insert(0, ...), so the LAST registered runs FIRST. Registering
-    # drain after the dispatcher makes drain the outermost layer - a
-    # 503+Retry-After can short-circuit before the dispatcher spends
-    # metric labels or a trace id on a request we're about to reject.
-    # In the non-draining path, drain just counts in-flight and
-    # delegates to the dispatcher.
+    # Drain registered LAST so Starlette's insert(0, ...) puts it as
+    # the outermost HTTP middleware - 503s short-circuit before the
+    # dispatcher stamps metrics or trace-ids.
     import from jac_scale.microservices._drain { build_drain_middleware }
     self.app.middleware("http")(build_drain_middleware("__gateway__"));
 
     return self.app;
 }
 
-"""Start the gateway server (blocking).
-
-Uses uvicorn's Config+Server split (not uvicorn.run) so we can wrap
-`server.handle_exit` with our drain hook before the event loop starts.
-The wrapped handler flips the drain flag (so the middleware starts
-503'ing new requests) and then calls uvicorn's original handler
-(which sets should_exit and begins graceful shutdown).
-
-`timeout_graceful_shutdown` is sourced from the microservices config
-and caps how long uvicorn waits for active connections to close. Our
-drain middleware makes that wait safe to cut short: by then no new
-request is expecting a real response.
-"""
+"""Start the gateway (blocking). Uses Config+Server so install_signal_drain
+can wrap `handle_exit` before the event loop starts."""
 impl MicroserviceGateway.start -> None {
     import from jac_scale.microservices._drain { install_signal_drain }
     import from jac_scale.config_loader { get_scale_config }

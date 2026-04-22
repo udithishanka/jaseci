@@ -18,10 +18,6 @@ import from jac_scale.microservices._drain {
 }
 
 
-# =============================================================================
-# State primitives
-# =============================================================================
-
 test "initial state is not draining and inflight is zero" {
     reset_drain();
     assert not is_draining();
@@ -41,8 +37,6 @@ test "start_drain flips is_draining True" {
 test "start_drain is idempotent; second call preserves original timeout" {
     reset_drain();
     start_drain(7.0);
-    # Second call must not reset drain_started_ts nor the timeout,
-    # so a re-entrant signal handler is safe.
     start_drain(99.0);
     assert is_draining();
     assert drain_timeout_s() == 7.0;
@@ -95,7 +89,6 @@ test "wait_for_zero unblocks when inflight drops in another thread" {
     elapsed = time.time() - t0;
     t.join();
     assert ok;
-    # Should unblock well before the 1s timeout.
     assert elapsed < 0.5;
     reset_drain();
 }
@@ -112,10 +105,6 @@ test "wait_for_zero times out when inflight stays stuck" {
     reset_drain();
 }
 
-
-# =============================================================================
-# Middleware
-# =============================================================================
 
 """Drive an async function from a sync test."""
 def _run_async(coro: object) -> object {
@@ -194,7 +183,6 @@ test "middleware accounts inflight across concurrent in-flight requests" {
 
     _run_async(go());
     assert inflight() == 0;
-    # At least one observation saw inflight >= 1.
     assert any(o >= 1 for o in observed);
     reset_drain();
 }
@@ -220,12 +208,6 @@ test "middleware decrements inflight even when handler raises" {
 }
 
 
-# =============================================================================
-# Signal-handler install (uvicorn wiring)
-# =============================================================================
-
-# Stand-in for uvicorn.Server so we can verify install_signal_drain wraps
-# handle_exit without touching real OS signals.
 obj _FakeServer {
     has handle_exit_calls: list = [];
 
@@ -240,7 +222,6 @@ test "install_signal_drain wraps handle_exit and configures drain timeout" {
     srv = _FakeServer();
     orig = srv.handle_exit;
     install_signal_drain(srv, timeout_s=3.0);
-    # Wrapper must be a different callable.
     assert srv.handle_exit is not orig;
     assert drain_timeout_s() == 3.0;
     reset_drain();
@@ -253,9 +234,8 @@ test "wrapped handle_exit starts drain then calls original" {
     install_signal_drain(srv, timeout_s=2.0);
     assert not is_draining();
 
-    srv.handle_exit(15, None);  # 15 = SIGTERM
+    srv.handle_exit(15, None);
     assert is_draining();
-    # The original handler still ran.
     assert len(srv.handle_exit_calls) == 1;
     assert srv.handle_exit_calls[0] == (15, None);
     reset_drain();

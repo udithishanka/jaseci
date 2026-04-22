@@ -1,23 +1,8 @@
-"""HTTP forwarding helpers for the microservice gateway.
+"""HTTP forwarding for the microservice gateway.
 
-Two modes:
-
-  `raw_forward`    buffered - reads the full upstream body before
-                   returning (status, headers, bytes). Used where
-                   the caller needs to inspect the body or peek the
-                   status (e.g. the 404-try-next loop in
-                   `handle_builtin_passthrough`).
-
-  `stream_forward` streaming - opens the request, returns a
-                   ForwardResult handle. Caller peeks status, then
-                   either calls `to_response()` to get a
-                   StreamingResponse (SSE, chunked, large bodies) or
-                   `cleanup()` to abort without streaming. The
-                   aiohttp session stays alive until the stream
-                   completes, so `text/event-stream` + connection
-                   keep-alive work end-to-end.
-
-Modeled on the aiohttp usage in jac_scale/providers/proxy/sandbox_proxy.jac.
+`raw_forward` buffers (for the 404-try-next passthrough path).
+`stream_forward` returns a ForwardResult the caller can stream
+(SSE / chunked) or abort via `cleanup()`. P15.
 """
 
 import logging;
@@ -29,12 +14,7 @@ glob _logger = logging.getLogger(__name__),
      _HOP_BY_HOP: set[str] = {"host", "transfer-encoding", "connection", "keep-alive"};
 
 
-"""Buffered forward: reads the full upstream body before returning.
-
-Used for endpoints where callers inspect the body or the status code
-pre-return (e.g. `handle_builtin_passthrough`'s 404-try-next loop).
-Returns (status, headers, body) on success or None on transport error.
-"""
+"""Buffered forward. Returns (status, headers, body) or None on transport error."""
 async def raw_forward(
     method: str,
     url: str,
@@ -70,36 +50,16 @@ async def raw_forward(
 }
 
 
-"""Handle for a still-open upstream response (ROADMAP P15).
-
-Keeps the aiohttp session + response alive so the caller can decide
-whether to build a StreamingResponse (one-shot body or SSE keepalive)
-or abort and close the connection. Either `to_response()` or
-`cleanup()` MUST be called; otherwise the session leaks a connection
-pool slot.
-"""
+"""Handle for an open upstream response. Caller must call either
+`to_response()` or `cleanup()`; otherwise the session leaks a
+connection pool slot."""
 obj ForwardResult {
     has status: int,
         headers: dict[str, str],
         _session: Any,
         _resp: Any;
 
-    """Wrap the open upstream response as a StreamingResponse.
-
-    Transfers ownership: closing the response iterator closes the
-    aiohttp session. Safe for SSE (Content-Type: text/event-stream),
-    chunked transfer encoding, and large bodies. For small buffered
-    bodies the iterator returns one chunk and closes - same visible
-    behavior as raw_forward + Response.
-    """
     def to_response -> StreamingResponse;
-
-    """Close the upstream response + session without streaming.
-
-    Call this when the caller decides (after peeking `status` +
-    `headers`) not to surface this response - e.g. the
-    handle_builtin_passthrough 404-try-next loop. Idempotent.
-    """
     async def cleanup -> None;
 }
 
@@ -149,12 +109,8 @@ impl ForwardResult.cleanup -> None {
 }
 
 
-"""Open a forward request and return a ForwardResult for the caller to
-either stream or abort. See ForwardResult docstring for lifecycle
-rules. Returns None on transport-level failure (connect refused,
-timeout, DNS failure) - caller should emit a 502 gateway_timeout
-envelope.
-"""
+"""Open the upstream request; return None on transport failure so the
+caller can emit a 502."""
 async def stream_forward(
     method: str,
     url: str,

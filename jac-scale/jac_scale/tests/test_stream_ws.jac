@@ -12,10 +12,6 @@ import from jac_scale.microservices.impl.http_forward {
 }
 
 
-# =============================================================================
-# WebSocket URL + header helpers
-# =============================================================================
-
 test "ws scheme rewrite: http -> ws" {
     assert _to_ws_scheme("http://127.0.0.1:8001/ws/chat") == "ws://127.0.0.1:8001/ws/chat";
 }
@@ -70,16 +66,8 @@ test "handshake headers are case-insensitive on the filter" {
 }
 
 
-# =============================================================================
-# stream_forward + ForwardResult end-to-end with an in-process aiohttp server
-# =============================================================================
-
-"""Spin up an aiohttp app on a random port that:
-  - POST /echo        -> echoes the request body as-is
-  - GET  /sse         -> text/event-stream with 3 pre-seeded events
-  - GET  /big         -> 64KB of bytes in chunked transfer
-  - GET  /fourofour   -> 404 + 'nope'
-Returns (site, runner, base_url). Caller awaits runner.cleanup()."""
+"""aiohttp test server with echo/sse/big/fourofour routes. Caller
+must await runner.cleanup()."""
 async def _spawn_upstream -> tuple[object, object, str] {
     import aiohttp;
     import from aiohttp { web }
@@ -90,8 +78,6 @@ async def _spawn_upstream -> tuple[object, object, str] {
     }
 
     async def sse(request: object) -> object {
-        # SSE: open the response, write three events, close. The
-        # client sees text/event-stream and chunked encoding.
         resp = web.StreamResponse(
             status=200,
             headers={"Content-Type": "text/event-stream"}
@@ -130,8 +116,6 @@ async def _spawn_upstream -> tuple[object, object, str] {
     await runner.setup();
     site = web.TCPSite(runner, "127.0.0.1", 0);
     await site.start();
-    # Discover the bound port from the server (aiohttp exposes it
-    # via the runner.sites list).
     actual_port: int = 0;
     for s in runner.sites {
         for srv in s._server.sockets if s._server else [] {
@@ -147,7 +131,6 @@ async def _spawn_upstream -> tuple[object, object, str] {
 }
 
 
-"""Helper: run an async coroutine from a sync test block."""
 def _run(coro: object) -> object {
     loop = asyncio.new_event_loop();
     try {
@@ -164,12 +147,8 @@ test "stream_forward streams SSE end-to-end with Content-Type preserved" {
         try {
             fr = await stream_forward("GET", f"{base}/sse", {}, b"");
             assert fr is not None;
-            # Headers the gateway would emit: text/event-stream preserved.
             ctype = fr.headers.get("Content-Type") or fr.headers.get("content-type");
             sr = fr.to_response();
-            # Drain the StreamingResponse iterator to confirm all bytes
-            # flow through. StreamingResponse.body_iterator exposes the
-            # async generator we returned.
             got = b"";
             async for chunk in sr.body_iterator {
                 got += chunk if isinstance(chunk, bytes) else chunk.encode("utf-8");
@@ -182,7 +161,6 @@ test "stream_forward streams SSE end-to-end with Content-Type preserved" {
     result = _run(body());
     assert result["status"] == 200;
     assert "text/event-stream" in (result["ctype"] or "");
-    # All three events arrived verbatim.
     assert "data: event0" in result["body"];
     assert "data: event1" in result["body"];
     assert "data: event2" in result["body"];
@@ -196,8 +174,6 @@ test "stream_forward streams chunked large body without buffering" {
             fr = await stream_forward("GET", f"{base}/big", {}, b"");
             assert fr is not None;
             sr = fr.to_response();
-            # Count chunks to prove the iterator yielded more than
-            # one (buffered responses yield exactly one).
             chunk_count: int = 0;
             total: int = 0;
             async for chunk in sr.body_iterator {
@@ -212,8 +188,6 @@ test "stream_forward streams chunked large body without buffering" {
     result = _run(body());
     assert result["status"] == 200;
     assert result["total"] == 65536;
-    # aiohttp's iter_chunked(8192) splits a 64KB body into >=1 chunk;
-    # for chunked-encoded 16x4KB writes we expect several.
     assert result["count"] >= 1;
 }
 
@@ -225,8 +199,6 @@ test "stream_forward.cleanup closes session without streaming" {
             fr = await stream_forward("GET", f"{base}/fourofour", {}, b"");
             assert fr is not None;
             assert fr.status == 404;
-            # Discard without streaming - exercises the cleanup path
-            # used by handle_builtin_passthrough's 404-try-next loop.
             await fr.cleanup();
             return {"ok": True};
         } finally {
@@ -239,7 +211,6 @@ test "stream_forward.cleanup closes session without streaming" {
 
 test "stream_forward returns None on connect refused (caller emits 502)" {
     async def body -> object {
-        # A port we know nothing is listening on.
         fr = await stream_forward("GET", "http://127.0.0.1:1/does/not/matter", {}, b"");
         return fr;
     }
@@ -265,10 +236,6 @@ test "raw_forward still buffers for the passthrough path" {
 }
 
 
-# =============================================================================
-# Gateway WS catch-all behavior via Starlette TestClient
-# =============================================================================
-
 test "ws route closes with 1008 when no registry prefix matches" {
     import from jac_scale.microservices.service_registry {
         ServiceRegistry
@@ -282,10 +249,6 @@ test "ws route closes with 1008 when no registry prefix matches" {
     gw.setup();
 
     client = TestClient(gw.app);
-    # TestClient.websocket_connect enters a context where the server
-    # handler runs. With no match the server closes with 1008; the
-    # client sees the close and the context exits raising
-    # WebSocketDisconnect with .code == 1008.
     got_code: int = 0;
     try {
         with client.websocket_connect("/no/such/prefix") as ws {
@@ -333,10 +296,6 @@ test "ws route rejects with 1012 during drain" {
         } except Exception as e {
             raised = True;
         }
-        # Drain closes immediately; the context-manager body either
-        # raises on receive() or on exit. Either way we've validated
-        # the route didn't attempt upstream ws_connect on :8001
-        # (which nothing is listening on).
         assert raised;
     } finally {
         reset_drain();
