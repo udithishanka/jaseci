@@ -34,7 +34,7 @@ Work top-to-bottom. Each row maps 1:1 to an interface that
 | P7 ✓ | **`X-Trace-Id` propagation** - new `microservices/_trace_ctx.jac` (ContextVar + set/get/reset + `ensure_trace_id` UUID4 minter + `TraceIdLogFilter` that prepends `[trace=<short>]` to root-logger messages). Gateway middleware stamps the ContextVar at ingress (preserving inbound header or minting fresh); `build_forward_headers` always emits `X-Trace-Id` downstream. Service middleware in `jfast_api.impl.jac` captures inbound, installs log filter on import, and echoes `X-Trace-Id` on every response. `sv_service_call` hookimpl forwards the ContextVar to the next hop's httpx.post. 6 unit tests (ctx round-trip, None handling, UUID4 mint, forwarding on sv, omits when unset) + 2 e2e (gateway round-trip echo, auto-mint when client omits) | Every external request gets a consistent correlator across every hop. Jaeger/Tempo in K8s just consumes the same header | Same code end-to-end |
 | P8 ✓ | **Gateway + per-service metrics** - new `microservices/_metrics.jac` with `build_gateway_metrics` (fresh CollectorRegistry per gateway), `classify_outcome` (status -> 2xx/3xx/4xx/5xx/err), `render_metrics`. Gateway dispatcher wraps every request with start-time + counter + histogram observation. Service label is the matched route name, or one of `__health__`, `__builtin__`, `__admin__`, `__static__`, `__metrics__`, `__unmatched__`. Namespace + histogram buckets pulled from `get_monitoring_config()`. `/metrics` dispatched before passthrough (removed from `_BUILTIN_EXACT` to prevent accidental proxying). No-op when `prometheus_client` isn't installed. 4 new unit tests + 2 e2e (exposition reachable, `__health__` label recorded) | Prometheus scrapes `http://{gateway-pod}:8000/metrics`. Dashboards written locally work in K8s unchanged | Same exposition format |
 | P9 ✓ | **Unified `/docs` Swagger aggregation** - new `microservices/_openapi_agg.jac` sequentially fetches each healthy service's `/openapi.json` via `urllib`, rewrites paths with the service's gateway prefix, merges `components.schemas` (first-wins on name collisions). Gateway owns `/docs` (Swagger UI pointing at `/openapi.json`) and `/openapi.json` (the merged doc). Both removed from `_BUILTIN_EXACT` so they're served locally instead of proxying. Gateway's own `/health` + `/metrics` always appear in the merged doc so consumers see the full surface. 5 new unit tests + 3 new e2e checks | Same aggregator + Swagger UI in K8s. Consumers see one API surface regardless of deploy target | Same aggregator |
-| P10 | **Standardized error envelope + graceful degradation** (row 11) - consistent error shape across proxy, passthrough, and sv_service_call failure paths. Service-down -> gateway returns 503 with retry-after | K8s pod evictions are normal; clients need predictable error semantics | Same envelope |
+| P10 ✓ | **Standardized error envelope + graceful degradation** - new `microservices/_errors.jac` with `error_response(code, message, status, service?, retry_after?)` helper + three convenience wrappers (`service_unavailable`, `gateway_timeout`, `not_found`). Envelope shape matches jac-scale's TransportResponse (`ok=false`, `error.code`, `error.message`, optional `error.service`, auto-filled `error.trace_id` from `_trace_ctx`). 503 responses ship `Retry-After: 2` so clients back off during pod restarts; 502/404 omit it. Every inline JSONResponse error in `gateway.impl.jac` replaced with the helper. 4 new unit tests + 2 e2e | K8s pod evictions are routine; consistent envelope means clients don't need to distinguish gateway from service errors. Retry-After works with standard retry-friendly HTTP clients | Same envelope shape |
 | P11 skip | *Colored per-service log prefixes* - local-only DX polish; doesn't apply in K8s (use `kubectl logs`). Deliberately skipped | N/A | Skipped |
 | P12 | **User docs + dev-setup section** (row 7, F) - editable-install prerequisites, MongoDB quickstart, the production-local contract. Tutorial at `docs/docs/tutorials/production/microservices.md` | Documents the interface contract K8sDeployer will satisfy | Documentation |
 
@@ -92,7 +92,7 @@ After P1-P12, the K8s work is bounded:
 | 8 | Complete endpoint passthrough | partial | Covers `/user`, `/sso`, `/walker`, `/function`, `/webhook`, `/ws`, `/jobs`, `/graph`, `/docs`, `/openapi.json`, `/redoc`, `/metrics`. `/admin` served separately |
 | 9 | Distributed tracing - X-Trace-Id (→ P7) | done | See row 4f. Jaeger/Tempo collection in K8s deferred post-K8s |
 | 10 | Gateway + per-service metrics (→ P8) | done | Prometheus Counter + Histogram on `/metrics`; `jac_scale_gateway_requests_total{service,method,outcome}` + `_request_duration_seconds` |
-| 11 | Standardized error envelope + graceful degradation (→ P10) | partial | Basic error envelope done; no retry/circuit-breaker/graceful-degrade |
+| 11 | Standardized error envelope + graceful degradation (→ P10) | done | `_errors.jac` with `SERVICE_UNAVAILABLE` / `GATEWAY_TIMEOUT` / `NOT_FOUND` / `METRICS_UNAVAILABLE` codes; `Retry-After: 2` on 503 |
 | 12 | Unified Swagger `/docs` aggregation (→ P9) | done | `_openapi_agg.aggregate_openapi` + gateway `handle_docs` / `handle_openapi`. Merged paths prefixed with each service's gateway route |
 | 13 | Developer experience - colored per-service logs (→ P11) | skipped | Per-service `.jac/logs/{name}.log` done; colored console output deliberately skipped - local-only, K8s uses `kubectl logs` |
 | 14 | `KubernetesDeployer` (→ K1) | not started | |
@@ -100,20 +100,20 @@ After P1-P12, the K8s work is bounded:
 
 ## Test coverage
 
-143 tests green across 9 suites:
+147 tests green across 9 suites:
 
 | Suite | Count | What it covers |
 |-------|-------|----------------|
 | `test_microservices_registry.jac` | 14 | prefix matching, register/deregister, rebuild |
 | `test_process_manager.jac` | 18 | subprocess start/stop/restart, health, port pick, pidfile cross-process stop + stale-pidfile cleanup |
 | `test_deployer.jac` | 16 | `ServiceDeployer` interface, `LocalDeployer`, `url_for` dispatch + pm wiring |
-| `test_gateway.jac` | 40 | middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch, Prometheus metrics, Swagger UI + aggregated /openapi.json |
+| `test_gateway.jac` | 44 | middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch, Prometheus metrics, Swagger UI + aggregated /openapi.json, standardized error envelope + Retry-After + trace_id correlation |
 | `test_orchestrator.jac` | 4 | `build_registry`, config routing |
 | `test_setup.jac` | 13 | CLI utilities, add/remove/list, TOML write |
 | `test_sv_auth_forward.jac` | 18 | sv_service_call auth forwarding, envelope errors, retry, circuit breaker (trip, counter reset, HALF_OPEN probe, app-errors-don't-trip), trace-ctx round-trip, UUID4 mint, sv forwarding of X-Trace-Id |
 | `test_microservice.jac` | 6 | sv_client contract tests (pre-existing) |
 | `test_eager_spawn.jac` | 9 | BFS provider discovery (pre-existing) |
-| `examples/micr-s-example/test_e2e.sh` | 43 | end-to-end: stack boot, deployer invariants, gateway surface (incl. /metrics + unified /docs + /openapi.json aggregation), auth, sv-import auth forwarding, CLI (incl. pidfile), X-Trace-Id round-trip + auto-mint |
+| `examples/micr-s-example/test_e2e.sh` | 45 | end-to-end: stack boot, deployer invariants, gateway surface (incl. /metrics + unified /docs + /openapi.json aggregation), auth, sv-import auth forwarding, CLI (incl. pidfile), X-Trace-Id round-trip + auto-mint, standardized error envelope on stopped service |
 
 ## How this file is maintained
 

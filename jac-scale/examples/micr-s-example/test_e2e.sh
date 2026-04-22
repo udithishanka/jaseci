@@ -507,6 +507,28 @@ STATUS_AFTER_STOP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$GATEWAY/api
 check "cart call returns 502/503 while stopped" \
   bash -c "[ '$STATUS_AFTER_STOP' = '502' ] || [ '$STATUS_AFTER_STOP' = '503' ]"
 
+# ROADMAP P10: standardized error envelope + graceful degradation.
+# When the service is stopped, the gateway should return the standard
+# envelope (ok/error/meta with error.code) and a Retry-After header
+# to help well-behaved clients back off during pod restarts.
+STOPPED_RESP=$(curl -s -D /tmp/stopped_headers.txt -X POST "$GATEWAY/api/cart/function/view_cart" \
+  -H "Authorization: Bearer ${TOKEN:-x}" -H 'Content-Type: application/json' -d '{}')
+check "stopped-service response has the standard ok=false envelope" \
+  bash -c "echo '$STOPPED_RESP' | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+exit(0 if d.get(\"ok\") is False and d.get(\"error\",{}).get(\"code\") in (\"SERVICE_UNAVAILABLE\",\"GATEWAY_TIMEOUT\") else 1)
+'"
+check "stopped-service response is enriched with service + trace_id" \
+  bash -c "echo '$STOPPED_RESP' | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+e=d.get(\"error\",{})
+# service must be in the envelope; trace_id is auto-populated by the
+# gateway even when the client did not set one
+exit(0 if e.get(\"service\")==\"cart_app\" and e.get(\"trace_id\") else 1)
+'"
+
 # NOTE: "jac scale restart" from a separate shell CAN spawn a new
 # service (its pidfile gets written), but the orchestrator's in-process
 # sv_client._registry still holds the OLD URL, so the gateway routes to

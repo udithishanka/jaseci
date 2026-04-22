@@ -237,7 +237,8 @@ impl MicroserviceGateway.handle_builtin_passthrough
             }
         }
     }
-    return JSONResponse(status_code=404, content={"error": "Not found on any service", "path": path});
+    import from jac_scale.microservices._errors { not_found }
+    return not_found(path, message="Not found on any service");
 }
 
 """Admin UI routes - /admin redirects, /admin/* serves assets."""
@@ -266,11 +267,12 @@ impl MicroserviceGateway.handle_proxy
         return None;
     }
 
+    import from jac_scale.microservices._errors {
+        service_unavailable, gateway_timeout
+    }
+
     if svc.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
-        return JSONResponse(
-            status_code=503,
-            content={"error": f"Service '{svc.name}' is {svc.status.value}"}
-        );
+        return service_unavailable(svc.name, svc.status.value);
     }
 
     target_url = self.resolve_target_url(svc, path, str(request.url.query));
@@ -284,10 +286,7 @@ impl MicroserviceGateway.handle_proxy
 
     result = await raw_forward(request.method, target_url, fwd_headers, body);
     if result is None {
-        return JSONResponse(
-            status_code=502,
-            content={"error": f"Failed to reach service '{svc.name}'"}
-        );
+        return gateway_timeout(svc.name);
     }
 
     (status_code, resp_headers, resp_body) = result;
@@ -323,11 +322,13 @@ through to passthrough as before.
 """
 impl MicroserviceGateway.handle_metrics -> Response {
     import from jac_scale.microservices._metrics { render_metrics }
+    import from jac_scale.microservices._errors { error_response }
     (body, ctype) = render_metrics(self._metrics_registry);
     if not body {
-        return JSONResponse(
-            status_code=503,
-            content={"error": "metrics not available (install prometheus_client)"}
+        return error_response(
+            code="METRICS_UNAVAILABLE",
+            message="metrics not available (install prometheus_client)",
+            status=503
         );
     }
     return Response(content=body, media_type=ctype);
@@ -443,10 +444,8 @@ impl MicroserviceGateway.setup -> FastAPI {
                     }
                 }
                 if resp is None {
-                    resp = JSONResponse(
-                        status_code=404,
-                        content={"error": "Not found", "path": path}
-                    );
+                    import from jac_scale.microservices._errors { not_found }
+                    resp = not_found(path);
                 }
             }
             # Echo trace id so clients can correlate and our e2e can

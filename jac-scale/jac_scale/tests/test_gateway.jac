@@ -236,6 +236,90 @@ test "gateway /metrics returns Prometheus exposition after a request" {
 }
 
 # =============================================================================
+# Standardized error envelope + graceful degradation (ROADMAP P10)
+# =============================================================================
+
+test "service-down returns standardized envelope with SERVICE_UNAVAILABLE + Retry-After" {
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.STOPPED
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/api/orders/walker/list");
+
+    assert resp.status_code == 503;
+    body = resp.json();
+    assert body["ok"] is False;
+    assert body["error"]["code"] == "SERVICE_UNAVAILABLE";
+    assert body["error"]["service"] == "orders";
+    assert body["meta"]["http_status"] == 503;
+    # Retry-After lets well-behaved clients back off
+    assert resp.headers.get("retry-after") == "2";
+}
+
+test "service-timeout returns GATEWAY_TIMEOUT (502) without Retry-After" {
+    # Healthy in our registry, but the port isn't actually listening -
+    # raw_forward returns None so we emit a 502. Unlike 503, we do NOT
+    # advertise Retry-After for 502s: a deterministic transport error
+    # on the same request won't change on retry.
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/api/orders/walker/list");
+
+    assert resp.status_code == 502;
+    body = resp.json();
+    assert body["error"]["code"] == "GATEWAY_TIMEOUT";
+    assert body["error"]["service"] == "orders";
+    assert resp.headers.get("retry-after") is None;
+}
+
+test "unmatched path returns NOT_FOUND envelope" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/this/does/not/match");
+
+    assert resp.status_code == 404;
+    body = resp.json();
+    assert body["ok"] is False;
+    assert body["error"]["code"] == "NOT_FOUND";
+    # The requested path appears in the message so operators can diagnose
+    assert "/this/does/not/match" in body["error"]["message"];
+}
+
+test "error envelope carries the request's trace id for correlation" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get(
+        "/this/does/not/match",
+        headers={"X-Trace-Id": "trace-for-error-corr"}
+    );
+    assert resp.status_code == 404;
+    body = resp.json();
+    assert body["error"]["trace_id"] == "trace-for-error-corr";
+}
+
+# =============================================================================
 # Unified /docs Swagger aggregation (ROADMAP P9)
 # =============================================================================
 
