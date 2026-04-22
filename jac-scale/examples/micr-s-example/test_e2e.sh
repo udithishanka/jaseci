@@ -322,6 +322,30 @@ check "list_products returns a TransportResponse envelope" \
   "$PROD_RESP"
 
 # ---------------------------------------------------------------------------
+# 5b. CORS middleware (P16). jac.toml enables allow_origins =
+# ["http://app.example.com"]. Preflight + actual cross-origin request
+# both carry the expected headers; an origin we did NOT allow gets
+# no Allow-Origin back.
+# ---------------------------------------------------------------------------
+section "CORS (P16)"
+
+CORS_PREFLIGHT_HDR=$(curl -s -D - -o /dev/null -X OPTIONS "$GATEWAY/health" \
+  -H 'Origin: http://app.example.com' \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: Authorization')
+check "preflight echoes Allow-Origin + Allow-Credentials" \
+  bash -c "echo '$CORS_PREFLIGHT_HDR' | grep -qi 'access-control-allow-origin: http://app.example.com' \
+    && echo '$CORS_PREFLIGHT_HDR' | grep -qi 'access-control-allow-credentials: true'"
+
+CORS_SIMPLE_HDR=$(curl -s -D - -o /dev/null "$GATEWAY/health" -H 'Origin: http://app.example.com')
+check "simple cross-origin GET echoes Allow-Origin" \
+  bash -c "echo '$CORS_SIMPLE_HDR' | grep -qi 'access-control-allow-origin: http://app.example.com'"
+
+CORS_DENY_HDR=$(curl -s -D - -o /dev/null "$GATEWAY/health" -H 'Origin: http://evil.example.net')
+check "disallowed origin gets no Allow-Origin back" \
+  bash -c "! echo '$CORS_DENY_HDR' | grep -qi 'access-control-allow-origin: http://evil.example.net'"
+
+# ---------------------------------------------------------------------------
 # 6. Built-in passthrough: /user/register + /user/login (roadmap 8)
 # ---------------------------------------------------------------------------
 section "Built-in passthrough (/user/*)"

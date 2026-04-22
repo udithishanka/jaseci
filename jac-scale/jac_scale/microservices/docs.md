@@ -250,19 +250,82 @@ The gateway forwards these to healthy services (tries all, skips 404):
 | `/cl/*` | Client error reporting |
 | `/docs`, `/openapi.json` | API documentation |
 
-## PR Roadmap
+## Production-Hardening Knobs
 
-| PR | What | Status |
-|----|------|--------|
-| 0 | Core hookspecs (`sv_service_call` + `get_sv_registry`) | Planned |
-| 1 | ServiceDeployer + LocalDeployer | Prototype done |
-| 2 | Gateway + config | Prototype done |
-| 3 | Orchestrator + `ensure_sv_service` hook override | Prototype done |
-| 4 | `sv_service_call` override (auth + retry + circuit breaker) | Planned |
-| 5 | CLI tooling (`jac setup microservice` + `jac scale`) | Prototype done |
-| 6 | E-commerce example app | Prototype done |
-| 7 | Documentation | In progress |
-| 8 | KubernetesDeployer | Planned |
-| 9 | K8s example + E2E | Planned |
+All configured under `[plugins.scale.microservices]` in `jac.toml`. `jac
+setup microservice` writes commented reference blocks for each; uncomment
+and tune per deployment.
 
-See [PLAN.md](PLAN.md) for full PR details, dependency graph, and design decisions.
+### Graceful shutdown on SIGTERM
+
+```toml
+[plugins.scale.microservices]
+drain_timeout_seconds = 10
+```
+
+On SIGTERM (or `jac scale stop`), gateway + services flip a drain flag
+(new requests get `503 SERVICE_UNAVAILABLE` with `Retry-After: 2`) and
+then uvicorn waits up to `drain_timeout_seconds` for in-flight requests
+to complete. Mirrors K8s `terminationGracePeriodSeconds`.
+
+### Per-service RPC timeout
+
+Default is 10s. Override for LLM / generation / long-running services:
+
+```toml
+[plugins.scale.microservices.services.llm_app]
+rpc_timeout = 120.0
+```
+
+The override is read on every `sv` RPC and passed through to `httpx.post(timeout=...)`.
+
+### WebSockets + SSE streaming
+
+No config needed. Any client-hit `/api/{service}/ws/{rest}` is proxied
+bidirectionally to `{service}`'s `ws://.../ws/{rest}` endpoint with
+auth + trace forwarding. HTTP responses that are `text/event-stream`
+or chunked are streamed through the gateway rather than buffered.
+
+### CORS
+
+Opt-in. Disabled unless `allow_origins` is non-empty:
+
+```toml
+[plugins.scale.microservices.cors]
+allow_origins   = ["https://app.example.com"]
+allow_methods   = ["GET", "POST", "OPTIONS"]
+allow_headers   = ["Authorization", "Content-Type"]
+allow_credentials = true
+max_age         = 600
+```
+
+Registered outermost so preflights answer even during drain (clients
+need CORS headers to read a 503 envelope).
+
+### Rate limiting
+
+Token bucket, per-IP + optional per-user. Opt-in:
+
+```toml
+[plugins.scale.microservices.rate_limit]
+enabled           = true
+per_ip_rpm        = 600
+per_user_rpm      = 120        # 0 disables per-user tier
+burst_multiplier  = 2.0        # capacity = rpm * burst / 60
+exempt_paths      = ["/health", "/healthz", "/metrics"]
+```
+
+Per-IP key falls back from `X-Forwarded-For` (first hop) to
+`request.client.host`. Per-user key is `sha256(Authorization)[:32]`. 429
+responses carry the standard envelope + `Retry-After` header.
+
+### Observability
+
+- `GET /health` — JSON summary of service statuses (always on).
+- `GET /metrics` — Prometheus exposition. Enable with
+  `[plugins.scale.monitoring] enabled = true`.
+- `X-Trace-Id` — gateway mints one if the client omits it and threads
+  it through every downstream hop (including `sv` RPCs). Echoed back
+  on every response.
+- `GET /docs` + `GET /openapi.json` — unified Swagger UI + merged
+  OpenAPI doc across all healthy services.

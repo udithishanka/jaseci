@@ -78,6 +78,24 @@ down on exit. Exit 0 if all green. The PASS/FAIL blocks map 1:1 to
 intended future pytest cases. Add a new `check "..."` line whenever a
 new feature lands.
 
+## Production-hardening knobs exercised in this example
+
+`jac.toml` enables CORS (`allow_origins = ["http://app.example.com"]`)
+so `test_e2e.sh` can verify preflight + deny behavior. The remaining
+knobs are referenced but left disabled to keep e2e timing independent
+of bucket refills and graceful-shutdown windows:
+
+- **Graceful drain** (P13): exercised by sending SIGTERM to a running
+  service and checking the port closes within the graceful window.
+- **WebSockets** (P15): exercised by `ws://localhost:8000/api/products/ws/EchoMessage`.
+- **Rate limiting** (P17): covered by unit tests (`test_rate_limit.jac`),
+  not e2e.
+- **Per-service RPC timeout** (P14): covered by unit tests
+  (`test_sv_auth_forward.jac`).
+
+See [`../../jac_scale/microservices/docs.md`](../../jac_scale/microservices/docs.md)
+for the full config reference.
+
 ## Manual test walkthrough
 
 ### 0. Pre-flight

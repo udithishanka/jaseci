@@ -147,6 +147,38 @@ def run_setup(project_root: str = ".") -> None {
         lines.append("");
     }
 
+    # Reference blocks for production-hardening knobs. Left commented so
+    # the default stance is safe: no CORS, no rate limiting. Uncomment
+    # and tune per deployment.
+    lines.extend([
+        "# Graceful drain window on SIGTERM (seconds). Matches K8s",
+        "# terminationGracePeriodSeconds. Default: 10.",
+        "# [plugins.scale.microservices]",
+        "# drain_timeout_seconds = 10",
+        "",
+        "# Per-service RPC timeout override (seconds). Raise for LLM /",
+        "# long-running services.",
+        "# [plugins.scale.microservices.services.llm_app]",
+        "# rpc_timeout = 120.0",
+        "",
+        "# CORS middleware. Disabled unless allow_origins is non-empty.",
+        "# [plugins.scale.microservices.cors]",
+        '# allow_origins = ["http://app.example.com"]',
+        '# allow_methods = ["GET", "POST", "OPTIONS"]',
+        '# allow_headers = ["Authorization", "Content-Type"]',
+        "# allow_credentials = true",
+        "# max_age = 600",
+        "",
+        "# Rate limiting (token bucket, per-IP + optional per-user).",
+        "# [plugins.scale.microservices.rate_limit]",
+        "# enabled = true",
+        "# per_ip_rpm = 600",
+        "# per_user_rpm = 120",
+        "# burst_multiplier = 2.0",
+        '# exempt_paths = ["/health", "/healthz", "/metrics"]',
+        ""
+    ]);
+
     toml_path.write_text("\n".join(lines));
 
     print(f"\nAdded microservice config to jac.toml:");

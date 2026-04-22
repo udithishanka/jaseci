@@ -47,3 +47,20 @@ cart_app = "/api/cart"
 entry = "main.jac"
 dist_dir = ".jac/client/dist"
 base_route = "/"
+
+# CORS (P16) - opt-in; the e2e script exercises a preflight.
+[plugins.scale.microservices.cors]
+allow_origins = ["http://app.example.com"]
+allow_methods = ["GET", "POST", "OPTIONS"]
+allow_headers = ["Authorization", "Content-Type"]
+allow_credentials = true
+
+# Rate limiting (P17) - opt-in. Reference values:
+#   [plugins.scale.microservices.rate_limit]
+#   enabled = true
+#   per_ip_rpm = 600
+#   per_user_rpm = 120
+#   burst_multiplier = 2.0
+#   exempt_paths = ["/health", "/healthz", "/metrics"]
+# Unit tests (test_rate_limit.jac) cover the full contract; leaving
+# it disabled here keeps e2e timing independent of the bucket refill.
