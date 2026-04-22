@@ -207,6 +207,105 @@ test "sv_service_call gives up after max_attempts on persistent transport error"
 }
 
 # =============================================================================
+# X-Trace-Id propagation (ROADMAP P7)
+# =============================================================================
+
+import from jac_scale.microservices._trace_ctx {
+    set_current_trace, reset_current_trace, get_current_trace, ensure_trace_id
+}
+
+test "trace_ctx set/get/reset round-trips" {
+    tok = set_current_trace("abc-123");
+    assert get_current_trace() == "abc-123";
+    reset_current_trace(tok);
+    assert get_current_trace() == "";
+}
+
+test "set_current_trace None stores empty string" {
+    tok = set_current_trace(None);
+    assert get_current_trace() == "";
+    reset_current_trace(tok);
+}
+
+test "ensure_trace_id preserves inbound header" {
+    assert ensure_trace_id("inbound-xyz") == "inbound-xyz";
+}
+
+test "ensure_trace_id mints a UUID4 when no inbound header" {
+    minted = ensure_trace_id(None);
+    # UUID4 string is 36 chars with 4 dashes; basic shape check
+    assert len(minted) == 36;
+    assert minted.count("-") == 4;
+    # Must differ between calls (statistically; UUID4 collision
+    # probability is astronomically low)
+    assert ensure_trace_id(None) != minted;
+}
+
+test "sv_service_call forwards X-Trace-Id when set in context" {
+    captured: dict = {"trace": ""};
+
+    def handler(request: httpx.Request) -> httpx.Response {
+        captured["trace"] = request.headers.get("X-Trace-Id", "");
+        return httpx.Response(
+            status_code=200, json={"ok": True, "data": {"result": "ok"}}
+        );
+    }
+    transport = httpx.MockTransport(handler);
+
+    original_post = httpx.post;
+    def trace_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
+        req_headers = dict(headers) if headers else {};
+        req = httpx.Request("POST", url, json=json, headers=req_headers);
+        return transport.handle_request(req);
+    }
+    httpx.post = trace_post;
+
+    try {
+        sv_client.register("trace_mod", "http://demo.invalid");
+        tok = set_current_trace("test-trace-xyz");
+        try {
+            JacScalePlugin.sv_service_call("trace_mod", "ping", {});
+        } finally {
+            reset_current_trace(tok);
+        }
+        assert captured["trace"] == "test-trace-xyz";
+    } finally {
+        httpx.post = original_post;
+        sv_client.unregister("trace_mod");
+    }
+}
+
+test "sv_service_call omits X-Trace-Id when no trace context is set" {
+    captured: dict = {"trace": "sentinel"};
+
+    def handler(request: httpx.Request) -> httpx.Response {
+        captured["trace"] = request.headers.get("X-Trace-Id", "");
+        return httpx.Response(
+            status_code=200, json={"ok": True, "data": {"result": "ok"}}
+        );
+    }
+    transport = httpx.MockTransport(handler);
+
+    original_post = httpx.post;
+    def trace_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
+        req_headers = dict(headers) if headers else {};
+        req = httpx.Request("POST", url, json=json, headers=req_headers);
+        return transport.handle_request(req);
+    }
+    httpx.post = trace_post;
+
+    try {
+        sv_client.register("trace_mod2", "http://demo.invalid");
+        # Don't set trace ctx; default empty string means no header added
+        JacScalePlugin.sv_service_call("trace_mod2", "ping", {});
+        assert captured["trace"] == "";
+    } finally {
+        httpx.post = original_post;
+        sv_client.unregister("trace_mod2");
+    }
+}
+
+# =============================================================================
 # Circuit breaker (ROADMAP P6)
 # =============================================================================
 

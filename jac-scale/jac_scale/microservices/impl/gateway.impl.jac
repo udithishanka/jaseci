@@ -167,15 +167,28 @@ glob _BUILTIN_PREFIXES: tuple = (
          "/docs", "/openapi.json", "/redoc"
      };
 
-"""Copy incoming request headers, dropping hop-by-hop headers."""
+"""Copy incoming request headers, dropping hop-by-hop headers.
+
+Also ensures X-Trace-Id is present on every forwarded request (either
+the inbound one or a freshly-minted UUID). Downstream services pick
+it up and thread it through their own logs + sv-import RPC calls.
+"""
 impl MicroserviceGateway.build_forward_headers
 (request: Request) -> dict[str, str] {
+    import from jac_scale.microservices._trace_ctx {
+        get_current_trace, ensure_trace_id
+    }
     fwd: dict[str, str] = {};
     for (key, value) in request.headers.items() {
         if key.lower() not in HOP_BY_HOP_HEADERS {
             fwd[key] = value;
         }
     }
+    # Trace-Id is set by the gateway's dispatcher (handle_health path
+    # and below). Fall back to the incoming header if the ContextVar
+    # isn't set (defensive; shouldn't happen in the dispatcher path).
+    trace = get_current_trace() or ensure_trace_id(request.headers.get("X-Trace-Id"));
+    fwd["X-Trace-Id"] = trace;
     return fwd;
 }
 
@@ -311,35 +324,55 @@ impl MicroserviceGateway.setup -> FastAPI {
 
     self.bootstrap_admin();
 
+    # Install the trace-id log filter once when the gateway starts up
+    # so every subsequent log line gets a [trace=...] prefix.
+    import from jac_scale.microservices._trace_ctx {
+        install_trace_log_filter,
+        set_current_trace, reset_current_trace, ensure_trace_id
+    }
+    install_trace_log_filter();
+
     @self.app.middleware("http")
     async def dispatcher(request: Request, call_next: object) -> Response {
         path: str = request.url.path;
 
-        if path == "/health" {
-            return gw.handle_health();
-        }
+        # Stamp the request with a trace id (preserving any inbound
+        # X-Trace-Id so clients can correlate upstream logs). The
+        # ContextVar is read by build_forward_headers for proxy +
+        # passthrough calls, and by downstream jfast_api middleware
+        # when the request lands on each service.
+        trace_id = ensure_trace_id(request.headers.get("X-Trace-Id"));
+        tok = set_current_trace(trace_id);
 
-        builtin = await gw.handle_builtin_passthrough(request, path);
-        if builtin is not None {
-            return builtin;
+        try {
+            resp: Response | None = None;
+            if path == "/health" {
+                resp = gw.handle_health();
+            } else {
+                resp = await gw.handle_builtin_passthrough(request, path);
+                if resp is None {
+                    resp = gw.handle_admin(path);
+                }
+                if resp is None {
+                    resp = await gw.handle_proxy(request, path);
+                }
+                if resp is None {
+                    resp = gw.handle_static(request, path);
+                }
+                if resp is None {
+                    resp = JSONResponse(
+                        status_code=404,
+                        content={"error": "Not found", "path": path}
+                    );
+                }
+            }
+            # Echo trace id so clients can correlate and our e2e can
+            # verify end-to-end propagation across the gateway hop.
+            resp.headers["X-Trace-Id"] = trace_id;
+            return resp;
+        } finally {
+            reset_current_trace(tok);
         }
-
-        admin = gw.handle_admin(path);
-        if admin is not None {
-            return admin;
-        }
-
-        proxy = await gw.handle_proxy(request, path);
-        if proxy is not None {
-            return proxy;
-        }
-
-        static_resp = gw.handle_static(request, path);
-        if static_resp is not None {
-            return static_resp;
-        }
-
-        return JSONResponse(status_code=404, content={"error": "Not found", "path": path});
     }
 
     return self.app;

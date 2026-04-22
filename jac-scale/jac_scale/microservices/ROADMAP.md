@@ -31,7 +31,7 @@ Work top-to-bottom. Each row maps 1:1 to an interface that
 | P4 ~ | **Cross-process CLI state via pidfile** - `.jac/run/{service}.pid` per service. `process_manager.start_service` writes pidfile; `stop_service` dual-mode: Popen handle when in-process, `os.kill`+pid when cross-process. Stop from a separate shell now works. 3 new unit tests (pidfile path, stale-pidfile cleanup, no-pidfile return-False). **Restart deferred**: CLI can spawn a new service but the orchestrator's in-process `sv_client._registry` still holds the old URL, so the gateway routes to the dead port. Fixing that needs a shared (file-backed or socket-based) registry writer, which is a cross-process state task beyond P4's pidfile scope. Tracked as a follow-up | K8sDeployer backs the same CLI with `kubectl get pod` / `kubectl delete pod`; K8s doesn't have the registry-sync gap because K8s Service DNS is the authority | Same CLI shape, different state source |
 | P5 ✓ | **Retry with exponential backoff** in `sv_service_call` hookimpl - 3 attempts, 0.1s -> 0.2s -> 0.4s backoff, 10s connect+read timeout on each. Retries on transport errors (`httpx.RequestError`, `TimeoutException`) but NOT on application-level `ok=false` envelope errors (those are deterministic). Test clients bypass retry (in-process, no transport). Refactored envelope unwrap into `_unwrap_sv_envelope` helper so both retry and test-client paths share it. 3 new unit tests (transient-then-success, persistent failure exhausts attempts, app-error skips retry) | K8s pod restarts + DNS propagation lag + network blips all covered. Same hookimpl, same behavior | Same code |
 | P6 ✓ | **Circuit breaker** in `sv_service_call` - per-provider CLOSED/OPEN/HALF_OPEN state machine in `plugin.jac`. Trips OPEN after 5 consecutive retry-exhausted transport-failure cycles; fail-fast with "blocked by open circuit breaker" for 30s cooldown; first call after cooldown becomes a HALF_OPEN probe (success -> CLOSED, failure -> back to OPEN). App-level envelope errors do NOT count (deterministic). Process-local state (dict + threading.Lock) - matches K8s pod-local semantics. 4 new unit tests (trip, success resets counter, HALF_OPEN probe success closes, app errors don't trip) | Prevents cascade failures when one K8s pod is unhealthy. Each pod runs its own breaker, which is the right granularity | Same code |
-| P7 | **`X-Trace-Id` propagation** (rows 4f + 9) - generate at gateway ingress, thread through `build_forward_headers` for proxy calls and the `sv_service_call` hookimpl via a ContextVar next to `_auth_ctx`. Log it on each service | Tracing is the primary observability tool in K8s. Same header flows through local and prod | Same code; K8s just adds Jaeger/Tempo collector |
+| P7 ✓ | **`X-Trace-Id` propagation** - new `microservices/_trace_ctx.jac` (ContextVar + set/get/reset + `ensure_trace_id` UUID4 minter + `TraceIdLogFilter` that prepends `[trace=<short>]` to root-logger messages). Gateway middleware stamps the ContextVar at ingress (preserving inbound header or minting fresh); `build_forward_headers` always emits `X-Trace-Id` downstream. Service middleware in `jfast_api.impl.jac` captures inbound, installs log filter on import, and echoes `X-Trace-Id` on every response. `sv_service_call` hookimpl forwards the ContextVar to the next hop's httpx.post. 6 unit tests (ctx round-trip, None handling, UUID4 mint, forwarding on sv, omits when unset) + 2 e2e (gateway round-trip echo, auto-mint when client omits) | Every external request gets a consistent correlator across every hop. Jaeger/Tempo in K8s just consumes the same header | Same code end-to-end |
 | P8 | **Gateway + per-service metrics** (row 10) - `/metrics` Prometheus endpoint on the gateway. Per-service request count, error rate, p50/p95/p99 latency histograms. Reuse jac-scale's existing `monitoring` config | K8s pod gets scraped by Prometheus. Local simulation runs prom scraping against `http://localhost:8000/metrics`. Identical metric shape | Same exposition format |
 | P9 | **Unified `/docs` Swagger aggregation** (row 12) - gateway aggregates OpenAPI schemas from all healthy services into one `/docs` view | Same in K8s - unified API surface for consumers. Local and prod both see one Swagger | Same aggregator |
 | P10 | **Standardized error envelope + graceful degradation** (row 11) - consistent error shape across proxy, passthrough, and sv_service_call failure paths. Service-down -> gateway returns 503 with retry-after | K8s pod evictions are normal; clients need predictable error semantics | Same envelope |
@@ -79,7 +79,7 @@ After P1-P12, the K8s work is bounded:
 | 4c | `TransportResponse` envelope unwrap | done | `plugin.jac:sv_service_call` |
 | 4d | Retry with exponential backoff (→ P5) | done | `plugin.jac:sv_service_call` retries 3x on transport errors with 0.1s/0.2s/0.4s backoff; does not retry on application envelope errors |
 | 4e | Circuit breaker (→ P6) | done | `plugin.jac`: per-provider CLOSED/OPEN/HALF_OPEN, trip threshold 5, cooldown 30s. App errors don't count |
-| 4f | `X-Trace-Id` propagation (→ P7) | not started | |
+| 4f | `X-Trace-Id` propagation (→ P7) | done | ContextVar + middleware + sv_service_call forwarding + response-header echo |
 | 5 | `jac setup microservice` CLI | done | `microservices/setup.jac` |
 | 5a | `jac scale status/stop/logs` (→ P4) | done | `scale_cmd` + `pm.stop_service` now read `.jac/run/{name}.pid` when there's no Popen handle. `stop` + `logs` + `status` work cross-process |
 | 5b | `jac scale restart` cross-process (follow-up to P4) | not started | `pm.start_service` spawns on new URL; orchestrator's in-process `sv_client._registry` isn't updated by external CLI. Needs a shared registry writer (file-backed or HTTP admin endpoint) |
@@ -90,7 +90,7 @@ After P1-P12, the K8s work is bounded:
 | 6d | e2e shell test (32 checks) | done | `examples/micr-s-example/test_e2e.sh` |
 | 7 | User docs + production-local architecture (→ P12) | partial | `microservices/docs.md` done; tutorial + dev-setup section not yet |
 | 8 | Complete endpoint passthrough | partial | Covers `/user`, `/sso`, `/walker`, `/function`, `/webhook`, `/ws`, `/jobs`, `/graph`, `/docs`, `/openapi.json`, `/redoc`, `/metrics`. `/admin` served separately |
-| 9 | Distributed tracing - X-Trace-Id (→ P7) | not started | |
+| 9 | Distributed tracing - X-Trace-Id (→ P7) | done | See row 4f. Jaeger/Tempo collection in K8s deferred post-K8s |
 | 10 | Gateway + per-service metrics (→ P8) | not started | |
 | 11 | Standardized error envelope + graceful degradation (→ P10) | partial | Basic error envelope done; no retry/circuit-breaker/graceful-degrade |
 | 12 | Unified Swagger `/docs` aggregation (→ P9) | not started | |
@@ -100,7 +100,7 @@ After P1-P12, the K8s work is bounded:
 
 ## Test coverage
 
-128 tests green across 9 suites:
+134 tests green across 9 suites:
 
 | Suite | Count | What it covers |
 |-------|-------|----------------|
@@ -110,10 +110,10 @@ After P1-P12, the K8s work is bounded:
 | `test_gateway.jac` | 31 | all 5 middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch |
 | `test_orchestrator.jac` | 4 | `build_registry`, config routing |
 | `test_setup.jac` | 13 | CLI utilities, add/remove/list, TOML write |
-| `test_sv_auth_forward.jac` | 12 | sv_service_call auth forwarding, envelope errors, retry, circuit breaker (trip, counter reset, HALF_OPEN probe, app-errors-don't-trip) |
+| `test_sv_auth_forward.jac` | 18 | sv_service_call auth forwarding, envelope errors, retry, circuit breaker (trip, counter reset, HALF_OPEN probe, app-errors-don't-trip), trace-ctx round-trip, UUID4 mint, sv forwarding of X-Trace-Id |
 | `test_microservice.jac` | 6 | sv_client contract tests (pre-existing) |
 | `test_eager_spawn.jac` | 9 | BFS provider discovery (pre-existing) |
-| `examples/micr-s-example/test_e2e.sh` | 36 | end-to-end: stack boot, deployer invariants (incl. url_for shape), gateway surface, auth, sv-import auth forwarding, CLI (incl. pidfile + cross-process stop) |
+| `examples/micr-s-example/test_e2e.sh` | 38 | end-to-end: stack boot, deployer invariants, gateway surface, auth, sv-import auth forwarding, CLI (incl. pidfile), X-Trace-Id round-trip + auto-mint |
 
 ## How this file is maintained
 

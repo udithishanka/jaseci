@@ -1124,6 +1124,20 @@ impl JFastApiServer.init(
         }
         auth_token = set_current_auth(request.headers.get('Authorization'));
 
+        # Same pattern for distributed trace id. If the inbound request
+        # lacks X-Trace-Id (e.g. client-to-service direct call, or a
+        # test harness), mint one so every downstream hop has a shared
+        # correlator. Install the log filter so this service's logs
+        # get a [trace=xxxx] prefix matching the gateway's and every
+        # sibling service's.
+        import from jac_scale.microservices._trace_ctx {
+            set_current_trace, reset_current_trace, ensure_trace_id,
+            install_trace_log_filter
+        }
+        install_trace_log_filter();
+        trace_id = ensure_trace_id(request.headers.get('X-Trace-Id'));
+        trace_token = set_current_trace(trace_id);
+
         user_id = getattr(request.state, 'user_root_id', None)
             if request?.state
             else None;
@@ -1148,6 +1162,12 @@ impl JFastApiServer.init(
                 raise;
             }
 
+            # Echo the trace id on the response so clients (and our
+            # e2e) can verify end-to-end propagation.
+            if trace_id {
+                response.headers["X-Trace-Id"] = trace_id;
+            }
+
             return response;
         } finally {
             try {
@@ -1159,6 +1179,11 @@ impl JFastApiServer.init(
                 reset_current_auth(auth_token);
             } except Exception as e {
                 logger.warning(f"Failed to reset auth context: {e}", exc_info=True);
+            }
+            try {
+                reset_current_trace(trace_token);
+            } except Exception as e {
+                logger.warning(f"Failed to reset trace context: {e}", exc_info=True);
             }
         }
     }

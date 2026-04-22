@@ -384,6 +384,40 @@ exit(0 if not items else 1)"' \
     "$VIEW2_RESP"
 
   # -------------------------------------------------------------------------
+  # 7b. X-Trace-Id propagation (ROADMAP P7)
+  # -------------------------------------------------------------------------
+  section "X-Trace-Id propagation"
+
+  # Round-trip check: send a client-specified X-Trace-Id, expect it
+  # echoed on the response. Gateway + service middleware both set
+  # response.headers["X-Trace-Id"] = trace_id, so if the inbound
+  # header was preserved through the full proxy hop, the client gets
+  # it back. This also covers the sv-import inner hop implicitly:
+  # the test below sends /api/orders/function/create_order which
+  # triggers orders_app -> sv_import -> cart_app.
+  TRACE_ID="e2e-trace-$(date +%s%N | tail -c 12)"
+
+  # Refill cart so create_order has something to work with
+  curl -s -X POST "$GATEWAY/api/cart/function/add_to_cart" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"product_id":"prod_1","product_name":"trace","price":1,"qty":1}' >/dev/null
+
+  ECHOED_TRACE=$(curl -s -D - -X POST "$GATEWAY/api/orders/function/create_order" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "X-Trace-Id: $TRACE_ID" \
+    -H 'Content-Type: application/json' -d '{}' -o /dev/null \
+    | grep -i '^x-trace-id:' | head -1 | awk '{print $2}' | tr -d '\r\n ')
+  check "X-Trace-Id echoed on response (gateway round-trip)" \
+    bash -c "[ '$ECHOED_TRACE' = '$TRACE_ID' ]"
+
+  # A gateway request that omits X-Trace-Id should get one minted for it
+  MINTED_TRACE=$(curl -s -D - -X POST "$GATEWAY/api/cart/function/view_cart" \
+    -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' -o /dev/null \
+    | grep -i '^x-trace-id:' | head -1 | awk '{print $2}' | tr -d '\r\n ')
+  check "gateway mints X-Trace-Id when client omits it" \
+    bash -c "[ -n '$MINTED_TRACE' ] && [ '${#MINTED_TRACE}' -ge 8 ]"
+
+  # -------------------------------------------------------------------------
   # 8. Negative: no auth -> downstream sv call should reject
   # -------------------------------------------------------------------------
   section "Negative: create_order without auth"

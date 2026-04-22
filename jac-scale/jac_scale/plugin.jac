@@ -782,6 +782,7 @@ class JacScalePlugin {
         import time;
         import from jaclang.runtimelib { sv_client }
         import from jac_scale.microservices._auth_ctx { get_current_auth }
+        import from jac_scale.microservices._trace_ctx { get_current_trace }
 
         # Test clients take precedence (matches core) and bypass retry +
         # breaker - they're in-process TestClient instances; transient
@@ -816,6 +817,12 @@ class JacScalePlugin {
         auth = get_current_auth();
         if auth {
             headers["Authorization"] = auth;
+        }
+        # Thread the trace id across the sv-import hop so downstream
+        # service logs + its further sv calls carry the same correlator.
+        trace = get_current_trace();
+        if trace {
+            headers["X-Trace-Id"] = trace;
         }
 
         max_attempts: int = 3;
