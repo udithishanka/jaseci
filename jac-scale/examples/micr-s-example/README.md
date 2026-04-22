@@ -36,6 +36,37 @@ Gateway :8000
                     auth forwarded from the inbound request)
 ```
 
+## Dev setup
+
+Microservice mode lives in jac-scale 0.2.14+ and relies on a hookspec
+added to jaclang core on this branch. Stable PyPI builds won't have
+either yet, so install both editable from source before running:
+
+```bash
+pip install -e /path/to/jaseci/jac
+pip install -e /path/to/jaseci/jac-scale
+```
+
+If `jac` isn't on your shell's PATH (common with non-activated conda
+envs), pass it to the e2e script via `JAC_BIN`:
+
+```bash
+JAC_BIN=/path/to/bin/jac ./test_e2e.sh
+```
+
+Common reset commands when things go sideways:
+
+```bash
+# clear compile cache after editing a hookspec
+find /path/to/jaseci -name __jac_gen__ -type d -exec rm -rf {} +
+
+# kill leftover subprocess zombies from an interrupted run
+pkill -9 -f "jac start"
+
+# reset per-service state (sqlite + logs + pidfiles)
+rm -rf .jac/data .jac/logs .jac/run
+```
+
 ## Automated e2e test
 
 ```bash
