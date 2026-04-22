@@ -257,8 +257,13 @@ impl MicroserviceGateway.handle_admin
 
 """Proxy a request to the microservice matched by prefix.
 
-Returns None if no service prefix matches, 503 if the matched service is
-not healthy, 502 on forwarding failure.
+Uses `stream_forward` (P15) so upstream SSE / chunked / large bodies
+pass through to the client as a StreamingResponse instead of being
+buffered at the gateway. The aiohttp session stays alive while the
+client reads; closing the response iterator tears down the session.
+
+Returns None if no service prefix matches, 503 if the matched service
+is not healthy, 502 on forwarding failure.
 """
 impl MicroserviceGateway.handle_proxy
 (request: Request, path: str) -> Response | None {
@@ -270,6 +275,7 @@ impl MicroserviceGateway.handle_proxy
     import from jac_scale.microservices._errors {
         service_unavailable, gateway_timeout
     }
+    import from jac_scale.microservices.impl.http_forward { stream_forward }
 
     if svc.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
         return service_unavailable(svc.name, svc.status.value);
@@ -284,13 +290,11 @@ impl MicroserviceGateway.handle_proxy
 
     body: bytes = await request.body();
 
-    result = await raw_forward(request.method, target_url, fwd_headers, body);
-    if result is None {
+    fr = await stream_forward(request.method, target_url, fwd_headers, body);
+    if fr is None {
         return gateway_timeout(svc.name);
     }
-
-    (status_code, resp_headers, resp_body) = result;
-    return Response(status_code=status_code, headers=resp_headers, content=resp_body);
+    return fr.to_response();
 }
 
 """Return the aggregated OpenAPI schema across all healthy services.
@@ -466,6 +470,53 @@ impl MicroserviceGateway.setup -> FastAPI {
         } finally {
             reset_current_trace(tok);
         }
+    }
+
+    # WebSocket catch-all (P15). FastAPI/Starlette ws routes don't go
+    # through the http middleware chain above; they need a dedicated
+    # registration. We register one `/{ws_path:path}` route that
+    # dispatches via the registry just like the http proxy. Upstream
+    # URL scheme is rewritten http(s)->ws(s) inside websocket_forward.
+    import from fastapi { WebSocket }
+    import from jac_scale.microservices._ws_forward { websocket_forward }
+
+    @self.app.websocket("/{ws_path:path}")
+    async def ws_proxy(websocket: WebSocket, ws_path: str) -> None {
+        # During drain, reject new ws handshakes too. 1012 = "service
+        # restart", the standard RFC 6455 code for "try again later".
+        import from jac_scale.microservices._drain { is_draining }
+        if is_draining() {
+            await websocket.close(code=1012);
+            return;
+        }
+        full_path: str = "/" + ws_path;
+        matched = gw.registry.match_route(full_path);
+        if not matched or not matched.url {
+            # 1008 = policy violation - the closest WS code for "no
+            # such route". Matches the http gateway's 404 for an
+            # unmatched path.
+            await websocket.accept();
+            await websocket.close(code=1008);
+            return;
+        }
+        if matched.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
+            await websocket.accept();
+            await websocket.close(code=1013);  # 1013 = "try again later"
+            return;
+        }
+        remaining: str = full_path[len(matched.prefix):] or "/";
+        query: str = str(websocket.url.query);
+        target_http: str = f"{matched.url}{remaining}";
+        if query {
+            target_http = f"{target_http}?{query}";
+        }
+        await websocket.accept();
+        req_headers: dict[str, str] = {};
+        for (k, v) in websocket.headers.items() {
+            req_headers[k] = v;
+        }
+        logger.info(f"ws proxy: {full_path} -> {target_http}");
+        await websocket_forward(websocket, target_http, req_headers);
     }
 
     # Drain middleware (P13). Starlette's middleware('http') does
