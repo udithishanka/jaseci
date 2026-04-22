@@ -765,3 +765,70 @@ test "health endpoint does not require auth" {
     resp = client.get("/health");
     assert resp.status_code == 200;
 }
+
+# =============================================================================
+# Drain / graceful shutdown integration (ROADMAP P13)
+# =============================================================================
+
+test "gateway drain 503s new requests with Retry-After + envelope" {
+    import from jac_scale.microservices._drain {
+        reset_drain, start_drain, is_draining
+    }
+    reset_drain();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    # Sanity: health works before drain.
+    resp = client.get("/health");
+    assert resp.status_code == 200;
+
+    # Flip drain - every request after this returns 503 until the
+    # process exits (or reset_drain in a test).
+    start_drain(10.0);
+    assert is_draining();
+
+    resp = client.get("/health");
+    assert resp.status_code == 503;
+    assert resp.headers.get("Retry-After") == "2";
+
+    body = resp.json();
+    assert body["ok"] == False;
+    assert body["error"]["code"] == "SERVICE_UNAVAILABLE";
+    assert body["error"]["service"] == "__gateway__";
+    assert "draining" in body["error"]["message"];
+
+    reset_drain();
+    # After reset, requests flow again.
+    resp = client.get("/health");
+    assert resp.status_code == 200;
+}
+
+test "gateway drain does not burn metrics labels on 503d requests" {
+    import from jac_scale.microservices._drain {
+        reset_drain, start_drain
+    }
+    reset_drain();
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    start_drain(5.0);
+    resp = client.get("/health");
+    assert resp.status_code == 503;
+
+    # No X-Trace-Id header because the dispatcher (which stamps it)
+    # never ran - drain middleware is outermost and short-circuits
+    # before any downstream layer touches the request.
+    assert "x-trace-id" not in {k.lower() for k in resp.headers.keys()};
+
+    reset_drain();
+}

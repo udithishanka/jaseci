@@ -347,6 +347,7 @@ impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, 
         'enabled': ms_config.get('enabled', False),
         'gateway_port': int(ms_config.get('gateway_port', 8000)),
         'gateway_host': ms_config.get('gateway_host', '0.0.0.0'),
+        'drain_timeout_seconds': float(ms_config.get('drain_timeout_seconds', 10)),
         'routes': dict(ms_config.get('routes', {})),
         'client': {
             'entry': client_config.get('entry', ''),

@@ -37,8 +37,13 @@ Work top-to-bottom. Each row maps 1:1 to an interface that
 | P10 ✓ | **Standardized error envelope + graceful degradation** - new `microservices/_errors.jac` with `error_response(code, message, status, service?, retry_after?)` helper + three convenience wrappers (`service_unavailable`, `gateway_timeout`, `not_found`). Envelope shape matches jac-scale's TransportResponse (`ok=false`, `error.code`, `error.message`, optional `error.service`, auto-filled `error.trace_id` from `_trace_ctx`). 503 responses ship `Retry-After: 2` so clients back off during pod restarts; 502/404 omit it. Every inline JSONResponse error in `gateway.impl.jac` replaced with the helper. 4 new unit tests + 2 e2e | K8s pod evictions are routine; consistent envelope means clients don't need to distinguish gateway from service errors. Retry-After works with standard retry-friendly HTTP clients | Same envelope shape |
 | P11 skip | *Colored per-service log prefixes* - local-only DX polish; doesn't apply in K8s (use `kubectl logs`). Deliberately skipped | N/A | Skipped |
 | P12 | **User docs + dev-setup section** (row 7, F) - editable-install prerequisites, MongoDB quickstart, the production-local contract. Tutorial at `docs/docs/tutorials/production/microservices.md` | Documents the interface contract K8sDeployer will satisfy | Documentation |
+| P13 ✓ | **Graceful shutdown / drain** - new `microservices/_drain.jac` with process-singleton drain state (is_draining, inflight counter, zero-event for wait-for-drain), a FastAPI middleware that 503s+`Retry-After: 2` new requests arriving after SIGTERM (standard envelope + service label), and `install_signal_drain` that wraps `uvicorn.Server.handle_exit` so the drain flag flips before uvicorn's own exit handler runs. Both service (`jfast_api.run_server`) and gateway (`gateway.start`) switched from `uvicorn.run` to `uvicorn.Config/Server` so `timeout_graceful_shutdown` is set (default 10s via new `drain_timeout_seconds` config under `microservices`). Drain middleware registered last so Starlette `insert(0,...)` puts it outermost - runs before dispatcher/metrics/trace so 503s don't burn metric labels. 14 unit tests (state, middleware, signal wrapping) + 2 gateway integration tests + 4 e2e checks (pid/port pre-SIGTERM, port closed within graceful window, drain log-line in service log) | K8s rolling deploys rely on `preStop` + `terminationGracePeriodSeconds`. Same drain semantics, just triggered by kubelet's SIGTERM | Same code |
+| P14 | **Per-service RPC timeout override** - `[plugins.scale.microservices.services.NAME]` gets a `rpc_timeout` field (float seconds), overriding the 10s default in `sv_service_call`. Plugin plumbs config -> hookimpl. Also exposes `rpc_timeout` kwarg on per-call override for services that only need a long timeout on specific endpoints (LLM generation vs admin ping) | K8s just reads the same config from ConfigMap. No K8s-specific logic | Same config key |
+| P15 | **WebSockets + SSE streaming on gateway** - aiohttp `ws_connect` bidirectional pipe in a new `handle_websocket` handler; replace current 502 on `/ws/*` paths. For SSE / chunked HTTP streaming: swap `raw_forward`'s `await resp.read()` for a `StreamingResponse` wrapping the aiohttp content iterator. Preserves `Content-Type: text/event-stream` + connection keepalive | K8s Services are L4 pass-through for ws/sse. Same gateway handler, no infrastructure bridge needed | Same code |
+| P16 | **CORS middleware on gateway** - FastAPI `CORSMiddleware` installed on the gateway app; allowed origins driven by `[plugins.scale.microservices.cors]` config. Default: disabled (empty allow list) - opt-in per deployment. Preflight passthrough for /api/* and /admin/* | Gateway-level middleware, K8s runs the same app | Same code |
+| P17 | **Rate limiting (per-IP + per-user)** - Token-bucket middleware on gateway. Per-IP default 60 rpm; per-authenticated-user override from config. In-process storage (no Redis dep in local mode) behind a `RateLimiterBackend` interface that K8s can swap for Redis later. Standard error envelope `RATE_LIMITED` with `Retry-After` | K8s Ingress can layer infra rate-limits on top; app-level limiter still valid per-pod. Redis backend is a K8s-era addition | Same interface |
 
-After P1-P12, the K8s work is bounded:
+After P1-P17, the K8s work is bounded:
 
 | | Task |
 |---|------|
@@ -95,25 +100,27 @@ After P1-P12, the K8s work is bounded:
 | 11 | Standardized error envelope + graceful degradation (→ P10) | done | `_errors.jac` with `SERVICE_UNAVAILABLE` / `GATEWAY_TIMEOUT` / `NOT_FOUND` / `METRICS_UNAVAILABLE` codes; `Retry-After: 2` on 503 |
 | 12 | Unified Swagger `/docs` aggregation (→ P9) | done | `_openapi_agg.aggregate_openapi` + gateway `handle_docs` / `handle_openapi`. Merged paths prefixed with each service's gateway route |
 | 13 | Developer experience - colored per-service logs (→ P11) | skipped | Per-service `.jac/logs/{name}.log` done; colored console output deliberately skipped - local-only, K8s uses `kubectl logs` |
-| 14 | `KubernetesDeployer` (→ K1) | not started | |
-| 15 | K8s manifests + HPA + minikube E2E (→ K2-K4) | not started | |
+| 14 | Graceful drain on SIGTERM (→ P13) | done | `microservices/_drain.jac` + middleware registered on both service (`jfast_api`) and gateway; `install_signal_drain` wraps `uvicorn.Server.handle_exit`; `timeout_graceful_shutdown` honored via `drain_timeout_seconds` config |
+| 15 | `KubernetesDeployer` (→ K1) | not started | |
+| 16 | K8s manifests + HPA + minikube E2E (→ K2-K4) | not started | |
 
 ## Test coverage
 
-147 tests green across 9 suites:
+158 tests green across 10 suites:
 
 | Suite | Count | What it covers |
 |-------|-------|----------------|
 | `test_microservices_registry.jac` | 14 | prefix matching, register/deregister, rebuild |
 | `test_process_manager.jac` | 18 | subprocess start/stop/restart, health, port pick, pidfile cross-process stop + stale-pidfile cleanup |
 | `test_deployer.jac` | 16 | `ServiceDeployer` interface, `LocalDeployer`, `url_for` dispatch + pm wiring |
-| `test_gateway.jac` | 44 | middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch, Prometheus metrics, Swagger UI + aggregated /openapi.json, standardized error envelope + Retry-After + trace_id correlation |
+| `test_gateway.jac` | 46 | middleware handlers, static, admin, proxy errors, `get_sv_registry` hookspec dispatch, Prometheus metrics, Swagger UI + aggregated /openapi.json, standardized error envelope + Retry-After + trace_id correlation, drain 503 via TestClient with/without X-Trace-Id leakage |
+| `test_drain.jac` | 14 | drain state primitives (start/inflight/wait_for_zero), middleware 503+envelope + inflight tracking across concurrent reqs, signal-handler wrapping + chaining |
 | `test_orchestrator.jac` | 4 | `build_registry`, config routing |
 | `test_setup.jac` | 13 | CLI utilities, add/remove/list, TOML write |
 | `test_sv_auth_forward.jac` | 18 | sv_service_call auth forwarding, envelope errors, retry, circuit breaker (trip, counter reset, HALF_OPEN probe, app-errors-don't-trip), trace-ctx round-trip, UUID4 mint, sv forwarding of X-Trace-Id |
 | `test_microservice.jac` | 6 | sv_client contract tests (pre-existing) |
 | `test_eager_spawn.jac` | 9 | BFS provider discovery (pre-existing) |
-| `examples/micr-s-example/test_e2e.sh` | 45 | end-to-end: stack boot, deployer invariants, gateway surface (incl. /metrics + unified /docs + /openapi.json aggregation), auth, sv-import auth forwarding, CLI (incl. pidfile), X-Trace-Id round-trip + auto-mint, standardized error envelope on stopped service |
+| `examples/micr-s-example/test_e2e.sh` | 49 | end-to-end: stack boot, deployer invariants, gateway surface (incl. /metrics + unified /docs + /openapi.json aggregation), auth, sv-import auth forwarding, CLI (incl. pidfile), X-Trace-Id round-trip + auto-mint, standardized error envelope on stopped service, P13 graceful drain (SIGTERM -> port closed within window + drain log line) |
 
 ## How this file is maintained
 

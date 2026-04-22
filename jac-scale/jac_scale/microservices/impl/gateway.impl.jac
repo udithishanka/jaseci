@@ -468,18 +468,51 @@ impl MicroserviceGateway.setup -> FastAPI {
         }
     }
 
+    # Drain middleware (P13). Starlette's middleware('http') does
+    # insert(0, ...), so the LAST registered runs FIRST. Registering
+    # drain after the dispatcher makes drain the outermost layer - a
+    # 503+Retry-After can short-circuit before the dispatcher spends
+    # metric labels or a trace id on a request we're about to reject.
+    # In the non-draining path, drain just counts in-flight and
+    # delegates to the dispatcher.
+    import from jac_scale.microservices._drain { build_drain_middleware }
+    self.app.middleware("http")(build_drain_middleware("__gateway__"));
+
     return self.app;
 }
 
-"""Start the gateway server (blocking)."""
+"""Start the gateway server (blocking).
+
+Uses uvicorn's Config+Server split (not uvicorn.run) so we can wrap
+`server.handle_exit` with our drain hook before the event loop starts.
+The wrapped handler flips the drain flag (so the middleware starts
+503'ing new requests) and then calls uvicorn's original handler
+(which sets should_exit and begins graceful shutdown).
+
+`timeout_graceful_shutdown` is sourced from the microservices config
+and caps how long uvicorn waits for active connections to close. Our
+drain middleware makes that wait safe to cut short: by then no new
+request is expecting a real response.
+"""
 impl MicroserviceGateway.start -> None {
+    import from jac_scale.microservices._drain { install_signal_drain }
+    import from jac_scale.config_loader { get_scale_config }
+
     if self.app is None {
         self.setup();
     }
     logger.info(f"Gateway starting on {self.host}:{self.port}");
-    uvicorn.run(
+
+    ms_cfg = get_scale_config().get_microservices_config();
+    drain_timeout: float = float(ms_cfg.get("drain_timeout_seconds", 10));
+
+    config = uvicorn.Config(
         getattr(self, "app"),
         host=self.host,
-        port=self.port
+        port=self.port,
+        timeout_graceful_shutdown=int(drain_timeout)
     );
+    server = uvicorn.Server(config);
+    install_signal_drain(server, timeout_s=drain_timeout);
+    server.run();
 }

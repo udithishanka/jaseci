@@ -480,6 +480,64 @@ exit(0 if items else 1)"' \
 fi
 
 # ---------------------------------------------------------------------------
+# 8b. Graceful drain (ROADMAP P13)
+#
+# On SIGTERM the service should:
+#   (a) flip its drain flag (drain log line appears in the service log)
+#   (b) begin uvicorn graceful shutdown (listen socket closes, existing
+#       connections drained via in-flight completion)
+#   (c) exit within timeout_graceful_shutdown (default 10s)
+#
+# Uvicorn closes idle keep-alive connections during shutdown so the
+# drain middleware's 503 path is only reachable when a new request
+# arrives on a connection that was mid-cycle - hard to hit
+# deterministically from the outside. That code path is covered by the
+# test_drain.jac + test_gateway.jac unit suites. Here we verify the
+# uvicorn-level graceful-shutdown contract and the drain-log side
+# effect - the observable bits of P13 in a running process.
+# ---------------------------------------------------------------------------
+section "Graceful drain on SIGTERM (P13)"
+
+PRODUCTS_PORT=$(echo "$(curl -s $GATEWAY/health)" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+print(d.get('services',{}).get('products_app',{}).get('port',''))
+")
+PRODUCTS_PID=$(cat .jac/run/products_app.pid 2>/dev/null || echo '')
+
+check "products_app has a pid + port" \
+  bash -c "[ -n '$PRODUCTS_PID' ] && [ -n '$PRODUCTS_PORT' ]"
+
+# Baseline: service responds with 200 on /healthz before SIGTERM.
+check "products_app healthz returns 200 before SIGTERM" \
+  bash -c "[ \$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$PRODUCTS_PORT/healthz) = '200' ]"
+
+kill -TERM "$PRODUCTS_PID" 2>/dev/null || true
+
+# Wait until the listening port is gone (uvicorn's graceful shutdown
+# closed the socket and the process exited). `kill -0` is unreliable
+# here because the orchestrator parent doesn't reap children promptly,
+# leaving them as zombies whose PID still exists. Port-closed is the
+# operationally correct signal: new TCP connections get refused once
+# uvicorn shuts down, whether or not the zombie is reaped.
+deadline=$(( $(date +%s) + 15 ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if ! curl -s -o /dev/null --connect-timeout 1 "http://127.0.0.1:$PRODUCTS_PORT/healthz"; then
+    break
+  fi
+  sleep 0.5
+done
+
+check "products_app port is closed within graceful shutdown window" \
+  bash -c "! curl -s -o /dev/null --connect-timeout 1 http://127.0.0.1:$PRODUCTS_PORT/healthz"
+
+# The drain hook wrote a log line before uvicorn's own shutdown - proof
+# the SIGTERM-to-drain wiring (install_signal_drain -> start_drain) ran
+# in the service subprocess.
+check "drain log line appears in service log after SIGTERM" \
+  bash -c "grep -q 'drain: started' .jac/logs/products_app.log"
+
+# ---------------------------------------------------------------------------
 # 9. Scale CLI (status / logs / stop / restart) (roadmap 5a resolved by P4)
 #
 # stop/restart now work cross-process via pidfiles at .jac/run/{name}.pid.

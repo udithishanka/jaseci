@@ -111,6 +111,19 @@ impl JFastApiServer.run_server(
         },
 
     };
+    # Drain setup (P13). The service subprocess gets SIGTERM both from
+    # the local orchestrator (`jac scale stop`) and from the K8s
+    # kubelet at pod termination. Switching from uvicorn.run to
+    # Config+Server lets us wrap `handle_exit` with the drain flag
+    # before the event loop starts; the drain middleware then 503s
+    # new requests that arrive on existing keep-alive connections
+    # while uvicorn drains. `timeout_graceful_shutdown` caps how long
+    # uvicorn waits for active connections to close.
+    import from jac_scale.microservices._drain { install_signal_drain }
+    import from jac_scale.config_loader { get_scale_config }
+    ms_cfg = get_scale_config().get_microservices_config();
+    drain_timeout: float = float(ms_cfg.get("drain_timeout_seconds", 10));
+
     current_port = port;
     for _ in range(max_retries) {
         try {
@@ -120,7 +133,16 @@ impl JFastApiServer.run_server(
                     style="warning"
                 );
             }
-            uvicorn.run(app, host=host, port=current_port, log_config=log_config);
+            config = uvicorn.Config(
+                app,
+                host=host,
+                port=current_port,
+                log_config=log_config,
+                timeout_graceful_shutdown=int(drain_timeout)
+            );
+            server = uvicorn.Server(config);
+            install_signal_drain(server, timeout_s=drain_timeout);
+            server.run();
             return;
         } except SystemExit as e {
             # uvicorn raises SystemExit when port is in use
@@ -1192,4 +1214,14 @@ impl JFastApiServer.init(
     # Register context first so JWT ends up at index 0 and runs before context.
     self.app.middleware('http')(request_context_middleware);
     self.app.middleware('http')(jwt_validation_middleware);
+
+    # Drain middleware (P13). Registered last so it sits at index 0 =
+    # outermost = runs FIRST. During a SIGTERM drain window, new
+    # requests short-circuit with 503 + Retry-After before JWT
+    # validation or context setup runs - no wasted state, no trace id
+    # burned on a response the client will retry against another pod.
+    # In the non-drain path it just counts in-flight requests so a
+    # drain triggered mid-request can observe and wait for them.
+    import from jac_scale.microservices._drain { build_drain_middleware }
+    self.app.middleware('http')(build_drain_middleware("service"));
 }
