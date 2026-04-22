@@ -61,6 +61,12 @@ obj MicroserviceGateway {
        Returns 503 if prometheus_client isn't available."""
     def handle_metrics -> Response;
 
+    """Return the aggregated OpenAPI schema across all healthy services."""
+    async def handle_openapi -> Response;
+
+    """Render the Swagger UI page pointing at our aggregated /openapi.json."""
+    def handle_docs -> Response;
+
     # --- helpers used by handlers ---
 
     """Forward selected request headers to a target, stripping hop-by-hop headers."""

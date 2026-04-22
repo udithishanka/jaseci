@@ -274,6 +274,27 @@ check "/metrics returns Prometheus exposition" \
 check "/metrics records /health hit under __health__ label" \
   bash -c "echo '$METRICS_BODY' | grep -q 'service=\"__health__\"'"
 
+# Unified Swagger (ROADMAP P9). Gateway aggregates every healthy
+# service's /openapi.json and rewrites paths under the gateway
+# prefix so /docs shows one unified API surface.
+DOCS_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$GATEWAY/docs")
+check "/docs returns 200 Swagger HTML" \
+  bash -c "[ '$DOCS_STATUS' = '200' ]"
+
+OPENAPI_BODY=$(curl -s "$GATEWAY/openapi.json")
+check "/openapi.json is valid JSON with openapi version" \
+  bash -c "echo '$OPENAPI_BODY' | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get(\"openapi\",\"\").startswith(\"3.\") else 1)'"
+
+check "/openapi.json aggregates paths from at least one service under /api/{svc}" \
+  bash -c "echo '$OPENAPI_BODY' | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+paths=set(d.get(\"paths\",{}).keys())
+# The aggregator prefixes each services paths with its gateway route.
+# Any path starting with /api/ is evidence of a successful merge.
+exit(0 if any(p.startswith(\"/api/\") for p in paths) else 1)
+'"
+
 # ---------------------------------------------------------------------------
 # 5. Public function proxy (roadmap 2a)
 # list_products requires auth (def:pub != unauthenticated in jac-scale).

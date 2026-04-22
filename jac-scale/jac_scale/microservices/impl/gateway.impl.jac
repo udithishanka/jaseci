@@ -163,8 +163,7 @@ glob _BUILTIN_PREFIXES: tuple = (
     "/jobs/", "/graph/"
 ),
      _BUILTIN_EXACT: set[str] = {
-         "/user", "/healthz", "/graph",
-         "/docs", "/openapi.json", "/redoc"
+         "/user", "/healthz", "/graph"
      };
 
 """Copy incoming request headers, dropping hop-by-hop headers.
@@ -295,6 +294,26 @@ impl MicroserviceGateway.handle_proxy
     return Response(status_code=status_code, headers=resp_headers, content=resp_body);
 }
 
+"""Return the aggregated OpenAPI schema across all healthy services.
+
+Fetches each service's /openapi.json, prefixes its paths with the
+service's gateway route, and merges. See `_openapi_agg.aggregate_openapi`.
+"""
+impl MicroserviceGateway.handle_openapi -> Response {
+    import from jac_scale.microservices._openapi_agg { aggregate_openapi }
+    doc = await aggregate_openapi(self.registry);
+    return JSONResponse(status_code=200, content=doc);
+}
+
+"""Render the Swagger UI page pointing at our aggregated /openapi.json."""
+impl MicroserviceGateway.handle_docs -> Response {
+    import from fastapi.openapi.docs { get_swagger_ui_html }
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="Jac Microservice Gateway - API"
+    );
+}
+
 """Serve the Prometheus exposition for this gateway's registry.
 
 Returns 503 when prometheus_client is not installed (the 'monitoring'
@@ -388,6 +407,12 @@ impl MicroserviceGateway.setup -> FastAPI {
             } elif path == "/metrics" {
                 svc_label = "__metrics__";
                 resp = gw.handle_metrics();
+            } elif path == "/openapi.json" {
+                svc_label = "__openapi__";
+                resp = await gw.handle_openapi();
+            } elif path == "/docs" {
+                svc_label = "__docs__";
+                resp = gw.handle_docs();
             } else {
                 # Prefix-match first so we can label the service name on
                 # proxy hits even before handle_proxy gets the Response.

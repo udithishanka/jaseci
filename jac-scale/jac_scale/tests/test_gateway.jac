@@ -235,6 +235,91 @@ test "gateway /metrics returns Prometheus exposition after a request" {
     assert "__health__" in body;
 }
 
+# =============================================================================
+# Unified /docs Swagger aggregation (ROADMAP P9)
+# =============================================================================
+
+test "_prefixed_paths prepends the service prefix to every key" {
+    import from jac_scale.microservices._openapi_agg { _prefixed_paths }
+    raw = {
+        "/function/list_products": {"post": {"summary": "list"}},
+        "/function/get_product": {"post": {"summary": "get"}}
+    };
+    out = _prefixed_paths(raw, "/api/products");
+    assert "/api/products/function/list_products" in out;
+    assert "/api/products/function/get_product" in out;
+    # Originals gone
+    assert "/function/list_products" not in out;
+}
+
+test "_prefixed_paths handles prefix with trailing slash" {
+    import from jac_scale.microservices._openapi_agg { _prefixed_paths }
+    out = _prefixed_paths(
+        {"/function/x": {"post": {}}},
+        "/api/products/"   # trailing slash
+    );
+    # rstrip('/') normalizes -> no double slash in output
+    assert "/api/products/function/x" in out;
+}
+
+test "gateway /docs returns Swagger HTML pointing at /openapi.json" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/docs");
+    assert resp.status_code == 200;
+    body = resp.text;
+    assert "swagger-ui" in body.lower() or "Swagger" in body;
+    assert "/openapi.json" in body;
+}
+
+test "gateway /openapi.json returns a minimal doc when no services reachable" {
+    # Registry has a service entry but its URL points nowhere; the
+    # aggregator skips it gracefully and we still get a document back
+    # with the gateway's own /health + /metrics paths.
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="unreachable", file="x.jac", prefix="/api/x",
+        port=9, url="http://127.0.0.1:9",
+        status=ServiceStatus.HEALTHY  # marked healthy, but not actually up
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/openapi.json");
+    assert resp.status_code == 200;
+    doc = resp.json();
+    assert doc["openapi"].startswith("3.");
+    # Gateway paths always present
+    assert "/health" in doc["paths"];
+    assert "/metrics" in doc["paths"];
+}
+
+test "gateway /openapi.json is its own route - not proxied to a service" {
+    # Pre-P9 /openapi.json fell through to handle_builtin_passthrough.
+    # With aggregation, /openapi.json is dispatched directly.
+    reg = ServiceRegistry();
+    reg.register(ServiceEntry(
+        name="orders", file="orders.jac", prefix="/api/orders",
+        port=8001, url="http://127.0.0.1:8001", status=ServiceStatus.HEALTHY
+    ));
+    gw = MicroserviceGateway(registry=reg);
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/openapi.json");
+    # Must return 200 with a document, NOT 502/404 from trying to
+    # passthrough to the (unreachable) orders service.
+    assert resp.status_code == 200;
+    assert resp.json().get("openapi", "").startswith("3.");
+}
+
 test "gateway /metrics is its own route - not proxied to a service" {
     # Before P8, /metrics fell through to handle_builtin_passthrough.
     # With gateway-level metrics, /metrics is dispatched directly.
