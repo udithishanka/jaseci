@@ -519,6 +519,24 @@ impl MicroserviceGateway.setup -> FastAPI {
     import from jac_scale.microservices._drain { build_drain_middleware }
     self.app.middleware("http")(build_drain_middleware("__gateway__"));
 
+    # P16: CORS registered AFTER drain so preflights answer correctly
+    # even during shutdown (clients need CORS headers to read 503s).
+    # Disabled unless `allow_origins` is configured.
+    import from jac_scale.config_loader { get_scale_config }
+    cors_cfg = get_scale_config().get_microservices_config().get("cors", {});
+    if cors_cfg.get("allow_origins") {
+        import from fastapi.middleware.cors { CORSMiddleware }
+        self.app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_cfg["allow_origins"],
+            allow_methods=cors_cfg.get("allow_methods", ["*"]),
+            allow_headers=cors_cfg.get("allow_headers", ["*"]),
+            allow_credentials=cors_cfg.get("allow_credentials", False),
+            expose_headers=cors_cfg.get("expose_headers", []),
+            max_age=cors_cfg.get("max_age", 600)
+        );
+    }
+
     return self.app;
 }
 

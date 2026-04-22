@@ -307,6 +307,43 @@ class JacScalePluginConfig {
                             "default": {},
                             "description": "Per-service overrides keyed by module name. Each subkey is a dict with optional `rpc_timeout` (float seconds) to override the default 10s `sv_service_call` timeout. Use for LLM/long-running services that need minutes, not seconds. Example: [plugins.scale.microservices.services.llm_app] rpc_timeout = 120.0"
                         },
+                        "cors": {
+                            "type": "dict",
+                            "default": {},
+                            "description": "CORS middleware on the gateway. Disabled unless `allow_origins` is non-empty.",
+                            "nested": {
+                                "allow_origins": {
+                                    "type": "list",
+                                    "default": [],
+                                    "description": "Origins that may access the gateway. Use [\"*\"] for any. Empty list disables CORS."
+                                },
+                                "allow_methods": {
+                                    "type": "list",
+                                    "default": ["*"],
+                                    "description": "HTTP methods allowed on cross-origin requests."
+                                },
+                                "allow_headers": {
+                                    "type": "list",
+                                    "default": ["*"],
+                                    "description": "Request headers allowed on cross-origin requests."
+                                },
+                                "allow_credentials": {
+                                    "type": "bool",
+                                    "default": False,
+                                    "description": "Allow cookies / Authorization on cross-origin requests. Incompatible with allow_origins = [\"*\"] per spec."
+                                },
+                                "expose_headers": {
+                                    "type": "list",
+                                    "default": [],
+                                    "description": "Response headers the browser is allowed to read across origins."
+                                },
+                                "max_age": {
+                                    "type": "int",
+                                    "default": 600,
+                                    "description": "How long (seconds) the browser may cache a preflight response."
+                                }
+                            }
+                        },
                         "client": {
                             "type": "dict",
                             "default": {},

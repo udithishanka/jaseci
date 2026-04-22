@@ -342,6 +342,7 @@ impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, 
     config = self.load();
     ms_config = config.get('microservices', {});
     client_config = ms_config.get('client', {});
+    cors_config = ms_config.get('cors', {});
 
     return {
         'enabled': ms_config.get('enabled', False),
@@ -350,6 +351,14 @@ impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, 
         'drain_timeout_seconds': float(ms_config.get('drain_timeout_seconds', 10)),
         'routes': dict(ms_config.get('routes', {})),
         'services': dict(ms_config.get('services', {})),
+        'cors': {
+            'allow_origins': list(cors_config.get('allow_origins', [])),
+            'allow_methods': list(cors_config.get('allow_methods', ["*"])),
+            'allow_headers': list(cors_config.get('allow_headers', ["*"])),
+            'allow_credentials': bool(cors_config.get('allow_credentials', False)),
+            'expose_headers': list(cors_config.get('expose_headers', [])),
+            'max_age': int(cors_config.get('max_age', 600))
+        },
         'client': {
             'entry': client_config.get('entry', ''),
             'dist_dir': client_config.get('dist_dir', '.jac/client/dist'),

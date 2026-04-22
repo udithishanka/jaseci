@@ -822,3 +822,157 @@ test "gateway drain does not burn metrics labels on 503d requests" {
 
     reset_drain();
 }
+
+
+# P16: CORS middleware. The gateway only installs CORSMiddleware when
+# `allow_origins` is configured; these tests patch the config resolver
+# so setup() sees the test config.
+
+obj _FakeScaleConfig {
+    has _cors: dict = {};
+
+    def get_microservices_config -> dict {
+        return {
+            "enabled": True, "gateway_port": 8000, "gateway_host": "0.0.0.0",
+            "drain_timeout_seconds": 10.0, "routes": {}, "services": {},
+            "cors": self._cors, "client": {"entry": "", "dist_dir": "", "base_route": "/"}
+        };
+    }
+
+    def get_monitoring_config -> dict {
+        return {"namespace": "jac_scale", "histogram_buckets": None};
+    }
+}
+
+
+def _with_cors_config(cfg: dict, fn: object) -> object {
+    import jac_scale.config_loader as config_loader;
+    orig = config_loader.get_scale_config;
+    fake = _FakeScaleConfig(_cors=cfg);
+    def fake_factory(project_dir: object = None) -> object {
+        return fake;
+    }
+    setattr(config_loader, "get_scale_config", fake_factory);
+    try {
+        return fn();
+    } finally {
+        setattr(config_loader, "get_scale_config", orig);
+    }
+}
+
+
+test "CORS disabled when allow_origins is empty" {
+    def build -> object {
+        reg = ServiceRegistry();
+        gw = MicroserviceGateway(registry=reg);
+        gw.setup();
+        return gw;
+    }
+    gw = _with_cors_config({"allow_origins": []}, build);
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/health", headers={"Origin": "http://example.com"});
+    assert resp.status_code == 200;
+    # No CORS headers emitted -> disabled.
+    assert "access-control-allow-origin" not in {k.lower() for k in resp.headers.keys()};
+}
+
+
+test "CORS preflight returns Allow-Origin + Allow-Methods when configured" {
+    def build -> object {
+        reg = ServiceRegistry();
+        gw = MicroserviceGateway(registry=reg);
+        gw.setup();
+        return gw;
+    }
+    cors = {
+        "allow_origins": ["http://app.example.com"],
+        "allow_methods": ["GET", "POST"],
+        "allow_headers": ["Authorization", "Content-Type"],
+        "allow_credentials": True,
+        "expose_headers": [],
+        "max_age": 600
+    };
+    gw = _with_cors_config(cors, build);
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.options(
+        "/health",
+        headers={
+            "Origin": "http://app.example.com",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization"
+        }
+    );
+    assert resp.status_code == 200;
+    assert resp.headers.get("access-control-allow-origin") == "http://app.example.com";
+    assert "GET" in resp.headers.get("access-control-allow-methods", "");
+    assert resp.headers.get("access-control-allow-credentials") == "true";
+}
+
+
+test "CORS simple request echoes Allow-Origin on the response" {
+    def build -> object {
+        reg = ServiceRegistry();
+        gw = MicroserviceGateway(registry=reg);
+        gw.setup();
+        return gw;
+    }
+    cors = {
+        "allow_origins": ["http://app.example.com"],
+        "allow_methods": ["*"], "allow_headers": ["*"],
+        "allow_credentials": False, "expose_headers": [], "max_age": 600
+    };
+    gw = _with_cors_config(cors, build);
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    resp = client.get("/health", headers={"Origin": "http://app.example.com"});
+    assert resp.status_code == 200;
+    assert resp.headers.get("access-control-allow-origin") == "http://app.example.com";
+}
+
+
+test "CORS preflight still responds during drain (headers reachable on 503)" {
+    import from jac_scale.microservices._drain { reset_drain, start_drain }
+    def build -> object {
+        reg = ServiceRegistry();
+        gw = MicroserviceGateway(registry=reg);
+        gw.setup();
+        return gw;
+    }
+    cors = {
+        "allow_origins": ["http://app.example.com"],
+        "allow_methods": ["*"], "allow_headers": ["*"],
+        "allow_credentials": False, "expose_headers": [], "max_age": 600
+    };
+    gw = _with_cors_config(cors, build);
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+    reset_drain();
+    start_drain(5.0);
+    try {
+        # Preflight (OPTIONS) must succeed even mid-drain - the browser
+        # needs the CORS headers before it will issue the real request
+        # (which may then 503 with CORS headers set).
+        resp = client.options(
+            "/health",
+            headers={
+                "Origin": "http://app.example.com",
+                "Access-Control-Request-Method": "GET"
+            }
+        );
+        assert resp.status_code == 200;
+        assert resp.headers.get("access-control-allow-origin") == "http://app.example.com";
+
+        # Non-preflight during drain -> 503 with CORS headers set.
+        resp2 = client.get("/health", headers={"Origin": "http://app.example.com"});
+        assert resp2.status_code == 503;
+        assert resp2.headers.get("access-control-allow-origin") == "http://app.example.com";
+    } finally {
+        reset_drain();
+    }
+}
