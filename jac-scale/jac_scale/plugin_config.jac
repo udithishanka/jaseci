@@ -342,12 +342,12 @@ class JacScalePluginConfig {
                         "cors": {
                             "type": "dict",
                             "default": {},
-                            "description": "CORS middleware on the gateway. Disabled unless `allow_origins` is non-empty.",
+                            "description": "CORS middleware on the gateway. Open by default (any origin). Set `allow_origins = []` to disable, or provide a concrete list to restrict.",
                             "nested": {
                                 "allow_origins": {
                                     "type": "list",
-                                    "default": [],
-                                    "description": "Origins that may access the gateway. Use [\"*\"] for any. Empty list disables CORS."
+                                    "default": ["*"],
+                                    "description": "Origins that may access the gateway. Default [\"*\"] allows any. Empty list disables CORS."
                                 },
                                 "allow_methods": {
                                     "type": "list",

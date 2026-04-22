@@ -48,7 +48,9 @@ entry = "main.jac"
 dist_dir = ".jac/client/dist"
 base_route = "/"
 
-# CORS (P16) - opt-in; the e2e script exercises a preflight.
+# CORS (P16). Defaults to open (allow_origins = ["*"]); override with
+# a concrete list to restrict. The e2e script runs with this explicit
+# allow list so it can also verify disallowed-origin behavior.
 [plugins.scale.microservices.cors]
 allow_origins = ["http://app.example.com"]
 allow_methods = ["GET", "POST", "OPTIONS"]

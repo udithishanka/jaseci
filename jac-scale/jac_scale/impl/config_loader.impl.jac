@@ -360,7 +360,12 @@ impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, 
             'exempt_paths': list(rl_config.get('exempt_paths', ["/health", "/healthz", "/metrics"]))
         },
         'cors': {
-            'allow_origins': list(cors_config.get('allow_origins', [])),
+            # Open-by-default so local dev (SPA on :5173 etc.) works
+            # out of the box. `allow_credentials=True` with `*` origin
+            # is spec-forbidden, hence the safe default of False; tight
+            # deployments override allow_origins to a concrete list
+            # and set allow_credentials=True.
+            'allow_origins': list(cors_config.get('allow_origins', ["*"])),
             'allow_methods': list(cors_config.get('allow_methods', ["*"])),
             'allow_headers': list(cors_config.get('allow_headers', ["*"])),
             'allow_credentials': bool(cors_config.get('allow_credentials', False)),

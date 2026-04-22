@@ -288,19 +288,22 @@ or chunked are streamed through the gateway rather than buffered.
 
 ### CORS
 
-Opt-in. Disabled unless `allow_origins` is non-empty:
+Open by default — `allow_origins` defaults to `["*"]` so local SPA
+dev workflows (Vite on `:5173`, React on `:3000`, etc.) work without
+config. Override to restrict:
 
 ```toml
 [plugins.scale.microservices.cors]
-allow_origins   = ["https://app.example.com"]
-allow_methods   = ["GET", "POST", "OPTIONS"]
-allow_headers   = ["Authorization", "Content-Type"]
-allow_credentials = true
-max_age         = 600
+allow_origins     = ["https://app.example.com"]   # concrete list
+allow_methods     = ["GET", "POST", "OPTIONS"]
+allow_headers     = ["Authorization", "Content-Type"]
+allow_credentials = true    # requires concrete origins (not "*")
+max_age           = 600
 ```
 
-Registered outermost so preflights answer even during drain (clients
-need CORS headers to read a 503 envelope).
+Set `allow_origins = []` to disable CORS entirely. Registered
+outermost so preflights answer even during drain (clients need CORS
+headers to read a 503 envelope).
 
 ### Rate limiting
 
