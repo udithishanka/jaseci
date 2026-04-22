@@ -307,6 +307,38 @@ class JacScalePluginConfig {
                             "default": {},
                             "description": "Per-service overrides keyed by module name. Each subkey is a dict with optional `rpc_timeout` (float seconds) to override the default 10s `sv_service_call` timeout. Use for LLM/long-running services that need minutes, not seconds. Example: [plugins.scale.microservices.services.llm_app] rpc_timeout = 120.0"
                         },
+                        "rate_limit": {
+                            "type": "dict",
+                            "default": {},
+                            "description": "Gateway rate limiting (token bucket). Disabled unless `enabled = true`.",
+                            "nested": {
+                                "enabled": {
+                                    "type": "bool",
+                                    "default": False,
+                                    "description": "Master switch."
+                                },
+                                "per_ip_rpm": {
+                                    "type": "int",
+                                    "default": 60,
+                                    "description": "Requests per minute per client IP. 0 disables per-IP limit."
+                                },
+                                "per_user_rpm": {
+                                    "type": "int",
+                                    "default": 0,
+                                    "description": "Additional requests per minute per authenticated user (keyed by Authorization header hash). 0 disables per-user limit."
+                                },
+                                "burst_multiplier": {
+                                    "type": "float",
+                                    "default": 2.0,
+                                    "description": "Bucket capacity = rpm * burst_multiplier / 60 (allows short bursts above the steady rate)."
+                                },
+                                "exempt_paths": {
+                                    "type": "list",
+                                    "default": ["/health", "/healthz", "/metrics"],
+                                    "description": "Paths that bypass rate limiting entirely (monitoring + probes)."
+                                }
+                            }
+                        },
                         "cors": {
                             "type": "dict",
                             "default": {},

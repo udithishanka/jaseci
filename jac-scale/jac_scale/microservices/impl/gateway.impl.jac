@@ -519,11 +519,22 @@ impl MicroserviceGateway.setup -> FastAPI {
     import from jac_scale.microservices._drain { build_drain_middleware }
     self.app.middleware("http")(build_drain_middleware("__gateway__"));
 
+    import from jac_scale.config_loader { get_scale_config }
+    ms_cfg = get_scale_config().get_microservices_config();
+
+    # P17: rate limit between drain and CORS. Preflights bypass the
+    # limiter (CORS outer handles OPTIONS short-circuit) and drain
+    # inner can still 503 once the limiter allows through.
+    import from jac_scale.microservices._rate_limit { build_rate_limit_middleware }
+    rl_mw = build_rate_limit_middleware(ms_cfg.get("rate_limit", {}));
+    if rl_mw is not None {
+        self.app.middleware("http")(rl_mw);
+    }
+
     # P16: CORS registered AFTER drain so preflights answer correctly
     # even during shutdown (clients need CORS headers to read 503s).
     # Disabled unless `allow_origins` is configured.
-    import from jac_scale.config_loader { get_scale_config }
-    cors_cfg = get_scale_config().get_microservices_config().get("cors", {});
+    cors_cfg = ms_cfg.get("cors", {});
     if cors_cfg.get("allow_origins") {
         import from fastapi.middleware.cors { CORSMiddleware }
         self.app.add_middleware(
