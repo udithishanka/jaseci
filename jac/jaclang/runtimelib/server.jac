@@ -281,7 +281,22 @@ obj JacAPIServer {
         has method: str = "",
             path: str = "",
             protocol: APIProtocol = APIProtocol.HTTP,
-            broadcast: bool = False;
+            broadcast: bool = False,
+            # Distributed coordination kwargs (jaseci-labs/jaseci#5628).
+            # All optional; a jac-scale-style server is expected to honor them
+            # by wrapping the endpoint dispatch with the corresponding middleware.
+            # Interpolation (supported by jac-scale): "{user_id}", "{<path_param>}",
+            # "{body.<field>}". All coord keys are auto-prefixed "jac_coord:<app>:".
+            lock: (str | None) = None,
+            lock_timeout_ms: int = 30000,
+            rate_limit: (tuple | None) = None,
+            rate_limit_key: (str | None) = None,
+            publish_on_entry: (str | None) = None,
+            publish_on_success: (str | None) = None,
+            cache_ttl_ms: int = 0,
+            cache_key: (str | None) = None,
+            stream: (str | None) = None,
+            stream_max_len: int = 10000;
     }
 
     def postinit -> None;

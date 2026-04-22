@@ -15,7 +15,14 @@ obj ScheduleSpec {
     has date: (str | None) = None,
         interval: (float | None) = None,
         cron: (str | None) = None,
-        trigger: ScheduleTrigger = ScheduleTrigger.STATIC;
+        trigger: ScheduleTrigger = ScheduleTrigger.STATIC,
+        # Distributed leader election (jaseci-labs/jaseci#5628). When leader=True,
+        # the scheduler only fires the task on one pod at a time, using a Redis
+        # lease keyed by `leader_key` (defaults to task name) with TTL `leader_ttl_ms`.
+        # A jac-scale scheduler honors this; the stock Scheduler ignores it.
+        leader: bool = False,
+        leader_key: (str | None) = None,
+        leader_ttl_ms: int = 60000;
 }
 
 """One registered scheduled task."""

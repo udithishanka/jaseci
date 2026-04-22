@@ -104,11 +104,38 @@ impl JacAPIServerEndpoints.create_walker_parameters(
     return parameters;
 }
 
+"""Interpolate {user_id} / {kwarg_name} placeholders in a key template.
+Missing placeholders render as empty strings (a warning is logged once).
+Keeps it forgiving: a typo in a lock= template shouldn't crash the endpoint."""
+def _interpolate_coord_key(template: str, username: str, kwargs: dict) -> str {
+    if "{" not in template {
+        return template;
+    }
+    out = template;
+    out = out.replace("{user_id}", username or "");
+    # pass 2: replace any remaining {name} with kwargs[name] (flat scope)
+    import re as _re;
+    def _sub(m: Any) -> str {
+        name = m.group(1);
+        val = kwargs.get(name);
+        return "" if val is None else str(val);
+    }
+    out = _re.sub(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", _sub, out);
+    return out;
+}
+
 impl JacAPIServerEndpoints.create_walker_callback(
     walker_name: str, has_node_param: bool = False
 ) -> Callable[..., (TransportResponse | StreamingResponse)] {
     import from jaclang.runtimelib.transport { TransportResponse, Meta }
     import from fastapi { Request }
+    # Capture coord spec once at callback build time — not read on every request.
+    walker_cls = self.get_walkers()[walker_name];
+    rs = walker_cls.restspec if walker_cls?.restspec else None;
+    coord_lock = rs.lock if rs?.lock else None;
+    coord_lock_timeout = rs.lock_timeout_ms if rs else 30000;
+    coord_pub_entry = rs.publish_on_entry if rs?.publish_on_entry else None;
+    coord_pub_success = rs.publish_on_success if rs?.publish_on_success else None;
     requires_auth = self.introspector.is_auth_required_for_walker(walker_name);
     async def callback(
         request: Request, nd: (str | None) = None, **kwargs: JsonValue
@@ -124,9 +151,47 @@ impl JacAPIServerEndpoints.create_walker_callback(
         if nd {
             kwargs['_jac_spawn_node'] = nd;
         }
-        result = await self.execution_manager.spawn_walker(
-            self.get_walkers()[walker_name], kwargs, (username or Con.GUEST.value)
-        );
+        # -------------------- Coord middleware (pre-dispatch) --------------------
+        lock_token: str = "";
+        lock_key: str = "";
+        if coord_lock {
+            try {
+                import from jac_scale.coord { acquire_lock, release_lock, publish }
+                lock_key = _interpolate_coord_key(coord_lock, username or "", kwargs);
+                (acquired, lock_token) = acquire_lock(
+                    lock_key, ttl_ms=coord_lock_timeout, blocking_timeout_ms=coord_lock_timeout
+                );
+                if not acquired {
+                    return TransportResponse.fail(
+                        code='LOCKED',
+                        message=f'Resource is locked: {lock_key}',
+                        meta=Meta(extra={'http_status': 503, 'retry_after_ms': 1000})
+                    );
+                }
+            } except Exception as e {
+                # Lock subsystem failed — fall through, don't block the request.
+                lock_token = "";
+            }
+        }
+        if coord_pub_entry {
+            try {
+                import from jac_scale.coord { publish as _pub }
+                _ch = _interpolate_coord_key(coord_pub_entry, username or "", kwargs);
+                _pub(_ch, {"event": "entry", "user_id": username, "walker": walker_name});
+            } except Exception { }
+        }
+        try {
+            result = await self.execution_manager.spawn_walker(
+                self.get_walkers()[walker_name], kwargs, (username or Con.GUEST.value)
+            );
+        } finally {
+            if lock_token and lock_key {
+                try {
+                    import from jac_scale.coord { release_lock as _rl }
+                    _rl(lock_key, lock_token);
+                } except Exception { }
+            }
+        }
         if (isgenerator(result) or isinstance(result, AsyncGenerator)) {
             return StreamingResponse(
                 result,
@@ -145,6 +210,13 @@ impl JacAPIServerEndpoints.create_walker_callback(
                 details=result.get('traceback') if 'traceback' in result else None,
                 meta=Meta(extra={'http_status': 500})
             );
+        }
+        if coord_pub_success {
+            try {
+                import from jac_scale.coord { publish as _pub }
+                _ch = _interpolate_coord_key(coord_pub_success, username or "", kwargs);
+                _pub(_ch, {"event": "success", "user_id": username, "walker": walker_name, "data": result});
+            } except Exception { }
         }
         return TransportResponse.success(
             data=result, meta=Meta(extra={'http_status': 200})
