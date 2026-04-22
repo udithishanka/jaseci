@@ -1,28 +1,34 @@
 """Implementation of MicroserviceGateway methods."""
 
 import shutil;
+# Module-scope imports for names used in type annotations of handlers
+# registered inside this file. Jac compiles `.jac` -> `.py` with
+# `from __future__ import annotations` (PEP 563), which turns ALL
+# parameter annotations into strings. FastAPI resolves those strings
+# back to types via `get_type_hints(endpoint)`, which uses
+# `endpoint.__globals__` = this module's globals. If `WebSocket` is
+# only imported inside a helper function, the annotation `WebSocket`
+# on a nested def can't be resolved, FastAPI fails to detect the
+# WebSocket dependency, no WebSocket gets injected, and the WS route
+# closes before accepting -> uvicorn logs HTTP 403. Keeping the
+# import here makes the type visible to FastAPI's runtime
+# introspection regardless of where the endpoint is declared.
+import from fastapi { WebSocket }
 
 
 """Register the WebSocket catch-all proxy on a gateway's FastAPI app
 (ROADMAP P15).
 
-Why module-scope and not inside `setup()`: when `@app.websocket(...)`
-is placed inside an `impl` method body on the MicroserviceGateway
-obj, FastAPI's route registration silently fails and uvicorn rejects
-every WS upgrade with HTTP 403, even though `route.matches()`
-returns FULL. The same decorator inside a module-level function or
-`with entry` block works correctly. Keeping this registration at
-module scope sidesteps the quirk; `setup()` calls us after
-configuring its HTTP middleware.
-
-The handler dispatches via `gw.registry.match_route`, sends the
-appropriate close code (1012 draining / 1008 no-route / 1013
+Placed at module scope (not inside `setup()`) primarily for clarity;
+the critical reason WS works is that `WebSocket` is imported at
+module scope above - FastAPI's PEP-563 annotation resolution depends
+on that. The handler dispatches via `gw.registry.match_route`, sends
+the appropriate close code (1012 draining / 1008 no-route / 1013
 unhealthy) when rejecting, or pipes bidirectionally via
 `websocket_forward` when matched. URL scheme is rewritten http->ws
 inside `websocket_forward`.
 """
 def _install_ws_catchall(gw: object) -> None {
-    import from fastapi { WebSocket }
     import from jac_scale.microservices._ws_forward { websocket_forward }
     import from jac_scale.microservices._drain { is_draining }
     import from jac_scale.microservices.service_registry { ServiceStatus }

@@ -56,3 +56,15 @@ def:pub get_product(product_id: str) -> dict {
     }
     return {"error": "Product not found"};
 }
+
+# WebSocket echo walker (exercised by the gateway P15 e2e). Served on
+# this service at ws://host/ws/EchoMessage; reachable through the
+# gateway at ws://gateway/api/products/ws/EchoMessage.
+@restspec(protocol=APIProtocol.WEBSOCKET)
+async walker:pub EchoMessage {
+    has message: str;
+
+    async can echo with Root entry {
+        report {"echo": self.message, "from": "products_app"};
+    }
+}

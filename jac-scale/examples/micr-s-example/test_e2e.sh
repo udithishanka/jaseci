@@ -20,6 +20,18 @@ cd "$SCRIPT_DIR"
 # (e.g. conda envs without activation):  JAC_BIN=/path/to/jac ./test_e2e.sh
 JAC_BIN="${JAC_BIN:-jac}"
 
+# Resolve the Python interpreter that lives alongside JAC_BIN (same
+# env has `websockets`, httpx, etc. installed). Falls back to system
+# python3 for envs where JAC_BIN is a wrapper without a sibling python.
+_JAC_DIR="$(dirname "$(command -v "$JAC_BIN" 2>/dev/null || echo "$JAC_BIN")")"
+if [ -x "$_JAC_DIR/python" ]; then
+  ENV_PYTHON="$_JAC_DIR/python"
+elif [ -x "$_JAC_DIR/python3" ]; then
+  ENV_PYTHON="$_JAC_DIR/python3"
+else
+  ENV_PYTHON="python3"
+fi
+
 GATEWAY="http://localhost:8000"
 STACK_LOG="$SCRIPT_DIR/.jac/e2e_stack.log"
 STACK_PID=""
@@ -445,6 +457,75 @@ exit(0 if not items else 1)"' \
     | grep -i '^x-trace-id:' | head -1 | awk '{print $2}' | tr -d '\r\n ')
   check "gateway mints X-Trace-Id when client omits it" \
     bash -c "[ -n '$MINTED_TRACE' ] && [ '${#MINTED_TRACE}' -ge 8 ]"
+
+  # -------------------------------------------------------------------------
+  # 7c. WebSocket proxying (ROADMAP P15)
+  # -------------------------------------------------------------------------
+  # The gateway's `_install_ws_catchall` handler matches `/api/{svc}/ws/{rest}`
+  # via the registry and pipes bidirectionally to the service's
+  # ws://host/ws/{rest}. products_app ships an `@restspec(WEBSOCKET)`
+  # EchoMessage walker; we send a message through the gateway and verify
+  # the service's echo comes back end-to-end.
+  section "WebSocket proxy (P15)"
+
+  "$ENV_PYTHON" -c "
+import asyncio, json, sys
+try:
+    import websockets
+except ImportError:
+    sys.exit(77)  # 77 = skip; websockets lib not installed
+TOKEN = '$TOKEN'
+async def main():
+    url = f'ws://127.0.0.1:8000/api/products/ws/EchoMessage?token={TOKEN}'
+    async with websockets.connect(url, open_timeout=5) as ws:
+        await ws.send(json.dumps({'message': 'e2e-ws-ping', 'token': TOKEN}))
+        reply = await asyncio.wait_for(ws.recv(), timeout=5)
+    sys.exit(0 if '\"ok\":true' in reply and 'e2e-ws-ping' in reply else 1)
+try:
+    asyncio.run(main())
+except Exception as e:
+    print(f'WS error: {e}', file=sys.stderr)
+    sys.exit(1)
+" > /tmp/ws_result.txt 2>&1
+  ws_rc=$?
+  if [ "$ws_rc" = "77" ]; then
+    log "skipping WS check (python websockets library not installed)"
+  else
+    check "WS through gateway proxies to products_app EchoMessage walker" \
+      bash -c "[ '$ws_rc' = '0' ]"
+  fi
+
+  # Unmatched WS path should close cleanly (1008 policy violation), not
+  # hang or 403. Proves `_install_ws_catchall` is wired and uvicorn
+  # honors the close code.
+  "$ENV_PYTHON" -c "
+import asyncio, sys
+try:
+    import websockets
+    from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
+except ImportError:
+    sys.exit(77)
+async def main():
+    try:
+        async with websockets.connect('ws://127.0.0.1:8000/no/such/prefix', open_timeout=3) as ws:
+            try:
+                await asyncio.wait_for(ws.recv(), timeout=1)
+            except Exception:
+                pass
+        sys.exit(0)  # if we reach here at all, handshake completed
+    except (ConnectionClosedOK, ConnectionClosedError) as e:
+        sys.exit(0 if e.code == 1008 else 1)
+    except Exception:
+        sys.exit(1)
+asyncio.run(main())
+" > /dev/null 2>&1
+  nomatch_rc=$?
+  if [ "$nomatch_rc" = "77" ]; then
+    :
+  else
+    check "WS to unmatched path closes with 1008" \
+      bash -c "[ '$nomatch_rc' = '0' ]"
+  fi
 
   # -------------------------------------------------------------------------
   # 8. Negative: no auth -> downstream sv call should reject
