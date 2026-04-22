@@ -2,6 +2,67 @@
 
 import shutil;
 
+
+"""Register the WebSocket catch-all proxy on a gateway's FastAPI app
+(ROADMAP P15).
+
+Why module-scope and not inside `setup()`: when `@app.websocket(...)`
+is placed inside an `impl` method body on the MicroserviceGateway
+obj, FastAPI's route registration silently fails and uvicorn rejects
+every WS upgrade with HTTP 403, even though `route.matches()`
+returns FULL. The same decorator inside a module-level function or
+`with entry` block works correctly. Keeping this registration at
+module scope sidesteps the quirk; `setup()` calls us after
+configuring its HTTP middleware.
+
+The handler dispatches via `gw.registry.match_route`, sends the
+appropriate close code (1012 draining / 1008 no-route / 1013
+unhealthy) when rejecting, or pipes bidirectionally via
+`websocket_forward` when matched. URL scheme is rewritten http->ws
+inside `websocket_forward`.
+"""
+def _install_ws_catchall(gw: object) -> None {
+    import from fastapi { WebSocket }
+    import from jac_scale.microservices._ws_forward { websocket_forward }
+    import from jac_scale.microservices._drain { is_draining }
+    import from jac_scale.microservices.service_registry { ServiceStatus }
+
+    @gw.app.websocket("/{ws_path:path}")
+    async def ws_proxy(websocket: WebSocket, ws_path: str) -> None {
+        if is_draining() {
+            # 1012 = service restart
+            await websocket.close(code=1012);
+            return;
+        }
+        full_path: str = "/" + ws_path;
+        matched = gw.registry.match_route(full_path);
+        if not matched or not matched.url {
+            # 1008 = policy violation (our "no matching route").
+            await websocket.accept();
+            await websocket.close(code=1008);
+            return;
+        }
+        if matched.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
+            await websocket.accept();
+            await websocket.close(code=1013);  # try again later
+            return;
+        }
+        remaining: str = full_path[len(matched.prefix):] or "/";
+        query: str = str(websocket.url.query);
+        target_http: str = f"{matched.url}{remaining}";
+        if query {
+            target_http = f"{target_http}?{query}";
+        }
+        await websocket.accept();
+        req_headers: dict[str, str] = {};
+        for (k, v) in websocket.headers.items() {
+            req_headers[k] = v;
+        }
+        logger.info(f"ws proxy: {full_path} -> {target_http}");
+        await websocket_forward(websocket, target_http, req_headers);
+    }
+}
+
 """Build the target URL by stripping prefix and forwarding the rest.
 
 Resolution order:
@@ -472,52 +533,11 @@ impl MicroserviceGateway.setup -> FastAPI {
         }
     }
 
-    # WebSocket catch-all (P15). FastAPI/Starlette ws routes don't go
-    # through the http middleware chain above; they need a dedicated
-    # registration. We register one `/{ws_path:path}` route that
-    # dispatches via the registry just like the http proxy. Upstream
-    # URL scheme is rewritten http(s)->ws(s) inside websocket_forward.
-    import from fastapi { WebSocket }
-    import from jac_scale.microservices._ws_forward { websocket_forward }
-
-    @self.app.websocket("/{ws_path:path}")
-    async def ws_proxy(websocket: WebSocket, ws_path: str) -> None {
-        # During drain, reject new ws handshakes too. 1012 = "service
-        # restart", the standard RFC 6455 code for "try again later".
-        import from jac_scale.microservices._drain { is_draining }
-        if is_draining() {
-            await websocket.close(code=1012);
-            return;
-        }
-        full_path: str = "/" + ws_path;
-        matched = gw.registry.match_route(full_path);
-        if not matched or not matched.url {
-            # 1008 = policy violation - the closest WS code for "no
-            # such route". Matches the http gateway's 404 for an
-            # unmatched path.
-            await websocket.accept();
-            await websocket.close(code=1008);
-            return;
-        }
-        if matched.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
-            await websocket.accept();
-            await websocket.close(code=1013);  # 1013 = "try again later"
-            return;
-        }
-        remaining: str = full_path[len(matched.prefix):] or "/";
-        query: str = str(websocket.url.query);
-        target_http: str = f"{matched.url}{remaining}";
-        if query {
-            target_http = f"{target_http}?{query}";
-        }
-        await websocket.accept();
-        req_headers: dict[str, str] = {};
-        for (k, v) in websocket.headers.items() {
-            req_headers[k] = v;
-        }
-        logger.info(f"ws proxy: {full_path} -> {target_http}");
-        await websocket_forward(websocket, target_http, req_headers);
-    }
+    # WebSocket catch-all (P15). Delegated to the module-level helper
+    # because placing @self.app.websocket(...) directly inside this
+    # impl method silently fails in a way that makes uvicorn 403 every
+    # WS upgrade. See `_install_ws_catchall` docstring.
+    _install_ws_catchall(self);
 
     # Drain middleware (P13). Starlette's middleware('http') does
     # insert(0, ...), so the LAST registered runs FIRST. Registering
