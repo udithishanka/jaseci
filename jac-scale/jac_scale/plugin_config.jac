@@ -302,6 +302,11 @@ class JacScalePluginConfig {
                             "default": {},
                             "description": "Module-name -> gateway-prefix map. Services are discovered via `sv import`; this only controls client-facing URL routing."
                         },
+                        "services": {
+                            "type": "dict",
+                            "default": {},
+                            "description": "Per-service overrides keyed by module name. Each subkey is a dict with optional `rpc_timeout` (float seconds) to override the default 10s `sv_service_call` timeout. Use for LLM/long-running services that need minutes, not seconds. Example: [plugins.scale.microservices.services.llm_app] rpc_timeout = 120.0"
+                        },
                         "client": {
                             "type": "dict",
                             "default": {},

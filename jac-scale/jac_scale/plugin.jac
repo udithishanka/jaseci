@@ -829,13 +829,15 @@ class JacScalePlugin {
         backoff: float = 0.1;  # doubles each attempt: 0.1, 0.2, 0.4
         last_err: Exception | None = None;
 
+        rpc_timeout: float = _sv_rpc_timeout(module_name);
+
         for attempt in range(max_attempts) {
             try {
                 resp = httpx.post(
                     f"{url}/function/{func_name}",
                     json=args,
                     headers=headers,
-                    timeout=10.0
+                    timeout=rpc_timeout
                 );
                 data = resp.json();
                 # Transport succeeded (ignore envelope ok/not-ok for the
@@ -866,6 +868,46 @@ class JacScalePlugin {
         );
     }
 }
+
+# =============================================================================
+# Per-service RPC timeout (ROADMAP P14).
+#
+# Default is 10s which is plenty for typical in-cluster service calls.
+# LLM / generation / long-running services need minutes - override per
+# service in jac.toml:
+#
+#   [plugins.scale.microservices.services.llm_app]
+#   rpc_timeout = 120.0
+#
+# The config is read on every sv RPC; `get_scale_config()` + `.load()`
+# are both cached on the config singleton so this is O(dict-lookup).
+# Keeping it lazy means tests that reset the config singleton (or
+# install a fake one) pick up the new value on the next call.
+# =============================================================================
+glob _SV_DEFAULT_RPC_TIMEOUT: float = 10.0;
+
+
+"""Return the `rpc_timeout` (seconds) configured for `module_name`, or
+the default 10s. Falls back gracefully if the config is unavailable
+(tests that instantiate the plugin without a jac.toml)."""
+def _sv_rpc_timeout(module_name: str) -> float {
+    try {
+        import from jac_scale.config_loader { get_scale_config }
+        ms_cfg = get_scale_config().get_microservices_config();
+        services_cfg = ms_cfg.get("services", {});
+        svc_cfg = services_cfg.get(module_name, {});
+        if "rpc_timeout" in svc_cfg {
+            return float(svc_cfg["rpc_timeout"]);
+        }
+    } except Exception {
+        # Config unavailable in this process (rare - usually test envs).
+        # Fall through to the default; do not let a config read failure
+        # translate into RPC timeout churn at runtime.
+        ;
+    }
+    return _SV_DEFAULT_RPC_TIMEOUT;
+}
+
 
 # =============================================================================
 # Per-provider circuit breaker state for sv_service_call (ROADMAP P6).

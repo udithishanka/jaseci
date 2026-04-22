@@ -475,3 +475,93 @@ test "sv_service_call does NOT retry on application error envelope" {
         sv_client.unregister("app_err_mod");
     }
 }
+
+
+# =============================================================================
+# Per-service RPC timeout override (ROADMAP P14)
+# =============================================================================
+
+test "sv_service_call uses the default 10s timeout when no per-service override" {
+    captured: dict = {};
+
+    def handler(request: httpx.Request) -> httpx.Response {
+        return httpx.Response(
+            status_code=200,
+            json={"ok": True, "data": {"result": "done"}}
+        );
+    }
+    transport = httpx.MockTransport(handler);
+
+    original_post = httpx.post;
+    def capturing_post(
+        url: str, json: dict = None, headers: dict = None, **kwargs: dict
+    ) -> httpx.Response {
+        captured["timeout"] = kwargs.get("timeout");
+        req = httpx.Request("POST", url, json=json, headers=dict(headers or {}));
+        return transport.handle_request(req);
+    }
+    httpx.post = capturing_post;
+
+    try {
+        sv_client.register("default_to_mod", "http://demo.invalid");
+        JacScalePlugin.sv_service_call("default_to_mod", "run", {});
+        # No override for this module in jac.toml -> default 10s.
+        assert captured["timeout"] == 10.0;
+    } finally {
+        httpx.post = original_post;
+        sv_client.unregister("default_to_mod");
+    }
+}
+
+
+test "sv_service_call honors per-service rpc_timeout from config" {
+    import jac_scale.plugin as plugin_mod;
+    captured: dict = {};
+
+    def handler(request: httpx.Request) -> httpx.Response {
+        return httpx.Response(
+            status_code=200,
+            json={"ok": True, "data": {"result": "done"}}
+        );
+    }
+    transport = httpx.MockTransport(handler);
+
+    original_post = httpx.post;
+    def capturing_post(
+        url: str, json: dict = None, headers: dict = None, **kwargs: dict
+    ) -> httpx.Response {
+        captured["timeout"] = kwargs.get("timeout");
+        req = httpx.Request("POST", url, json=json, headers=dict(headers or {}));
+        return transport.handle_request(req);
+    }
+    httpx.post = capturing_post;
+
+    # Patch _sv_rpc_timeout so we don't need a jac.toml fixture - the
+    # unit under test is "sv_service_call passes the resolved timeout
+    # through to httpx.post", not "config loading works end-to-end"
+    # (that's covered by config_loader tests separately).
+    original_resolver = getattr(plugin_mod, "_sv_rpc_timeout");
+    def fake_resolver(module_name: str) -> float {
+        return 75.5 if module_name == "slow_mod" else 10.0;
+    }
+    setattr(plugin_mod, "_sv_rpc_timeout", fake_resolver);
+
+    try {
+        sv_client.register("slow_mod", "http://demo.invalid");
+        JacScalePlugin.sv_service_call("slow_mod", "run", {});
+        assert captured["timeout"] == 75.5;
+    } finally {
+        setattr(plugin_mod, "_sv_rpc_timeout", original_resolver);
+        httpx.post = original_post;
+        sv_client.unregister("slow_mod");
+    }
+}
+
+
+test "_sv_rpc_timeout returns default when config lookup fails" {
+    import from jac_scale.plugin { _sv_rpc_timeout }
+    # Any module name works - the default is returned whenever the
+    # services config has no entry (or the config is unavailable).
+    t: float = _sv_rpc_timeout("module_that_has_no_override");
+    assert t == 10.0;
+}
