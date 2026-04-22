@@ -206,6 +206,137 @@ test "sv_service_call gives up after max_attempts on persistent transport error"
     }
 }
 
+# =============================================================================
+# Circuit breaker (ROADMAP P6)
+# =============================================================================
+
+import from jac_scale.plugin {
+    _breaker_reset, _breaker_record_success, _breaker_record_failure,
+    _breaker_should_skip, _BREAKER_TRIP_THRESHOLD
+}
+
+test "breaker trips OPEN after N consecutive transport failures and fails fast" {
+    # Drive the breaker to OPEN directly via the recorder so we don't
+    # have to burn N full retry cycles in the test.
+    mod = "breaker_open_test";
+    _breaker_reset(mod);
+
+    for _ in range(_BREAKER_TRIP_THRESHOLD) {
+        _breaker_record_failure(mod);
+    }
+
+    # Breaker should now short-circuit any sv_service_call for this mod.
+    # Confirm by checking the skip helper directly - no httpx mock needed
+    # because the call path raises before any network I/O.
+    assert _breaker_should_skip(mod);
+
+    # And a real sv_service_call should fail fast with the breaker msg.
+    # We don't even register the URL: if the breaker opens correctly,
+    # the call never gets as far as URL resolution.
+    raised_msg = "";
+    try {
+        JacScalePlugin.sv_service_call(mod, "anything", {});
+    } except RuntimeError as e {
+        raised_msg = str(e);
+    }
+    assert "open circuit breaker" in raised_msg;
+
+    _breaker_reset(mod);
+}
+
+test "breaker success recorder resets failure count" {
+    mod = "breaker_reset_test";
+    _breaker_reset(mod);
+
+    # Fail threshold-1 times (one short of tripping)
+    for _ in range(_BREAKER_TRIP_THRESHOLD - 1) {
+        _breaker_record_failure(mod);
+    }
+    assert not _breaker_should_skip(mod);
+
+    # A success resets the counter
+    _breaker_record_success(mod);
+
+    # Now threshold-1 more failures should NOT trip (counter was reset)
+    for _ in range(_BREAKER_TRIP_THRESHOLD - 1) {
+        _breaker_record_failure(mod);
+    }
+    assert not _breaker_should_skip(mod);
+
+    _breaker_reset(mod);
+}
+
+test "HALF_OPEN probe success closes the breaker" {
+    # Simulate: breaker OPEN, cooldown elapses, probe succeeds.
+    # Without waiting 30s we use _breaker_force_cooldown_elapsed.
+    import from jac_scale.plugin {
+        _breaker_peek, _breaker_force_cooldown_elapsed
+    }
+
+    mod = "breaker_half_open_test";
+    _breaker_reset(mod);
+
+    for _ in range(_BREAKER_TRIP_THRESHOLD) {
+        _breaker_record_failure(mod);
+    }
+    assert _breaker_should_skip(mod);
+
+    # Force cooldown elapsed, next skip-check transitions OPEN -> HALF_OPEN
+    _breaker_force_cooldown_elapsed(mod);
+    assert not _breaker_should_skip(mod);
+    st = _breaker_peek(mod);
+    assert st is not None and st["state"] == "HALF_OPEN";
+
+    # Probe success closes the breaker fully
+    _breaker_record_success(mod);
+    st = _breaker_peek(mod);
+    assert st is not None and st["state"] == "CLOSED";
+    assert st["fails"] == 0;
+
+    _breaker_reset(mod);
+}
+
+test "application error envelope does NOT trip the breaker" {
+    # 5 application-error calls in a row should NOT open the breaker -
+    # only transport errors count. Verified by calling through the real
+    # hookimpl with a mock that always returns ok=false.
+    mod = "breaker_app_err_test";
+    _breaker_reset(mod);
+
+    def handler(request: httpx.Request) -> httpx.Response {
+        return httpx.Response(
+            status_code=200,
+            json={"ok": False, "error": {"code": "X", "message": "nope"}}
+        );
+    }
+    transport = httpx.MockTransport(handler);
+
+    original_post = httpx.post;
+    def app_err_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
+        req_headers = dict(headers) if headers else {};
+        req = httpx.Request("POST", url, json=json, headers=req_headers);
+        return transport.handle_request(req);
+    }
+    httpx.post = app_err_post;
+
+    try {
+        sv_client.register(mod, "http://demo.invalid");
+        for _ in range(_BREAKER_TRIP_THRESHOLD) {
+            try {
+                JacScalePlugin.sv_service_call(mod, "fail", {});
+            } except RuntimeError {
+                ;
+            }
+        }
+        # Breaker should still be CLOSED - app errors don't count
+        assert not _breaker_should_skip(mod);
+    } finally {
+        httpx.post = original_post;
+        sv_client.unregister(mod);
+        _breaker_reset(mod);
+    }
+}
+
 test "sv_service_call does NOT retry on application error envelope" {
     # Simulates: downstream returns 200 with ok=false (application-level
     # error). Retrying won't change the answer, so we give up after 1
