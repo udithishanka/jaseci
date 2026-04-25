@@ -108,6 +108,43 @@ impl MicroserviceGateway.serve_static
     return Response(content=target.read_bytes(), media_type=content_type);
 }
 
+"""Serve a static file from a configured static_mounts local directory.
+Path-jails to local_dir (rejects symlink/.. escapes via realpath compare).
+Returns None if not found, not a regular file, or outside the jail."""
+impl MicroserviceGateway.serve_extra_static
+(local_dir: str, file_path: str) -> Response | None {
+    if not local_dir {
+        return None;
+    }
+    base = Path(local_dir);
+    target = base / file_path;
+
+    try {
+        resolved = target.resolve();
+        base_resolved = base.resolve();
+        if not str(resolved).startswith(str(base_resolved)) {
+            return None;
+        }
+    } except OSError {
+        return None;
+    }
+
+    if not target.is_file() {
+        return None;
+    }
+
+    (content_type, _) = mimetypes.guess_type(str(target));
+    if content_type is None {
+        content_type = "application/octet-stream";
+    }
+
+    if content_type.startswith("text/") or content_type in ("application/javascript", "application/json") {
+        return Response(content=target.read_text(encoding="utf-8"), media_type=content_type);
+    }
+    return Response(content=target.read_bytes(), media_type=content_type);
+}
+
+
 """Serve index.html for SPA fallback. Returns None if no index.html exists."""
 impl MicroserviceGateway.serve_spa_fallback
 -> Response | None {
@@ -386,9 +423,43 @@ impl MicroserviceGateway.handle_static
 
     file_path: str = path.lstrip("/");
     if file_path {
-        static_resp = self.serve_static(file_path);
-        if static_resp {
-            return static_resp;
+        # Declarative static mounts are checked first: any URL matching a
+        # configured `url_prefix` is served from the corresponding
+        # `local_path`. Lets callers expose repo-root directories
+        # (e.g. assets/) without restructuring the client build output.
+        # First matching mount has canonical ownership of its URL prefix;
+        # on file-miss inside that mount we surface a 404 instead of
+        # falling through to dist_dir (which could mask the missing asset
+        # behind a same-named file under dist).
+        mount_matched = False;
+        for mount in self.static_mounts {
+            prefix = str(mount.get("url_prefix", "")).lstrip("/").rstrip("/");
+            if not prefix {
+                continue;
+            }
+            if file_path == prefix {
+                # request is exactly the prefix — treat as a directory
+                # listing request, which we don't serve. Defer to dist
+                # or 404.
+                continue;
+            }
+            if file_path.startswith(prefix + "/") {
+                mount_matched = True;
+                sub_path = file_path[len(prefix) + 1:];
+                local_dir = str(mount.get("local_path", ""));
+                mounted_resp = self.serve_extra_static(local_dir, sub_path);
+                if mounted_resp {
+                    return mounted_resp;
+                }
+                break;
+            }
+        }
+
+        if not mount_matched {
+            static_resp = self.serve_static(file_path);
+            if static_resp {
+                return static_resp;
+            }
         }
     }
 

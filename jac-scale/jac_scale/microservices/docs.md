@@ -181,6 +181,54 @@ impl app.apiCall(service: str, endpoint: str, body: dict = {}) -> any {
 }
 ```
 
+### Static asset directories outside dist
+
+By default the gateway only serves files under `client.dist_dir`. If your
+SPA references assets from a sibling directory in your repo (e.g. an
+`assets/` folder for fonts, images, WASM, monaco workers, etc.) those
+URLs will 404 in microservices mode unless you:
+
+1. **Build them into dist** via your bundler (vite-plugin-static-copy,
+   `publicDir`, or equivalent), **or**
+2. **Declare a static mount** so the gateway serves them directly from
+   their source directory.
+
+Static mounts are the simpler option when you don't want to restructure
+the build. Add one or more entries to
+`[plugins.scale.microservices.client.static_mounts]`:
+
+```toml
+[[plugins.scale.microservices.client.static_mounts]]
+url_prefix = "/static/assets"
+local_path = "assets"
+
+[[plugins.scale.microservices.client.static_mounts]]
+url_prefix = "/uploads"
+local_path = "/var/jac-uploads"
+```
+
+Each entry maps a URL prefix to a directory on disk. `local_path` can be
+relative (resolved from the gateway's working directory) or absolute.
+At request time the gateway checks `static_mounts` **before** falling
+back to `client.dist_dir`, so a `GET /static/assets/logo.png` is served
+from `<local_path>/logo.png`.
+
+**Canonical ownership semantics**: a URL whose prefix matches a configured
+mount belongs to that mount exclusively. A miss inside the mount returns
+**404**, even if a same-named file exists under `client.dist_dir`. This
+prevents dist from silently masking a missing asset and surfaces the
+real configuration bug instead.
+
+**Path safety**: requests are jailed to the configured `local_path` via
+`Path.resolve()` + common-prefix check; `..` traversal and symlink
+escapes are rejected.
+
+**When dist works fine**: prefer building assets into dist if your
+bundler already produces them (e.g. monaco workers via vite plugins).
+Static mounts shine when you have a stable repo-root directory with
+content that has no reason to be rebuilt by vite — fonts, vendored WASM,
+agent prompt fixtures, manifest files, etc.
+
 ## What Is and Isn't a Service
 
 Any module `sv import`ed somewhere is a service. No TOML declaration needed:

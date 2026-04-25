@@ -532,6 +532,154 @@ test "serve static css file returns text content type" {
 }
 
 # =============================================================================
+# static_mounts — declarative extra static directories
+# =============================================================================
+
+test "serve_extra_static serves a file from a configured local dir" {
+    tmp = tempfile.mkdtemp();
+    assets = Path(tmp) / "assets";
+    assets.mkdir();
+    (assets / "logo.png").write_bytes(b"PNG_DATA");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg, client_dist_dir=tmp);
+
+    resp = gw.serve_extra_static(str(assets), "logo.png");
+    assert resp is not None;
+    assert b"PNG_DATA" in resp.body;
+    assert "image/png" in resp.media_type;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve_extra_static returns None when local_dir is empty" {
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    resp = gw.serve_extra_static("", "anything.txt");
+    assert resp is None;
+}
+
+test "serve_extra_static returns None for missing file" {
+    tmp = tempfile.mkdtemp();
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    resp = gw.serve_extra_static(tmp, "nonexistent.png");
+    assert resp is None;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "serve_extra_static blocks path traversal escape" {
+    tmp = tempfile.mkdtemp();
+    assets = Path(tmp) / "assets";
+    assets.mkdir();
+    # Create a file outside the jail; the test should not be able to read it.
+    secret = Path(tmp) / "secret.txt";
+    secret.write_text("classified");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(registry=reg);
+
+    resp = gw.serve_extra_static(str(assets), "../secret.txt");
+    assert resp is None;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "static_mounts wins over dist_dir for matching URL" {
+    tmp = tempfile.mkdtemp();
+    dist = Path(tmp) / "dist";
+    dist.mkdir();
+    assets = Path(tmp) / "assets";
+    assets.mkdir();
+    (assets / "logo.png").write_bytes(b"FROM_MOUNT");
+    # A same-named file under dist would only be reached if static_mounts
+    # was ignored — the test asserts the mount wins.
+    (dist / "static" / "assets").mkdir(parents=True);
+    (dist / "static" / "assets" / "logo.png").write_bytes(b"FROM_DIST");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(
+        registry=reg,
+        client_dist_dir=str(dist),
+        static_mounts=[{"url_prefix": "/static/assets", "local_path": str(assets)}]
+    );
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.get("/static/assets/logo.png");
+    assert resp.status_code == 200;
+    assert resp.content == b"FROM_MOUNT";
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "static_mounts dispatch falls through to dist_dir for non-matching URL" {
+    tmp = tempfile.mkdtemp();
+    dist = Path(tmp) / "dist";
+    dist.mkdir();
+    (dist / "vendor.js").write_text("/* vendor bundle */");
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(
+        registry=reg,
+        client_dist_dir=str(dist),
+        static_mounts=[{"url_prefix": "/static/assets", "local_path": "/nonexistent"}]
+    );
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    # /vendor.js doesn't match the /static/assets mount prefix, so it
+    # falls through to dist_dir.
+    resp = client.get("/vendor.js");
+    assert resp.status_code == 200;
+    assert "javascript" in resp.headers.get("content-type", "");
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+test "matched static_mount with missing file does not fall back to dist" {
+    tmp = tempfile.mkdtemp();
+    dist = Path(tmp) / "dist";
+    dist.mkdir();
+    # If we DID fall back, the gateway would find this file at the same
+    # URL — the test asserts mounts have canonical ownership of their
+    # prefix, so a 404 is preferred over silently serving from dist.
+    (dist / "static" / "assets").mkdir(parents=True);
+    (dist / "static" / "assets" / "logo.png").write_bytes(b"FROM_DIST");
+    assets = Path(tmp) / "assets";
+    assets.mkdir();   # empty — no logo.png here
+
+    reg = ServiceRegistry();
+    gw = MicroserviceGateway(
+        registry=reg,
+        client_dist_dir=str(dist),
+        static_mounts=[{"url_prefix": "/static/assets", "local_path": str(assets)}]
+    );
+    gw.setup();
+
+    import from fastapi.testclient { TestClient }
+    client = TestClient(gw.app);
+
+    resp = client.get("/static/assets/logo.png");
+    assert resp.status_code == 404;
+
+    import shutil;
+    shutil.rmtree(tmp);
+}
+
+# =============================================================================
 # SPA fallback
 # =============================================================================
 

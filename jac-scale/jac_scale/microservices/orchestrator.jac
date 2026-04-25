@@ -156,14 +156,69 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
         console.print(f"  [bold]Client:[/bold] {dict(client_config)['entry']}");
         console.print(f"  [bold]Static:[/bold] {client_dist}");
     }
+
+    # Read static_mounts (used in step 5 below) so we can show them in the
+    # banner. We re-read here for display only; the canonical list is built
+    # again in step 5 to keep that block self-contained.
+    _banner_mounts: list[Any] = [];
+    if client_config {
+        _raw = dict(client_config).get("static_mounts", []);
+        if isinstance(_raw, list) {
+            _banner_mounts = list(_raw);
+        }
+    }
+    if _banner_mounts {
+        console.print();
+        console.print("  [bold]Static mounts[/bold]");
+        console.print(f"  [dim]{'─' * 48}[/dim]");
+        for _m in _banner_mounts {
+            _md = dict(_m) if isinstance(_m, dict) else {};
+            _u = str(_md.get("url_prefix", ""));
+            _p = str(_md.get("local_path", ""));
+            if _u and _p {
+                console.print(f"  [cyan]→[/cyan] {_u:20s} -> {_p}");
+            }
+        }
+    }
     console.print();
 
-    # 5. Start gateway (blocking)
+    # 5. Build optional static_mounts list. Each entry maps a URL prefix to
+    #    a local directory the gateway should serve from BEFORE falling back
+    #    to client_dist_dir. Configured as:
+    #      [[plugins.scale.microservices.client.static_mounts]]
+    #      url_prefix = "/static/assets"
+    #      local_path = "assets"
+    #    Tolerates missing/empty config — defaults to no extra mounts.
+    static_mounts: list[dict[str, str]] = [];
+    if client_config {
+        raw_mounts: list[Any] = [];
+        _raw = dict(client_config).get("static_mounts", []);
+        if isinstance(_raw, list) {
+            raw_mounts = list(_raw);
+        }
+        for entry in raw_mounts {
+            ed = dict(entry) if isinstance(entry, dict) else {};
+            url_prefix = str(ed.get("url_prefix", "")).strip();
+            local_path = str(ed.get("local_path", "")).strip();
+            if url_prefix and local_path {
+                static_mounts.append({
+                    "url_prefix": url_prefix,
+                    "local_path": local_path,
+                });
+                logger.info(
+                    f"Static mount: {url_prefix} -> {local_path}"
+                );
+            }
+        }
+    }
+
+    # 6. Start gateway (blocking)
     gateway = MicroserviceGateway(
         registry=registry,
         port=gateway_port,
         host=gateway_host,
-        client_dist_dir=client_dist
+        client_dist_dir=client_dist,
+        static_mounts=static_mounts
     );
     gateway.start();
 

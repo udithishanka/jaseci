@@ -26,6 +26,14 @@ obj MicroserviceGateway {
         host: str = "0.0.0.0",
         client_dist_dir: str = ".jac/client/dist",
         admin_dist_dir: str = ".jac/admin",
+        # Optional declarative static mounts: each entry is
+        # {"url_prefix": "/foo", "local_path": "/abs/or/rel/path"}.
+        # Configured via [[plugins.scale.microservices.client.static_mounts]]
+        # in jac.toml; consulted by handle_static BEFORE falling back to
+        # client_dist_dir so projects can serve repo-root assets without
+        # restructuring the build output. Default empty list = behavior
+        # unchanged from before the feature.
+        static_mounts: list[dict[str, str]] = [],
         # Prometheus metrics registry + collectors. None when
         # prometheus_client isn't installed; the dispatcher no-ops
         # instrumentation in that case.
@@ -74,6 +82,11 @@ obj MicroserviceGateway {
 
     """Serve a static file from the client dist directory. Returns None if not found."""
     def serve_static(file_path: str) -> Response | None;
+
+    """Serve a static file from a configured `static_mounts` entry's local
+    directory. Path-jails to that directory (rejects ../ escapes). Returns
+    None if not found."""
+    def serve_extra_static(local_dir: str, file_path: str) -> Response | None;
 
     """Serve index.html for SPA fallback. Returns None if no index.html exists."""
     def serve_spa_fallback -> Response | None;
