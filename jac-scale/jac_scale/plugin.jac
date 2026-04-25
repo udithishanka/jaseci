@@ -774,6 +774,14 @@ class JacScalePlugin {
     mid-request, DNS propagation lag, brief network blips. The breaker
     also prevents a bad downstream pod from exhausting calling threads
     while waiting on long timeouts.
+
+    Streaming returns: when the downstream function returns a generator,
+    serve.endpoints emits an `text/event-stream` body framed by
+    sse_frame_stream. We detect that via Content-Type and return a
+    Python generator (consume_sse_stream) that yields parsed event
+    dicts. Retries only cover connect-time failures — once a stream is
+    open, an in-flight error surfaces to the caller's iterator as a
+    RuntimeError (we cannot replay events that were already consumed).
     """
     @hookimpl
     static def sv_service_call(
@@ -781,17 +789,28 @@ class JacScalePlugin {
     ) -> Any {
         import time;
         import from jaclang.runtimelib { sv_client }
+        import from jaclang.runtimelib.sv_sse { consume_sse_stream }
         import from jac_scale.microservices._auth_ctx { get_current_auth }
         import from jac_scale.microservices._trace_ctx { get_current_trace }
+
+        func_label = f"{module_name}.{func_name}";
 
         # Test clients take precedence (matches core) and bypass retry +
         # breaker - they're in-process TestClient instances; transient
         # transport errors are not a concern.
         if module_name in sv_client._test_clients {
-            resp = sv_client._test_clients[module_name].post(
-                f"/function/{func_name}", json=args
-            );
-            data = resp.json();
+            tc = sv_client._test_clients[module_name];
+            stream_cm = tc.stream("POST", f"/function/{func_name}", json=args);
+            resp = stream_cm.__enter__();
+            ct = resp.headers.get("content-type", "");
+            if ct.startswith("text/event-stream") {
+                return consume_sse_stream(stream_cm, func_label);
+            }
+            try {
+                data = resp.json();
+            } finally {
+                stream_cm.__exit__(None, None, None);
+            }
             return _unwrap_sv_envelope(data, module_name, func_name);
         }
 
@@ -833,16 +852,34 @@ class JacScalePlugin {
 
         for attempt in range(max_attempts) {
             try {
-                resp = httpx.post(
+                # Use httpx.stream() so we can inspect Content-Type before
+                # buffering the body. SSE replies stay open and feed the
+                # consumer iterator; JSON replies are read fully then the
+                # connection is closed in the finally branch.
+                client = httpx.Client(timeout=rpc_timeout);
+                stream_cm = client.stream(
+                    "POST",
                     f"{url}/function/{func_name}",
                     json=args,
-                    headers=headers,
-                    timeout=rpc_timeout
+                    headers=headers
                 );
-                data = resp.json();
-                # Transport succeeded (ignore envelope ok/not-ok for the
-                # breaker - app errors are deterministic, they don't
-                # mean the provider is down).
+                resp = stream_cm.__enter__();
+                ct = resp.headers.get("content-type", "");
+                if ct.startswith("text/event-stream") {
+                    # Streaming success: connection stays open. Record a
+                    # transport success and hand back a generator that
+                    # owns connection cleanup.
+                    _breaker_record_success(module_name);
+                    return _wrap_sse_with_client_close(
+                        stream_cm, client, func_label
+                    );
+                }
+                try {
+                    data = resp.json();
+                } finally {
+                    stream_cm.__exit__(None, None, None);
+                    client.close();
+                }
                 _breaker_record_success(module_name);
                 return _unwrap_sv_envelope(data, module_name, func_name);
             } except (httpx.RequestError, httpx.TimeoutException) as e {
@@ -866,6 +903,25 @@ class JacScalePlugin {
             f"sv-to-sv RPC '{module_name}.{func_name}' failed after "
             + f"{max_attempts} attempts: {last_err}"
         );
+    }
+}
+
+
+"""Yield SSE events through the consumer, then close the owning httpx
+Client when the consumer is done. Hoisted to module scope (Jac doesn't
+support nested defs).
+"""
+def _wrap_sse_with_client_close
+(stream_cm: Any, client: Any, func_label: str) -> Any {
+    import from jaclang.runtimelib.sv_sse { consume_sse_stream }
+    try {
+        for ev in consume_sse_stream(stream_cm, func_label) {
+            yield ev;
+        }
+    } finally {
+        try {
+            client.close();
+        } except Exception { ; }
     }
 }
 

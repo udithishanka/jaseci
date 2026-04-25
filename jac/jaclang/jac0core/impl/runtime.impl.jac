@@ -1845,14 +1845,44 @@ impl JacAPIServer.ensure_sv_service(module_name: str, base_path: str) -> None {
 Plugins override this to inject auth forwarding, retries, circuit breakers,
 or tracing. The resolution order for the target (test client, registry,
 env var, ensure_sv_service) is handled by sv_client.call before this runs.
+
+Two response shapes are honoured:
+
+  - JSON envelope (`Content-Type: application/json`): the existing
+    TransportResponse wire format. Decoded and unwrapped.
+  - SSE stream (`Content-Type: text/event-stream`): the function on
+    the other end returned an iterator. We hand back a Python
+    generator that yields parsed event dicts as they arrive — the
+    caller's `for ev in sv_func(...)` loop sees live events instead
+    of a str-ified generator object. See jac/jaclang/runtimelib/
+    sv_sse.jac for the framing contract.
 """
 impl JacAPIServer.sv_service_call
 (module_name: str, func_name: str, args: dict) -> Any {
     import from jaclang.runtimelib { sv_client }
+    import from jaclang.runtimelib.sv_sse { consume_sse_stream }
+
+    func_label = f"{module_name}.{func_name}";
 
     if module_name in sv_client._test_clients {
-        resp = sv_client._test_clients[module_name].post(f"/function/{func_name}", json=args);
-        data = resp.json();
+        # TestClient path: streaming responses come through `stream()`;
+        # non-streaming use `post()`. Probe with stream() first so the
+        # returned context manager can drive the SSE consumer.
+        client = sv_client._test_clients[module_name];
+        stream_cm = client.stream("POST", f"/function/{func_name}", json=args);
+        # Enter the context manager to inspect the response headers,
+        # then either consume as SSE (keeping it open for the iterator)
+        # or close and re-issue a non-streaming post.
+        resp = stream_cm.__enter__();
+        ct = resp.headers.get("content-type", "");
+        if ct.startswith("text/event-stream") {
+            return consume_sse_stream(stream_cm, func_label);
+        }
+        try {
+            data = resp.json();
+        } finally {
+            stream_cm.__exit__(None, None, None);
+        }
     } else {
         url = sv_client.resolve_url(module_name);
         try {
@@ -1863,8 +1893,23 @@ impl JacAPIServer.sv_service_call
                 + "Install it via `pip install httpx`."
             );
         }
-        resp = httpx.post(f"{url}/function/{func_name}", json=args);
-        data = resp.json();
+        client = httpx.Client();
+        stream_cm = client.stream("POST", f"{url}/function/{func_name}", json=args);
+        resp = stream_cm.__enter__();
+        ct = resp.headers.get("content-type", "");
+        if ct.startswith("text/event-stream") {
+            # Hand the open context manager + client to the consumer; on
+            # generator exhaustion / close, consume_sse_stream calls
+            # __exit__ (which releases the connection) and we close the
+            # client right after.
+            return _wrap_streaming_close(stream_cm, client, func_label);
+        }
+        try {
+            data = resp.json();
+        } finally {
+            stream_cm.__exit__(None, None, None);
+            client.close();
+        }
     }
 
     if isinstance(data, dict) and data.get("ok") {
@@ -1880,6 +1925,25 @@ impl JacAPIServer.sv_service_call
     raise RuntimeError(
         f"sv-to-sv RPC '{module_name}.{func_name}' failed: {msg or 'unknown error'}"
     );
+}
+
+
+"""Yield events from an httpx stream context manager, then close the
+underlying client when the consumer is done. Lives at module scope
+because Jac doesn't support nested defs.
+"""
+def _wrap_streaming_close
+(stream_cm: Any, client: Any, func_label: str) -> Any {
+    import from jaclang.runtimelib.sv_sse { consume_sse_stream }
+    try {
+        for ev in consume_sse_stream(stream_cm, func_label) {
+            yield ev;
+        }
+    } finally {
+        try {
+            client.close();
+        } except Exception { ; }
+    }
 }
 
 """Default sv-service registry: a snapshot of sv_client._registry.
