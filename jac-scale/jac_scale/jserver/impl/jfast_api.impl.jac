@@ -1154,9 +1154,7 @@ impl JFastApiServer.init(
         trace_id = ensure_trace_id(request.headers.get('X-Trace-Id'));
         trace_token = set_current_trace(trace_id);
 
-        user_id = getattr(request.state, 'user_root_id', None)
-            if request?.state
-            else None;
+        user_id = request.state?.user_root_id if request?.state else None;
 
         if user_id {
             try {
