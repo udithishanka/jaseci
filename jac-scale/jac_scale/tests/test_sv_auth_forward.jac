@@ -8,11 +8,49 @@ Covers:
 """
 
 import httpx;
+import from typing { Any }
 import from jaclang.runtimelib { sv_client }
 import from jac_scale.microservices._auth_ctx {
     set_current_auth, reset_current_auth, get_current_auth
 }
 import from jac_scale.plugin { JacScalePlugin }
+
+
+# =============================================================================
+# Test helper: mock-backed httpx.Client
+# =============================================================================
+# The plugin's sv_service_call uses httpx.Client(timeout=...).stream("POST", ...)
+# to inspect Content-Type before consuming the body (so it can pivot to SSE
+# streaming when the downstream returns a generator). For tests we need to
+# intercept at the Client level — `transport=MockTransport(handler)` lets a
+# real Client serve canned Responses without doing real I/O. Both .stream()
+# and .post() on the Client go through the transport, so a single helper
+# covers every existing test pattern (plain JSON, ConnectError on retry,
+# call counting, timeout capture).
+
+def _mock_client_class(handler: Any, on_init: Any = None) -> Any {
+    # Returns a *factory callable* (not a class) so the plugin's
+    # `httpx.Client(timeout=...)` substitution still works. Subclassing
+    # httpx.Client inside a Jac function and calling super().__init__
+    # raises 'super' object is not callable (Jac compiles the inner
+    # class differently than CPython expects). The factory pattern
+    # sidesteps that — we just hand back a fresh real Client backed by
+    # our MockTransport on every call.
+    #
+    # Capture the *original* httpx.Client at helper-construction time:
+    # by the time the factory runs, the test has already done
+    # `httpx.Client = _mock_client_class(...)`, so calling httpx.Client
+    # inside the factory would recurse infinitely.
+    transport = httpx.MockTransport(handler);
+    real_client_cls = httpx.Client;
+    def factory(*args: Any, **kwargs: Any) -> Any {
+        if on_init {
+            on_init(kwargs);
+        }
+        return real_client_cls(transport=transport);
+    }
+    return factory;
+}
 
 # =============================================================================
 # _auth_ctx
@@ -46,16 +84,8 @@ test "sv_service_call forwards Authorization header when auth set" {
         );
     }
 
-    transport = httpx.MockTransport(handler);
-
-    # Monkeypatch httpx.post so the plugin hookimpl uses our MockTransport
-    original_post = httpx.post;
-    def mock_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = mock_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("demo_mod", "http://demo.invalid");
@@ -69,7 +99,7 @@ test "sv_service_call forwards Authorization header when auth set" {
         assert captured["auth"] == "Bearer xyz";
         assert result == "echoed";
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("demo_mod");
     }
 }
@@ -85,15 +115,8 @@ test "sv_service_call omits Authorization when no auth context" {
         );
     }
 
-    transport = httpx.MockTransport(handler);
-
-    original_post = httpx.post;
-    def mock_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = mock_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("demo_mod2", "http://demo.invalid");
@@ -102,7 +125,7 @@ test "sv_service_call omits Authorization when no auth context" {
         assert captured["auth"] == "";
         assert result == "ok";
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("demo_mod2");
     }
 }
@@ -114,15 +137,9 @@ test "sv_service_call surfaces application-level error from envelope" {
             json={"ok": False, "error": {"code": "X", "message": "boom"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def mock_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = mock_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("demo_mod3", "http://demo.invalid");
@@ -134,7 +151,7 @@ test "sv_service_call surfaces application-level error from envelope" {
         }
         assert raised;
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("demo_mod3");
     }
 }
@@ -145,27 +162,21 @@ test "sv_service_call surfaces application-level error from envelope" {
 
 test "sv_service_call retries on transport error and succeeds on 2nd attempt" {
     # Simulates: pod is coming up, first connect fails; second succeeds.
-    # We count how many times httpx.post was called - should be 2.
+    # We count how many times the handler was called - should be 2.
     call_count: dict = {"n": 0};
 
     def handler(request: httpx.Request) -> httpx.Response {
-        return httpx.Response(
-            status_code=200, json={"ok": True, "data": {"result": "ok"}}
-        );
-    }
-    transport = httpx.MockTransport(handler);
-
-    original_post = httpx.post;
-    def flaky_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
         call_count["n"] = call_count["n"] + 1;
         if call_count["n"] == 1 {
             raise httpx.ConnectError("connection refused");
         }
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
+        return httpx.Response(
+            status_code=200, json={"ok": True, "data": {"result": "ok"}}
+        );
     }
-    httpx.post = flaky_post;
+
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("retry_mod", "http://demo.invalid");
@@ -173,7 +184,7 @@ test "sv_service_call retries on transport error and succeeds on 2nd attempt" {
         assert result == "ok";
         assert call_count["n"] == 2;  # first failed, second succeeded
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("retry_mod");
     }
 }
@@ -183,12 +194,13 @@ test "sv_service_call gives up after max_attempts on persistent transport error"
     # fail; caller gets a RuntimeError mentioning "after N attempts".
     call_count: dict = {"n": 0};
 
-    original_post = httpx.post;
-    def broken_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
+    def handler(request: httpx.Request) -> httpx.Response {
         call_count["n"] = call_count["n"] + 1;
         raise httpx.ConnectError("connection refused");
     }
-    httpx.post = broken_post;
+
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("dead_mod", "http://demo.invalid");
@@ -201,7 +213,7 @@ test "sv_service_call gives up after max_attempts on persistent transport error"
         assert call_count["n"] == 3;
         assert "3 attempts" in raised_msg;
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("dead_mod");
     }
 }
@@ -250,15 +262,9 @@ test "sv_service_call forwards X-Trace-Id when set in context" {
             status_code=200, json={"ok": True, "data": {"result": "ok"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def trace_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = trace_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("trace_mod", "http://demo.invalid");
@@ -270,7 +276,7 @@ test "sv_service_call forwards X-Trace-Id when set in context" {
         }
         assert captured["trace"] == "test-trace-xyz";
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("trace_mod");
     }
 }
@@ -284,15 +290,9 @@ test "sv_service_call omits X-Trace-Id when no trace context is set" {
             status_code=200, json={"ok": True, "data": {"result": "ok"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def trace_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = trace_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("trace_mod2", "http://demo.invalid");
@@ -300,7 +300,7 @@ test "sv_service_call omits X-Trace-Id when no trace context is set" {
         JacScalePlugin.sv_service_call("trace_mod2", "ping", {});
         assert captured["trace"] == "";
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("trace_mod2");
     }
 }
@@ -408,15 +408,9 @@ test "application error envelope does NOT trip the breaker" {
             json={"ok": False, "error": {"code": "X", "message": "nope"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def app_err_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = app_err_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register(mod, "http://demo.invalid");
@@ -430,7 +424,7 @@ test "application error envelope does NOT trip the breaker" {
         # Breaker should still be CLOSED - app errors don't count
         assert not _breaker_should_skip(mod);
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister(mod);
         _breaker_reset(mod);
     }
@@ -439,25 +433,19 @@ test "application error envelope does NOT trip the breaker" {
 test "sv_service_call does NOT retry on application error envelope" {
     # Simulates: downstream returns 200 with ok=false (application-level
     # error). Retrying won't change the answer, so we give up after 1
-    # httpx.post call and raise immediately.
+    # request and raise immediately.
     call_count: dict = {"n": 0};
 
     def handler(request: httpx.Request) -> httpx.Response {
+        call_count["n"] = call_count["n"] + 1;
         return httpx.Response(
             status_code=200,
             json={"ok": False, "error": {"code": "X", "message": "deterministic_fail"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def counting_post(url: str, json: dict = None, headers: dict = None, **kwargs: dict) -> httpx.Response {
-        call_count["n"] = call_count["n"] + 1;
-        req_headers = dict(headers) if headers else {};
-        req = httpx.Request("POST", url, json=json, headers=req_headers);
-        return transport.handle_request(req);
-    }
-    httpx.post = counting_post;
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler);
 
     try {
         sv_client.register("app_err_mod", "http://demo.invalid");
@@ -471,7 +459,7 @@ test "sv_service_call does NOT retry on application error envelope" {
         assert call_count["n"] == 1;
         assert "deterministic_fail" in raised_msg;
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("app_err_mod");
     }
 }
@@ -486,24 +474,20 @@ test "sv_service_call uses the default 10s timeout when no per-service override"
             json={"ok": True, "data": {"result": "done"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def capturing_post(
-        url: str, json: dict = None, headers: dict = None, **kwargs: dict
-    ) -> httpx.Response {
+    def on_init(kwargs: dict) -> None {
         captured["timeout"] = kwargs.get("timeout");
-        req = httpx.Request("POST", url, json=json, headers=dict(headers or {}));
-        return transport.handle_request(req);
     }
-    httpx.post = capturing_post;
+
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler, on_init=on_init);
 
     try {
         sv_client.register("default_to_mod", "http://demo.invalid");
         JacScalePlugin.sv_service_call("default_to_mod", "run", {});
         assert captured["timeout"] == 10.0;
     } finally {
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("default_to_mod");
     }
 }
@@ -519,17 +503,13 @@ test "sv_service_call honors per-service rpc_timeout from config" {
             json={"ok": True, "data": {"result": "done"}}
         );
     }
-    transport = httpx.MockTransport(handler);
 
-    original_post = httpx.post;
-    def capturing_post(
-        url: str, json: dict = None, headers: dict = None, **kwargs: dict
-    ) -> httpx.Response {
+    def on_init(kwargs: dict) -> None {
         captured["timeout"] = kwargs.get("timeout");
-        req = httpx.Request("POST", url, json=json, headers=dict(headers or {}));
-        return transport.handle_request(req);
     }
-    httpx.post = capturing_post;
+
+    original_client = httpx.Client;
+    httpx.Client = _mock_client_class(handler, on_init=on_init);
 
     # Patch _sv_rpc_timeout to avoid depending on a jac.toml fixture.
     original_resolver = getattr(plugin_mod, "_sv_rpc_timeout");
@@ -544,7 +524,7 @@ test "sv_service_call honors per-service rpc_timeout from config" {
         assert captured["timeout"] == 75.5;
     } finally {
         setattr(plugin_mod, "_sv_rpc_timeout", original_resolver);
-        httpx.post = original_post;
+        httpx.Client = original_client;
         sv_client.unregister("slow_mod");
     }
 }
