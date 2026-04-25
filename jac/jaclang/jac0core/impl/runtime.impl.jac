@@ -1865,18 +1865,18 @@ impl JacAPIServer.sv_service_call
     func_label = f"{module_name}.{func_name}";
 
     if module_name in sv_client._test_clients {
-        # TestClient path: streaming responses come through `stream()`;
-        # non-streaming use `post()`. Probe with stream() first so the
-        # returned context manager can drive the SSE consumer.
+        # TestClient path: open via stream() so we can pivot to SSE if
+        # the downstream returns a generator. The body is unread until
+        # we explicitly .read() (JSON path) or iter_lines() (SSE path).
         client = sv_client._test_clients[module_name];
         stream_cm = client.stream("POST", f"/function/{func_name}", json=args);
-        # Enter the context manager to inspect the response headers,
-        # then either consume as SSE (keeping it open for the iterator)
-        # or close and re-issue a non-streaming post.
         resp = stream_cm.__enter__();
         ct = resp.headers.get("content-type", "");
         if ct.startswith("text/event-stream") {
-            return consume_sse_stream(stream_cm, func_label);
+            # Hand off lifecycle to the wrapper. It will exhaust
+            # iter_lines() and call __exit__ on the cm in finally —
+            # we MUST NOT exit it here.
+            return _wrap_sse_keepalive(stream_cm, resp, None, func_label);
         }
         try {
             # Streaming responses don't auto-read the body; call .read()
@@ -1901,11 +1901,7 @@ impl JacAPIServer.sv_service_call
         resp = stream_cm.__enter__();
         ct = resp.headers.get("content-type", "");
         if ct.startswith("text/event-stream") {
-            # Hand the open context manager + client to the consumer; on
-            # generator exhaustion / close, consume_sse_stream calls
-            # __exit__ (which releases the connection) and we close the
-            # client right after.
-            return _wrap_streaming_close(stream_cm, client, func_label);
+            return _wrap_sse_keepalive(stream_cm, resp, client, func_label);
         }
         try {
             resp.read();
@@ -1932,21 +1928,31 @@ impl JacAPIServer.sv_service_call
 }
 
 
-"""Yield events from an httpx stream context manager, then close the
-underlying client when the consumer is done. Lives at module scope
-because Jac doesn't support nested defs.
+"""Drive consume_sse_stream against an already-entered httpx Response,
+then `__exit__` the parent context manager (and `close()` the owning
+Client, if any) once the consumer is done iterating. Hoisted to module
+scope (Jac doesn't support nested defs).
+
+`client` may be None — the TestClient code path passes None because
+the TestClient instance is owned by sv_client._test_clients and lives
+beyond the call.
 """
-def _wrap_streaming_close
-(stream_cm: Any, client: Any, func_label: str) -> Any {
+def _wrap_sse_keepalive
+(stream_cm: Any, resp: Any, client: Any, func_label: str) -> Any {
     import from jaclang.runtimelib.sv_sse { consume_sse_stream }
     try {
-        for ev in consume_sse_stream(stream_cm, func_label) {
+        for ev in consume_sse_stream(resp, func_label) {
             yield ev;
         }
     } finally {
         try {
-            client.close();
+            stream_cm.__exit__(None, None, None);
         } except Exception { ; }
+        if client {
+            try {
+                client.close();
+            } except Exception { ; }
+        }
     }
 }
 

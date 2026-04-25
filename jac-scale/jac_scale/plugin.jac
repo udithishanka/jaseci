@@ -804,7 +804,12 @@ class JacScalePlugin {
             resp = stream_cm.__enter__();
             ct = resp.headers.get("content-type", "");
             if ct.startswith("text/event-stream") {
-                return consume_sse_stream(stream_cm, func_label);
+                # Wrapper takes ownership of stream_cm.__exit__; do NOT
+                # exit it here. Pass None for client (TestClient is
+                # owned by sv_client._test_clients).
+                return _wrap_sse_keepalive_scale(
+                    stream_cm, resp, None, func_label
+                );
             }
             try {
                 # Streaming responses don't auto-read the body; httpx
@@ -873,8 +878,8 @@ class JacScalePlugin {
                     # transport success and hand back a generator that
                     # owns connection cleanup.
                     _breaker_record_success(module_name);
-                    return _wrap_sse_with_client_close(
-                        stream_cm, client, func_label
+                    return _wrap_sse_keepalive_scale(
+                        stream_cm, resp, client, func_label
                     );
                 }
                 try {
@@ -911,21 +916,30 @@ class JacScalePlugin {
 }
 
 
-"""Yield SSE events through the consumer, then close the owning httpx
-Client when the consumer is done. Hoisted to module scope (Jac doesn't
-support nested defs).
+"""Drive the SSE consumer against an already-entered Response, then
+__exit__ the parent context manager (and close() the owning httpx
+Client, if any) when the consumer is done iterating. Hoisted to
+module scope because Jac doesn't support nested defs.
+
+The TestClient branch passes `client=None` because the TestClient
+instance is owned by sv_client._test_clients and outlives the call.
 """
-def _wrap_sse_with_client_close
-(stream_cm: Any, client: Any, func_label: str) -> Any {
+def _wrap_sse_keepalive_scale
+(stream_cm: Any, resp: Any, client: Any, func_label: str) -> Any {
     import from jaclang.runtimelib.sv_sse { consume_sse_stream }
     try {
-        for ev in consume_sse_stream(stream_cm, func_label) {
+        for ev in consume_sse_stream(resp, func_label) {
             yield ev;
         }
     } finally {
         try {
-            client.close();
+            stream_cm.__exit__(None, None, None);
         } except Exception { ; }
+        if client {
+            try {
+                client.close();
+            } except Exception { ; }
+        }
     }
 }
 

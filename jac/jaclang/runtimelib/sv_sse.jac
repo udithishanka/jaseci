@@ -96,13 +96,17 @@ def _parse_sse(line_iter: Any) -> Iterator[tuple[str, str]] {
 }
 
 
-"""Consume an httpx streaming response (or a context manager that
-yields one) as an event iterator.
+"""Consume an httpx streaming Response as an event iterator.
+
+The Response MUST already have been opened (i.e. the caller already
+called `stream_cm.__enter__()` and is responsible for `__exit__()`
+when the iterator is exhausted or dropped). This split exists because
+the caller has to inspect `Content-Type` to decide whether the
+response is SSE at all — by then the context manager is already
+entered, and httpx doesn't support a second enter.
 
 Args:
-    resp_cm: an httpx.Client.stream(...) context manager OR an already-
-        entered httpx.Response. Both shapes are accepted to keep the
-        caller flexible.
+    resp: an entered httpx.Response (has working iter_lines()).
     func_label: identifier shown in error messages (`module.func` form).
 
 Yields: parsed event dicts as they arrive.
@@ -110,49 +114,32 @@ Yields: parsed event dicts as they arrive.
 Raises: RuntimeError with the producer's error payload if the stream
     closes with `event: error`; httpx exceptions for transport issues.
 """
-def consume_sse_stream(resp_cm: Any, func_label: str) -> Iterator[dict] {
-    # Detect context-manager vs already-entered Response. httpx.Response
-    # has `iter_lines`; the stream() call returns a context manager whose
-    # __enter__ returns the Response.
-    is_cm = hasattr(resp_cm, "__enter__") and not hasattr(resp_cm, "iter_lines");
-    resp = resp_cm.__enter__() if is_cm else resp_cm;
-    try {
-        for (event_name, data_text) in _parse_sse(resp.iter_lines()) {
-            if event_name == "end" {
-                return;
-            }
-            if event_name == "error" {
-                payload: dict = {};
-                try {
-                    payload = json.loads(data_text) if data_text else {};
-                } except Exception {
-                    payload = {"message": data_text};
-                }
-                msg = payload.get("message", "stream producer failed");
-                raise RuntimeError(
-                    f"sv-to-sv stream '{func_label}' raised: {msg}"
-                );
-            }
-            # Default "message" event — payload is the JSON of one item.
-            # Drop malformed payloads with a warning rather than killing the
-            # stream; one bad event shouldn't take out the whole turn.
-            try {
-                yield json.loads(data_text);
-            } except Exception as je {
-                _logger.warning(
-                    f"sv-to-sv stream '{func_label}': dropped malformed event ({je})"
-                );
-            }
+def consume_sse_stream(resp: Any, func_label: str) -> Iterator[dict] {
+    for (event_name, data_text) in _parse_sse(resp.iter_lines()) {
+        if event_name == "end" {
+            return;
         }
-    } finally {
-        if is_cm {
+        if event_name == "error" {
+            payload: dict = {};
             try {
-                resp_cm.__exit__(None, None, None);
-            } except Exception as e {
-                _logger.warning(
-                    f"sv-to-sv stream '{func_label}': error closing response: {e}"
-                );
+                payload = json.loads(data_text) if data_text else {};
+            } except Exception {
+                payload = {"message": data_text};
+            }
+            msg = payload.get("message", "stream producer failed");
+            raise RuntimeError(
+                f"sv-to-sv stream '{func_label}' raised: {msg}"
+            );
         }
+        # Default "message" event — payload is the JSON of one item.
+        # Drop malformed payloads with a warning rather than killing the
+        # stream; one bad event shouldn't take out the whole turn.
+        try {
+            yield json.loads(data_text);
+        } except Exception as je {
+            _logger.warning(
+                f"sv-to-sv stream '{func_label}': dropped malformed event ({je})"
+            );
         }
     }
 }
