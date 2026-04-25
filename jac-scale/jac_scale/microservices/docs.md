@@ -325,14 +325,65 @@ Default is 10s. Override for LLM / generation / long-running services:
 rpc_timeout = 120.0
 ```
 
-The override is read on every `sv` RPC and passed through to `httpx.post(timeout=...)`.
+The override is read on every `sv` RPC and passed through to
+`httpx.Client(timeout=...)`.
 
-### WebSockets + SSE streaming
+### Streaming sv-to-sv RPC (generator returns)
+
+A `def:pub` function that returns a Python generator (or any iterator
+yielding JSON-serializable dicts) is automatically delivered to the
+caller as a live stream. No new toml — the framing is per-call:
+
+```jac
+# Provider service
+def:pub stream_events(run_id: str) -> Iterator[dict] {
+    yield {"type": "started", "run_id": run_id};
+    for chunk in some_long_running_work() {
+        yield {"type": "chunk", "data": chunk};
+    }
+    yield {"type": "done"};
+}
+
+# Consumer service — exact same call shape as a non-streaming sv import,
+# the runtime reads Content-Type and returns a generator on SSE.
+sv import from llm_app { stream_events }
+
+for ev in stream_events(run_id="abc") {
+    handle(ev);
+}
+```
+
+Wire format: `Content-Type: text/event-stream`, each yield framed as
+`data: {json}\n\n`, terminated by `event: end\ndata: {}\n\n`. Producer-
+side exceptions raised mid-stream surface as `event: error\ndata: {...}`
+and re-raise as a `RuntimeError` out of the consumer's iterator
+(so a normal `for ... in` loop sees the failure rather than a
+silently-truncated stream).
+
+Lifecycle: the consumer's generator owns the underlying httpx
+connection. Exhausting the iterator OR letting it go out of scope
+closes the connection cleanly. Dropping mid-stream (consumer
+disconnects) closes too — the producer's `finally` blocks run.
+
+`rpc_timeout` semantics on streaming: the timeout applies to
+*establishing* the connection and to each blocking read between
+events. A long, idle stream that sends no events for `rpc_timeout`
+seconds will time out, matching the behavior we want for a hung
+producer; a fast-stepping stream of any total duration is fine.
+
+Retries are skipped once the stream is open: an in-flight stream
+cannot be replayed without losing already-consumed events. Connect-
+time failures (DNS, refused) still retry + count against the breaker
+as they would for a non-streaming RPC.
+
+### WebSockets + SSE proxy at the gateway
 
 No config needed. Any client-hit `/api/{service}/ws/{rest}` is proxied
 bidirectionally to `{service}`'s `ws://.../ws/{rest}` endpoint with
 auth + trace forwarding. HTTP responses that are `text/event-stream`
-or chunked are streamed through the gateway rather than buffered.
+or chunked are streamed through the gateway rather than buffered —
+this also covers the generator-return path above when a public
+client (vs. another sv-imported service) hits it.
 
 ### CORS
 
