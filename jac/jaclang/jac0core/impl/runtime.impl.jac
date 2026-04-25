@@ -1879,6 +1879,9 @@ impl JacAPIServer.sv_service_call
             return consume_sse_stream(stream_cm, func_label);
         }
         try {
+            # Streaming responses don't auto-read the body; call .read()
+            # before .json() (httpx raises ResponseNotRead otherwise).
+            resp.read();
             data = resp.json();
         } finally {
             stream_cm.__exit__(None, None, None);
@@ -1905,6 +1908,7 @@ impl JacAPIServer.sv_service_call
             return _wrap_streaming_close(stream_cm, client, func_label);
         }
         try {
+            resp.read();
             data = resp.json();
         } finally {
             stream_cm.__exit__(None, None, None);
