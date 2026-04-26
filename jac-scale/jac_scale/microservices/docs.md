@@ -226,7 +226,7 @@ escapes are rejected.
 **When dist works fine**: prefer building assets into dist if your
 bundler already produces them (e.g. monaco workers via vite plugins).
 Static mounts shine when you have a stable repo-root directory with
-content that has no reason to be rebuilt by vite — fonts, vendored WASM,
+content that has no reason to be rebuilt by vite - fonts, vendored WASM,
 agent prompt fixtures, manifest files, etc.
 
 ## What Is and Isn't a Service
@@ -332,7 +332,7 @@ The override is read on every `sv` RPC and passed through to
 
 A `def:pub` function that returns a Python generator (or any iterator
 yielding JSON-serializable dicts) is automatically delivered to the
-caller as a live stream. No new toml — the framing is per-call:
+caller as a live stream. No new toml - the framing is per-call:
 
 ```jac
 # Provider service
@@ -344,7 +344,7 @@ def:pub stream_events(run_id: str) -> Iterator[dict] {
     yield {"type": "done"};
 }
 
-# Consumer service — exact same call shape as a non-streaming sv import,
+# Consumer service - exact same call shape as a non-streaming sv import,
 # the runtime reads Content-Type and returns a generator on SSE.
 sv import from llm_app { stream_events }
 
@@ -363,7 +363,7 @@ silently-truncated stream).
 Lifecycle: the consumer's generator owns the underlying httpx
 connection. Exhausting the iterator OR letting it go out of scope
 closes the connection cleanly. Dropping mid-stream (consumer
-disconnects) closes too — the producer's `finally` blocks run.
+disconnects) closes too - the producer's `finally` blocks run.
 
 `rpc_timeout` semantics on streaming: the timeout applies to
 *establishing* the connection and to each blocking read between
@@ -381,13 +381,13 @@ as they would for a non-streaming RPC.
 No config needed. Any client-hit `/api/{service}/ws/{rest}` is proxied
 bidirectionally to `{service}`'s `ws://.../ws/{rest}` endpoint with
 auth + trace forwarding. HTTP responses that are `text/event-stream`
-or chunked are streamed through the gateway rather than buffered —
+or chunked are streamed through the gateway rather than buffered -
 this also covers the generator-return path above when a public
 client (vs. another sv-imported service) hits it.
 
 ### CORS
 
-Open by default — `allow_origins` defaults to `["*"]` so local SPA
+Open by default - `allow_origins` defaults to `["*"]` so local SPA
 dev workflows (Vite on `:5173`, React on `:3000`, etc.) work without
 config. Override to restrict:
 
