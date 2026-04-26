@@ -423,11 +423,11 @@ responses carry the standard envelope + `Retry-After` header.
 
 ### Observability
 
-- `GET /health` — JSON summary of service statuses (always on).
-- `GET /metrics` — Prometheus exposition. Enable with
+- `GET /health` - JSON summary of service statuses (always on).
+- `GET /metrics` - Prometheus exposition. Enable with
   `[plugins.scale.monitoring] enabled = true`.
-- `X-Trace-Id` — gateway mints one if the client omits it and threads
+- `X-Trace-Id` - gateway mints one if the client omits it and threads
   it through every downstream hop (including `sv` RPCs). Echoed back
   on every response.
-- `GET /docs` + `GET /openapi.json` — unified Swagger UI + merged
+- `GET /docs` + `GET /openapi.json` - unified Swagger UI + merged
   OpenAPI doc across all healthy services.
