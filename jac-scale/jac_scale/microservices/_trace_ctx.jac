@@ -27,7 +27,7 @@ def set_current_trace(trace_id: str | None) -> Any {
 }
 
 """Reset the trace-id ContextVar to its previous value."""
-def reset_current_trace(token_obj: Any) -> None {
+def reset_current_trace(token_obj: Any) {
     _trace_id.reset(token_obj);
 }
 

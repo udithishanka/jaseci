@@ -21,7 +21,7 @@ glob _order_counter: int = 0;
 
 to sv:
 
-def:pub create_order() -> dict {
+def:pub create_order -> dict {
     # 1. Fetch cart from cart service via sv import (HTTP under the hood)
     cart = view_cart();
     items = cart.get("items", []) if cart else [];
@@ -60,16 +60,18 @@ def:pub create_order() -> dict {
     };
 }
 
-def:pub list_orders() -> list[dict] {
+def:pub list_orders -> list[dict] {
     result: list[dict] = [];
     for o in [root()-->][?:Order] {
-        result.append({
-            "id": o.id,
-            "status": o.status,
-            "total": o.total,
-            "item_count": len(o.items),
-            "created_at": o.created_at
-        });
+        result.append(
+            {
+                "id": o.id,
+                "status": o.status,
+                "total": o.total,
+                "item_count": len(o.items),
+                "created_at": o.created_at
+            }
+        );
     }
     return result;
 }

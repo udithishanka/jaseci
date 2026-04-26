@@ -24,9 +24,7 @@ document covering the healthy services - partial is better than none.
 
 import logging;
 import from typing { Any }
-import from jac_scale.microservices.service_registry {
-    ServiceRegistry, ServiceStatus
-}
+import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceStatus }
 
 glob _agg_logger = logging.getLogger(__name__);
 
@@ -86,7 +84,8 @@ async def aggregate_openapi(registry: ServiceRegistry) -> dict {
                 }
                 body: bytes = resp.read();
                 doc: dict = json.loads(body.decode("utf-8"));
-        } } except URLError as e {
+            }
+        } except URLError as e {
             _agg_logger.warning(f"openapi aggregate: skipping {name}: {e}");
             continue;
         } except Exception as e {

@@ -127,9 +127,7 @@ def consume_sse_stream(resp: Any, func_label: str) -> Iterator[dict] {
                 payload = {"message": data_text};
             }
             msg = payload.get("message", "stream producer failed");
-            raise RuntimeError(
-                f"sv-to-sv stream '{func_label}' raised: {msg}"
-            );
+            raise RuntimeError(f"sv-to-sv stream '{func_label}' raised: {msg}");
         }
         # Default "message" event — payload is the JSON of one item.
         # Drop malformed payloads with a warning rather than killing the

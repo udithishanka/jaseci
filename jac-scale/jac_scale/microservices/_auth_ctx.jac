@@ -25,7 +25,7 @@ def set_current_auth(token: str | None) -> Any {
 }
 
 """Reset the auth context var to its previous value."""
-def reset_current_auth(token_obj: Any) -> None {
+def reset_current_auth(token_obj: Any) {
     _auth_token.reset(token_obj);
 }
 

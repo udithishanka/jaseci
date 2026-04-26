@@ -600,9 +600,7 @@ class JacAPIServer {
         Returns the unwrapped result from the TransportResponse envelope.
         Raises RuntimeError on transport or application-level failure.
         """
-    static def sv_service_call(
-        module_name: str, func_name: str, args: dict
-    ) -> Any;
+    static def sv_service_call(module_name: str, func_name: str, args: dict) -> Any;
 
     """Return the current sv-service registry as a {module_name: base_url} dict.
 

@@ -6,12 +6,16 @@ import uvicorn;
 import from pathlib { Path }
 import from fastapi { FastAPI, Request }
 import from fastapi.responses { HTMLResponse, JSONResponse, Response }
-import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceEntry, ServiceStatus }
+import from jac_scale.microservices.service_registry {
+    ServiceRegistry,
+    ServiceEntry,
+    ServiceStatus
+}
 import from jac_scale.microservices.impl.http_forward { raw_forward }
 import from typing { Any }
 
 glob logger = logging.getLogger(__name__),
-     HOP_BY_HOP_HEADERS: set[str] = {"host", "transfer-encoding", "connection", "keep-alive"};
+     HOP_BY_HOP_HEADERS: set[str] = {"host","transfer-encoding","connection","keep-alive"};
 
 """API Gateway that routes requests to microservices by path prefix.
 
@@ -48,13 +52,14 @@ obj MicroserviceGateway {
     def resolve_target_url(service_entry: ServiceEntry, path: str, query: str) -> str;
 
     # --- request handlers (each returns a Response or None to defer) ---
-
     """Return the health summary response."""
     def handle_health -> Response;
 
     """Forward built-in jac-scale routes (/user/*, /walker/*, /function/* etc)
        to any healthy service; returns None if path isn't a built-in."""
-    async def handle_builtin_passthrough(request: Request, path: str) -> Response | None;
+    async def handle_builtin_passthrough(
+        request: Request, path: str
+    ) -> Response | None;
 
     """Handle admin UI routes; returns None if not an admin path."""
     def handle_admin(path: str) -> Response | None;
@@ -76,7 +81,6 @@ obj MicroserviceGateway {
     def handle_docs -> Response;
 
     # --- helpers used by handlers ---
-
     """Forward selected request headers to a target, stripping hop-by-hop headers."""
     def build_forward_headers(request: Request) -> dict[str, str];
 

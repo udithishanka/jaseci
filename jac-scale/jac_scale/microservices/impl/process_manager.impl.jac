@@ -14,7 +14,7 @@ def _pidfile_path(name: str) -> _Path {
 }
 
 """Write a service's pid to its pidfile."""
-def _write_pidfile(name: str, pid: int) -> None {
+def _write_pidfile(name: str, pid: int) {
     run_dir = _Path(".jac/run");
     run_dir.mkdir(parents=True, exist_ok=True);
     _pidfile_path(name).write_text(str(pid));
@@ -38,7 +38,7 @@ def _read_pidfile(name: str) -> int | None {
 }
 
 """Remove a service's pidfile (idempotent)."""
-def _remove_pidfile(name: str) -> None {
+def _remove_pidfile(name: str) {
     path = _pidfile_path(name);
     try {
         if path.exists() {
@@ -78,12 +78,11 @@ instantiate ServiceProcessManager directly (without a deployer wired
 in) keep working without a mock. K8sDeployer callers will always go
 through the deployer branch.
 """
-impl ServiceProcessManager._url_for
-(service_entry: ServiceEntry) -> str {
+impl ServiceProcessManager._url_for(service_entry: ServiceEntry) -> str {
     if self.deployer is not None {
         # `deployer` is typed `Any | None` to avoid a circular import with
         # deployer.jac; getattr dispatches to the concrete url_for impl.
-        url_fn = getattr(self.deployer, "url_for", None);
+        url_fn = self.deployer?.url_for;
         if url_fn is not None {
             result: str = url_fn(service_entry);
             return result;
@@ -98,8 +97,7 @@ Delegates to `_util.pick_free_port` so our deployer URLs stay consistent
 with core's `ensure_sv_service` port strategy and with the plugin's own
 hookimpl. Respects a pre-assigned `service_entry.port` if > 0.
 """
-impl ServiceProcessManager._assign_port
-(service_entry: ServiceEntry) -> int {
+impl ServiceProcessManager._assign_port(service_entry: ServiceEntry) -> int {
     if service_entry.port > 0 {
         return service_entry.port;
     }
@@ -108,8 +106,7 @@ impl ServiceProcessManager._assign_port
 }
 
 """Start a single service subprocess. Returns True on success."""
-impl ServiceProcessManager.start_service
-(name: str) -> bool {
+impl ServiceProcessManager.start_service(name: str) -> bool {
     if name not in self.registry.entries {
         logger.error(f"Service '{name}' not found in registry");
         return False;
@@ -150,11 +147,7 @@ impl ServiceProcessManager.start_service
         log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND);
 
         proc = subprocess.Popen(
-            cmd,
-            stdout=log_fd,
-            stderr=log_fd,
-            stdin=subprocess.DEVNULL,
-            env=child_env
+            cmd, stdout=log_fd, stderr=log_fd, stdin=subprocess.DEVNULL, env=child_env
         );
         os.close(log_fd);
         self.processes[name] = proc;
@@ -197,8 +190,7 @@ Two passes:
      identity_users sqlite table when every service's SQLAlchemy
      engine calls create_all() simultaneously.
 """
-impl ServiceProcessManager.start_all
--> None {
+impl ServiceProcessManager.start_all -> None {
     import from jac_scale.microservices._util { wait_for_health }
 
     for (name, entry) in self.registry.entries.items() {
@@ -213,13 +205,9 @@ impl ServiceProcessManager.start_all
         entry = self.registry.entries[name];
         proc = self.processes.get(name);
         if proc and entry.url {
-            ok = wait_for_health(
-                entry.url, lambda : proc.poll() is None, timeout=20.0
-            );
+            ok = wait_for_health(entry.url, lambda : proc.poll() is None, timeout=20.0);
             if not ok {
-                logger.warning(
-                    f"{name} did not become healthy within 20s; proceeding"
-                );
+                logger.warning(f"{name} did not become healthy within 20s; proceeding");
             }
         }
     }
@@ -237,8 +225,7 @@ Works in two modes:
   Popen handle; read the pidfile and os.kill the recorded pid. Clean
   up the pidfile either way so stale state doesn't accumulate.
 """
-impl ServiceProcessManager.stop_service
-(name: str) -> bool {
+impl ServiceProcessManager.stop_service(name: str) -> bool {
     import os;
     import time;
     import signal;
@@ -266,7 +253,9 @@ impl ServiceProcessManager.stop_service
             return False;
         }
         if not _pid_alive(pid) {
-            logger.info(f"{name} pid {pid} is not running (stale pidfile); cleaning up");
+            logger.info(
+                f"{name} pid {pid} is not running (stale pidfile); cleaning up"
+            );
             _remove_pidfile(name);
             if entry {
                 entry.status = ServiceStatus.STOPPED;
@@ -310,8 +299,7 @@ impl ServiceProcessManager.stop_service
 }
 
 """Stop all running services."""
-impl ServiceProcessManager.stop_all
--> None {
+impl ServiceProcessManager.stop_all -> None {
     names = list(self.processes.keys());
     for name in names {
         self.stop_service(name);
@@ -319,15 +307,13 @@ impl ServiceProcessManager.stop_all
 }
 
 """Restart a service (stop + start)."""
-impl ServiceProcessManager.restart_service
-(name: str) -> bool {
+impl ServiceProcessManager.restart_service(name: str) -> bool {
     self.stop_service(name);
     return self.start_service(name);
 }
 
 """Check /health on a single service. Returns True if healthy."""
-impl ServiceProcessManager.check_health
-(name: str) -> bool {
+impl ServiceProcessManager.check_health(name: str) -> bool {
     entry = self.registry.entries.get(name);
     if not entry or not entry.url {
         return False;
@@ -345,8 +331,7 @@ impl ServiceProcessManager.check_health
 }
 
 """Run health checks on all services. Returns per-service results."""
-impl ServiceProcessManager.check_all_health
--> dict[str, bool] {
+impl ServiceProcessManager.check_all_health -> dict[str, bool] {
     results: dict[str, bool] = {};
 
     for (name, entry) in self.registry.entries.items() {
@@ -361,7 +346,9 @@ impl ServiceProcessManager.check_all_health
             if self._failure_counts[name] >= self._max_failures {
                 entry.status = ServiceStatus.UNHEALTHY;
                 logger.warning(
-                    f"{name} is UNHEALTHY ({self._failure_counts[name]} consecutive failures)"
+                    f"{name} is UNHEALTHY ({self._failure_counts[
+                        name
+                    ]} consecutive failures)"
                 );
             }
         }

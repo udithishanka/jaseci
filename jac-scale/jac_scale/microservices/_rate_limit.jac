@@ -79,7 +79,7 @@ def _resolve_client_ip(request: Any) -> str {
     if xff {
         return xff.split(",")[0].strip();
     }
-    client = getattr(request, "client", None);
+    client = request?.client;
     return getattr(client, "host", "unknown") if client else "unknown";
 }
 
@@ -107,8 +107,7 @@ def build_rate_limit_middleware(cfg: dict[str, Any]) -> Any {
     ip_limiter: InProcessRateLimiter | None = None;
     if per_ip_rpm > 0 {
         ip_limiter = InProcessRateLimiter(
-            rate_per_sec=per_ip_rpm / 60.0,
-            capacity=max(1.0, per_ip_rpm * burst / 60.0)
+            rate_per_sec=per_ip_rpm / 60.0, capacity=max(1.0, per_ip_rpm * burst / 60.0)
         );
     }
     user_limiter: InProcessRateLimiter | None = None;

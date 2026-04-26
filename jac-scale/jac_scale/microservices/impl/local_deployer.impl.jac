@@ -17,8 +17,7 @@ impl LocalDeployer._ensure_pm -> ServiceProcessManager {
 }
 
 """Loopback URL for a service running as a local subprocess."""
-impl LocalDeployer.url_for
-(service_entry: ServiceEntry) -> str {
+impl LocalDeployer.url_for(service_entry: ServiceEntry) -> str {
     return f"http://127.0.0.1:{service_entry.port}";
 }
 
@@ -51,7 +50,9 @@ impl LocalDeployer.restart_service(name: str) -> bool {
 """Scale is not supported locally - always 1 replica."""
 impl LocalDeployer.scale_service(name: str, replicas: int) -> bool {
     if replicas != 1 {
-        logger.warning(f"Local deployer only supports 1 replica per service (requested {replicas})");
+        logger.warning(
+            f"Local deployer only supports 1 replica per service (requested {replicas})"
+        );
     }
     # If replicas is 0, stop the service
     if replicas == 0 {

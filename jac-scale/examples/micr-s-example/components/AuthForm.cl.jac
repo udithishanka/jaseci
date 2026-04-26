@@ -55,8 +55,8 @@ def:pub AuthForm(
                     {error}
                 </div>
             )
-            if error
-            else None}
+                if error
+                else None}
             <form onSubmit={onSubmit}>
                 <input
                     type="text"
@@ -108,8 +108,8 @@ def:pub AuthForm(
                     {(
                         (
                             "Processing..."
-                            if loading
-                            else ("Sign Up" if isSignup else "Log In")
+                                if loading
+                                else ("Sign Up" if isSignup else "Log In")
                         )
                     )}
                 </button>
@@ -117,8 +117,8 @@ def:pub AuthForm(
             <p style={{"textAlign": "center", "color": "#666", "fontSize": "0.9rem"}}>
                 {(
                     "Already have an account? "
-                    if isSignup
-                    else "Don't have an account? "
+                        if isSignup
+                        else "Don't have an account? "
                 )}
                 <span
                     onClick={onToggleMode}

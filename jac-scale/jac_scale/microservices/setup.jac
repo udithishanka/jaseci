@@ -18,7 +18,7 @@ import from pathlib { Path }
 """Scan the project for .jac files, excluding build artifacts."""
 def scan_jac_files(project_root: str = ".") -> list[str] {
     base_dir = Path(project_root);
-    exclude_dirs: set[str] = {".jac", "__pycache__", "node_modules", ".git", "dist", "build", "__jac_gen__"};
+    exclude_dirs: set[str] = {".jac","__pycache__","node_modules",".git","dist","build","__jac_gen__"};
     jac_files: list[str] = [];
 
     for f in base_dir.rglob("*.jac") {
@@ -73,7 +73,9 @@ def run_setup(project_root: str = ".") -> None {
         print(f"  {i + 1}. {f}");
     }
 
-    selection = input("\nSelect files to run as microservices (comma-separated numbers): ").strip();
+    selection = input(
+        "\nSelect files to run as microservices (comma-separated numbers): "
+    ).strip();
     if not selection {
         print("No services selected. Exiting.");
         return;
@@ -150,37 +152,39 @@ def run_setup(project_root: str = ".") -> None {
     # Reference blocks for production-hardening knobs. Left commented so
     # the default stance is safe: no CORS, no rate limiting. Uncomment
     # and tune per deployment.
-    lines.extend([
-        "# Graceful drain window on SIGTERM (seconds). Matches K8s",
-        "# terminationGracePeriodSeconds. Default: 10.",
-        "# [plugins.scale.microservices]",
-        "# drain_timeout_seconds = 10",
-        "",
-        "# Per-service RPC timeout override (seconds). Raise for LLM /",
-        "# long-running services.",
-        "# [plugins.scale.microservices.services.llm_app]",
-        "# rpc_timeout = 120.0",
-        "",
-        "# CORS middleware. Open by default (any origin; allow_origins",
-        "# defaults to [\"*\"]). Uncomment to restrict, or set",
-        "# allow_origins = [] to disable entirely. Note: allow_credentials",
-        "# = true requires a concrete allow_origins list per CORS spec.",
-        "# [plugins.scale.microservices.cors]",
-        '# allow_origins = ["https://app.example.com"]',
-        '# allow_methods = ["GET", "POST", "OPTIONS"]',
-        '# allow_headers = ["Authorization", "Content-Type"]',
-        "# allow_credentials = true",
-        "# max_age = 600",
-        "",
-        "# Rate limiting (token bucket, per-IP + optional per-user).",
-        "# [plugins.scale.microservices.rate_limit]",
-        "# enabled = true",
-        "# per_ip_rpm = 600",
-        "# per_user_rpm = 120",
-        "# burst_multiplier = 2.0",
-        '# exempt_paths = ["/health", "/healthz", "/metrics"]',
-        ""
-    ]);
+    lines.extend(
+        [
+            "# Graceful drain window on SIGTERM (seconds). Matches K8s",
+            "# terminationGracePeriodSeconds. Default: 10.",
+            "# [plugins.scale.microservices]",
+            "# drain_timeout_seconds = 10",
+            "",
+            "# Per-service RPC timeout override (seconds). Raise for LLM /",
+            "# long-running services.",
+            "# [plugins.scale.microservices.services.llm_app]",
+            "# rpc_timeout = 120.0",
+            "",
+            "# CORS middleware. Open by default (any origin; allow_origins",
+            "# defaults to [\"*\"]). Uncomment to restrict, or set",
+            "# allow_origins = [] to disable entirely. Note: allow_credentials",
+            "# = true requires a concrete allow_origins list per CORS spec.",
+            "# [plugins.scale.microservices.cors]",
+            '# allow_origins = ["https://app.example.com"]',
+            '# allow_methods = ["GET", "POST", "OPTIONS"]',
+            '# allow_headers = ["Authorization", "Content-Type"]',
+            "# allow_credentials = true",
+            "# max_age = 600",
+            "",
+            "# Rate limiting (token bucket, per-IP + optional per-user).",
+            "# [plugins.scale.microservices.rate_limit]",
+            "# enabled = true",
+            "# per_ip_rpm = 600",
+            "# per_user_rpm = 120",
+            "# burst_multiplier = 2.0",
+            '# exempt_paths = ["/health", "/healthz", "/metrics"]',
+            ""
+        ]
+    );
 
     toml_path.write_text("\n".join(lines));
 
@@ -296,7 +300,9 @@ def list_services(project_root: str) -> None {
     client = ms.get("client", {});
 
     print(f"Microservice mode: {'ENABLED' if enabled else 'DISABLED'}");
-    print(f"Gateway: {ms.get('gateway_host', '0.0.0.0')}:{ms.get('gateway_port', 8000)}");
+    print(
+        f"Gateway: {ms.get('gateway_host', '0.0.0.0')}:{ms.get('gateway_port', 8000)}"
+    );
 
     if routes {
         print(f"\nRoutes ({len(routes)}):");

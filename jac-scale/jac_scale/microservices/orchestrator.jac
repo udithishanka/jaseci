@@ -5,7 +5,11 @@ import atexit;
 import logging;
 import from typing { Any }
 import from jaclang.cli.console { console }
-import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceEntry, ServiceStatus }
+import from jac_scale.microservices.service_registry {
+    ServiceRegistry,
+    ServiceEntry,
+    ServiceStatus
+}
 import from jac_scale.microservices.process_manager { ServiceProcessManager }
 import from jac_scale.microservices.local_deployer { LocalDeployer }
 import from jac_scale.microservices.gateway { MicroserviceGateway }
@@ -24,10 +28,7 @@ def build_registry(ms_config: dict[str, Any]) -> ServiceRegistry {
     for (route_name, prefix) in routes.items() {
         name_str: str = str(route_name);
         svc_entry = ServiceEntry(
-            name=name_str,
-            file=f"{name_str}.jac",
-            prefix=str(prefix),
-            port=0
+            name=name_str, file=f"{name_str}.jac", prefix=str(prefix), port=0
         );
         registry.register(svc_entry);
         logger.info(f"Registered route: {name_str} -> {svc_entry.prefix}");
@@ -55,8 +56,12 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
 
     # 0. Build client if configured
     client_config = ms_config.get("client", {});
-    client_entry: str = str(dict(client_config).get("entry", "")) if client_config else "";
-    client_dist: str = str(dict(client_config).get("dist_dir", ".jac/client/dist")) if client_config else ".jac/client/dist";
+    client_entry: str = str(dict(client_config).get("entry", ""))
+        if client_config
+        else "";
+    client_dist: str = str(dict(client_config).get("dist_dir", ".jac/client/dist"))
+        if client_config
+        else ".jac/client/dist";
 
     if client_entry {
         import subprocess;
@@ -68,13 +73,14 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
             console.print(f"  Building client from {client_entry}...");
             try {
                 build_result = subprocess.run(
-                    ["jac", "build", client_entry],
-                    timeout=120
+                    ["jac", "build", client_entry], timeout=120
                 );
                 if build_result.returncode == 0 {
                     console.print("  Client build complete");
                 } else {
-                    logger.warning("Client build failed - gateway will start without client UI");
+                    logger.warning(
+                        "Client build failed - gateway will start without client UI"
+                    );
                 }
             } except subprocess.TimeoutExpired {
                 logger.warning("Client build timed out");
@@ -134,7 +140,9 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
     gateway_port: int = int(ms_config.get("gateway_port", 8000));
     gateway_host: str = str(ms_config.get("gateway_host", "0.0.0.0"));
     client_config = ms_config.get("client", {});
-    client_dist: str = str(dict(client_config).get("dist_dir", ".jac/client/dist")) if client_config else ".jac/client/dist";
+    client_dist: str = str(dict(client_config).get("dist_dir", ".jac/client/dist"))
+        if client_config
+        else ".jac/client/dist";
 
     console.print();
     console.print("[bold cyan]  Jac Microservice Mode[/bold cyan]");
@@ -201,13 +209,10 @@ def start_microservice_mode(ms_config: dict[str, Any]) -> None {
             url_prefix = str(ed.get("url_prefix", "")).strip();
             local_path = str(ed.get("local_path", "")).strip();
             if url_prefix and local_path {
-                static_mounts.append({
-                    "url_prefix": url_prefix,
-                    "local_path": local_path,
-                });
-                logger.info(
-                    f"Static mount: {url_prefix} -> {local_path}"
+                static_mounts.append(
+                    {"url_prefix": url_prefix, "local_path": local_path,}
                 );
+                logger.info(f"Static mount: {url_prefix} -> {local_path}");
             }
         }
     }

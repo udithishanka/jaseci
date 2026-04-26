@@ -35,21 +35,17 @@ Returns (registry, requests_counter, duration_histogram) or (None, None, None)
 if prometheus_client isn't available.
 """
 def build_gateway_metrics(
-    namespace: str = "jac_scale",
-    histogram_buckets: list[float] | None = None
+    namespace: str = "jac_scale", histogram_buckets: list[float] | None = None
 ) -> tuple[Any, Any, Any] {
     try {
-        import from prometheus_client {
-            CollectorRegistry, Counter, Histogram
-        }
+        import from prometheus_client { CollectorRegistry, Counter, Histogram }
     } except ImportError {
         return (None, None, None);
     }
 
     registry = CollectorRegistry();
-    buckets = histogram_buckets or [
-        0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0
-    ];
+    buckets = histogram_buckets
+    or [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0];
 
     requests = Counter(
         "gateway_requests_total",
@@ -97,9 +93,7 @@ def render_metrics(registry: Any) -> tuple[bytes, str] {
         return (b"", "text/plain");
     }
     try {
-        import from prometheus_client {
-            generate_latest, CONTENT_TYPE_LATEST
-        }
+        import from prometheus_client { generate_latest, CONTENT_TYPE_LATEST }
     } except ImportError {
         return (b"", "text/plain");
     }

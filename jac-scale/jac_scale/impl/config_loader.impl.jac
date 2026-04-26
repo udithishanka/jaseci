@@ -116,11 +116,7 @@ impl JacScaleConfig.get_default_config(self: JacScaleConfig) -> dict[str, Any] {
             'gateway_port': 8000,
             'gateway_host': '0.0.0.0',
             'routes': {},
-            'client': {
-                'entry': '',
-                'dist_dir': '.jac/client/dist',
-                'base_route': '/'
-            }
+            'client': {'entry': '', 'dist_dir': '.jac/client/dist', 'base_route': '/'}
         }
     };
 }
@@ -357,7 +353,9 @@ impl JacScaleConfig.get_microservices_config(self: JacScaleConfig) -> dict[str, 
             'per_ip_rpm': int(rl_config.get('per_ip_rpm', 60)),
             'per_user_rpm': int(rl_config.get('per_user_rpm', 0)),
             'burst_multiplier': float(rl_config.get('burst_multiplier', 2.0)),
-            'exempt_paths': list(rl_config.get('exempt_paths', ["/health", "/healthz", "/metrics"]))
+            'exempt_paths': list(
+                rl_config.get('exempt_paths', ["/health", "/healthz", "/metrics"])
+            )
         },
         'cors': {
             # Open-by-default so local dev (SPA on :5173 etc.) works

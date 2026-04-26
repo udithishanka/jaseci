@@ -62,10 +62,7 @@ False otherwise (timeout or early exit). The caller decides how to
 react (log a warning, raise, restart, etc.).
 """
 def wait_for_health(
-    base_url: str,
-    proc_alive: Any,
-    timeout: float = 15.0,
-    poll_interval: float = 0.1
+    base_url: str, proc_alive: Any, timeout: float = 15.0, poll_interval: float = 0.1
 ) -> bool {
     import time;
     import urllib.request;

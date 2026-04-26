@@ -31,17 +31,15 @@ import from inspect { isgenerator }
 import from typing { Any, AsyncIterator, AsyncGenerator }
 
 
-glob _logger: logging.Logger = logging.getLogger("jac_scale.microservices.sse");
-
-# Use the str() builtin as the json.dumps default so types like UUID,
-# datetime, etc. that the user's events may contain become string
-# representations instead of raising. Hoisted to module scope so we
-# don't re-bind it on every yield.
-glob _DEFAULT: Any = str;
-
-# Sentinel used to detect end-of-stream from the worker-thread side
-# (asyncio.to_thread can't propagate StopIteration cleanly).
-glob _STOP: Any = object();
+glob _logger: logging.Logger = logging.getLogger("jac_scale.microservices.sse"),
+     # Use the str() builtin as the json.dumps default so types like UUID,
+     # datetime, etc. that the user's events may contain become string
+     # representations instead of raising. Hoisted to module scope so we
+     # don't re-bind it on every yield.
+     _DEFAULT: Any = str,
+     # Sentinel used to detect end-of-stream from the worker-thread side
+     # (asyncio.to_thread can't propagate StopIteration cleanly).
+     _STOP: Any = object();
 
 
 """Drive `next(gen)` on a worker thread; return _STOP at end-of-stream.
@@ -73,7 +71,9 @@ async def sse_frame_stream(gen: Any) -> AsyncIterator[str] {
     sync = isgenerator(gen);
     if not sync and not isinstance(gen, AsyncGenerator) {
         raise TypeError(
-            f"sse_frame_stream expected a generator or async generator, got {type(gen).__name__}"
+            f"sse_frame_stream expected a generator or async generator, got {type(
+                gen
+            ).__name__}"
         );
     }
 
@@ -102,19 +102,18 @@ async def sse_frame_stream(gen: Any) -> AsyncIterator[str] {
         yield "event: end\ndata: {}\n\n";
     } except Exception as e {
         _logger.exception("sse_frame_stream: producer raised");
-        err_payload = {
-            "error_type": type(e).__name__,
-            "message": str(e),
-        };
+        err_payload = {"error_type": type(e).__name__, "message": str(e),};
         yield f"event: error\ndata: {json.dumps(err_payload, default=_DEFAULT)}\n\n";
     } finally {
         # Best-effort cleanup so a long-running queue producer can drop its
         # state when the consumer disconnects mid-stream.
         try {
-            close_fn = getattr(gen, "close", None);
+            close_fn = gen?.close;
             if close_fn {
                 close_fn();
             }
-        } except Exception { ; }
+        } except Exception {
+            ;
+        }
     }
 }

@@ -64,11 +64,7 @@ def error_response(
         err["trace_id"] = trace;
     }
 
-    body: dict = {
-        "ok": False,
-        "error": err,
-        "meta": {"http_status": status}
-    };
+    body: dict = {"ok": False, "error": err, "meta": {"http_status": status}};
 
     headers: dict[str, str] = {};
     if retry_after_seconds is not None {
@@ -107,9 +103,5 @@ def gateway_timeout(service: str) -> JSONResponse {
 
 """Convenience: no route matches the requested path."""
 def not_found(path: str, message: str = "Not found") -> JSONResponse {
-    return error_response(
-        code="NOT_FOUND",
-        message=f"{message}: {path}",
-        status=404
-    );
+    return error_response(code="NOT_FOUND", message=f"{message}: {path}", status=404);
 }

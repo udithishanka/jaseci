@@ -6,7 +6,11 @@ overridden for different deployment targets (local subprocesses, K8s pods, etc.)
 
 import logging;
 import from typing { Any }
-import from jac_scale.microservices.service_registry { ServiceRegistry, ServiceEntry, ServiceStatus }
+import from jac_scale.microservices.service_registry {
+    ServiceRegistry,
+    ServiceEntry,
+    ServiceStatus
+}
 
 glob logger = logging.getLogger(__name__);
 

@@ -1136,7 +1136,8 @@ impl JFastApiServer.init(
         # The sv_service_call hookimpl in plugin.jac reads this ContextVar
         # and forwards the header to the downstream service.
         import from jac_scale.microservices._auth_ctx {
-            set_current_auth, reset_current_auth
+            set_current_auth,
+            reset_current_auth
         }
         auth_token = set_current_auth(request.headers.get('Authorization'));
 
@@ -1147,7 +1148,9 @@ impl JFastApiServer.init(
         # get a [trace=xxxx] prefix matching the gateway's and every
         # sibling service's.
         import from jac_scale.microservices._trace_ctx {
-            set_current_trace, reset_current_trace, ensure_trace_id,
+            set_current_trace,
+            reset_current_trace,
+            ensure_trace_id,
             install_trace_log_filter
         }
         install_trace_log_filter();

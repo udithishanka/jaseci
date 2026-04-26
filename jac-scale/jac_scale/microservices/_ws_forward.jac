@@ -10,12 +10,7 @@ import asyncio;
 import from typing { Any }
 
 glob _logger = logging.getLogger(__name__),
-     _WS_HOP_BY_HOP: set[str] = {
-        "host", "connection", "upgrade", "sec-websocket-key",
-        "sec-websocket-version", "sec-websocket-extensions",
-        "sec-websocket-protocol", "sec-websocket-accept",
-        "transfer-encoding", "keep-alive"
-     };
+     _WS_HOP_BY_HOP: set[str] = {"host","connection","upgrade","sec-websocket-key","sec-websocket-version","sec-websocket-extensions","sec-websocket-protocol","sec-websocket-accept","transfer-encoding","keep-alive"};
 
 
 def _to_ws_scheme(url: str) -> str {
@@ -31,9 +26,7 @@ def _to_ws_scheme(url: str) -> str {
 
 """Only forward auth + trace + XFF; drop cookies and hop-by-hops so
 we don't leak client-hop state into the service."""
-def _select_handshake_headers(
-    client_headers: dict[str, str]
-) -> dict[str, str] {
+def _select_handshake_headers(client_headers: dict[str, str]) -> dict[str, str] {
     out: dict[str, str] = {};
     for (k, v) in client_headers.items() {
         lk = k.lower();
@@ -48,7 +41,7 @@ def _select_handshake_headers(
 }
 
 
-async def _pump_client_to_upstream(client_ws: Any, upstream_ws: Any) -> None {
+async def _pump_client_to_upstream(client_ws: Any, upstream_ws: Any) {
     try {
         while True {
             frame = await client_ws.receive();
@@ -67,7 +60,7 @@ async def _pump_client_to_upstream(client_ws: Any, upstream_ws: Any) -> None {
 }
 
 
-async def _pump_upstream_to_client(upstream_ws: Any, client_ws: Any) -> None {
+async def _pump_upstream_to_client(upstream_ws: Any, client_ws: Any) {
     try {
         async for msg in upstream_ws {
             if msg.type == aiohttp.WSMsgType.TEXT {
@@ -75,7 +68,9 @@ async def _pump_upstream_to_client(upstream_ws: Any, client_ws: Any) -> None {
             } elif msg.type == aiohttp.WSMsgType.BINARY {
                 await client_ws.send_bytes(msg.data);
             } elif msg.type in (
-                aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING
+                aiohttp.WSMsgType.CLOSE,
+                aiohttp.WSMsgType.CLOSED,
+                aiohttp.WSMsgType.CLOSING
             ) {
                 break;
             } elif msg.type == aiohttp.WSMsgType.ERROR {

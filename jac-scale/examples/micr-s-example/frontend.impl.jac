@@ -29,18 +29,19 @@ impl app.fetchProducts -> None {
 }
 
 impl app.addToCart(productId: str, name: str, price: float) -> None {
-    await apiCall("cart", "add_to_cart", {
-        "product_id": productId,
-        "product_name": name,
-        "price": price,
-        "qty": 1
-    });
+    await apiCall(
+        "cart",
+        "add_to_cart",
+        {"product_id": productId, "product_name": name, "price": price, "qty": 1}
+    );
     fetchCart();
 }
 
 impl app.fetchCart -> None {
     data = await apiCall("cart", "view_cart", {});
-    cart = data.data.result if data.data and data.data.result else {"items": [], "total": 0};
+    cart = data.data.result
+        if data.data and data.data.result
+        else {"items": [], "total": 0};
 }
 
 impl app.placeOrder -> None {

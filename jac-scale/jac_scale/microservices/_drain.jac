@@ -49,7 +49,7 @@ def inflight -> int {
 
 """Idempotent so re-entrant signal handlers are safe."""
 def start_drain(timeout_s: float | None = None) -> None {
-    global _is_draining, _drain_started_ts, _drain_timeout_s;
+    global _is_draining,_drain_started_ts,_drain_timeout_s;
     with _drain_lock {
         if _is_draining {
             return;
@@ -100,8 +100,8 @@ def wait_for_zero(timeout_s: float | None = None) -> bool {
 
 
 """Reset for tests. Never call from production paths."""
-def reset_drain -> None {
-    global _is_draining, _drain_started_ts, _inflight;
+def reset_drain {
+    global _is_draining,_drain_started_ts,_inflight;
     with _drain_lock {
         _is_draining = False;
         _drain_started_ts = None;
@@ -136,12 +136,12 @@ def build_drain_middleware(service_label: str = "service") -> Any {
 """Wrap uvicorn.Server.handle_exit so SIGTERM/SIGINT flips the drain
 flag before uvicorn's own exit handler runs. Call after constructing
 the Server, before `server.run()`."""
-def install_signal_drain(server: Any, timeout_s: float = 10.0) -> None {
+def install_signal_drain(server: Any, timeout_s: float = 10.0) {
     global _drain_timeout_s;
     _drain_timeout_s = timeout_s;
     orig_handle_exit = server.handle_exit;
 
-    def wrapped_handle_exit(sig: Any, frame: Any) -> None {
+    def wrapped_handle_exit(sig: Any, frame: Any) {
         start_drain(timeout_s);
         orig_handle_exit(sig, frame);
     }

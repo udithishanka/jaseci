@@ -1857,8 +1857,7 @@ Two response shapes are honoured:
     of a str-ified generator object. See jac/jaclang/runtimelib/
     sv_sse.jac for the framing contract.
 """
-impl JacAPIServer.sv_service_call
-(module_name: str, func_name: str, args: dict) -> Any {
+impl JacAPIServer.sv_service_call(module_name: str, func_name: str, args: dict) -> Any {
     import from jaclang.runtimelib { sv_client }
     import from jaclang.runtimelib.sv_sse { consume_sse_stream }
 
@@ -1892,8 +1891,7 @@ impl JacAPIServer.sv_service_call
             import httpx;
         } except ImportError {
             raise RuntimeError(
-                "httpx is required for sv-to-sv RPC calls. "
-                + "Install it via `pip install httpx`."
+                "httpx is required for sv-to-sv RPC calls. " + "Install it via `pip install httpx`."
             );
         }
         client = httpx.Client();
@@ -1937,8 +1935,9 @@ scope (Jac doesn't support nested defs).
 the TestClient instance is owned by sv_client._test_clients and lives
 beyond the call.
 """
-def _wrap_sse_keepalive
-(stream_cm: Any, resp: Any, client: Any, func_label: str) -> Any {
+def _wrap_sse_keepalive(
+    stream_cm: Any, resp: Any, client: Any, func_label: str
+) -> Any {
     import from jaclang.runtimelib.sv_sse { consume_sse_stream }
     try {
         for ev in consume_sse_stream(resp, func_label) {
@@ -1947,11 +1946,15 @@ def _wrap_sse_keepalive
     } finally {
         try {
             stream_cm.__exit__(None, None, None);
-        } except Exception { ; }
+        } except Exception {
+            ;
+        }
         if client {
             try {
                 client.close();
-            } except Exception { ; }
+            } except Exception {
+                ;
+            }
         }
     }
 }

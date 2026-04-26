@@ -450,37 +450,43 @@ class JacCmd {
             help="Configure microservice mode - select which Jac files become services",
             args=[
                 Arg.create(
-                    "subcommand", kind=ArgKind.POSITIONAL,
+                    "subcommand",
+                    kind=ArgKind.POSITIONAL,
                     help="Setup type (currently: microservice)"
                 ),
                 Arg.create(
-                    "add", typ=str, default="",
+                    "add",
+                    typ=str,
+                    default="",
                     help="Add a service file to existing config"
                 ),
                 Arg.create(
-                    "remove", typ=str, default="",
-                    help="Remove a service by name"
+                    "remove", typ=str, default="", help="Remove a service by name"
                 ),
                 Arg.create(
-                    "list", typ=bool, default=False,
+                    "list",
+                    typ=bool,
+                    default=False,
                     help="List currently configured services"
                 ),
+
             ],
             examples=[
-                ("jac setup microservice", "Interactive setup - select files, write config"),
+                (
+                    "jac setup microservice",
+                    "Interactive setup - select files, write config"
+                ),
                 ("jac setup microservice --list", "Show current microservice config"),
                 ("jac setup microservice --add orders_app.jac", "Add a service"),
                 ("jac setup microservice --remove orders", "Remove a service"),
+
             ],
             group="microservices",
             priority=CommandPriority.PLUGIN,
             source="jac-scale"
         )
         def setup_cmd(
-            subcommand: str,
-            add: str = "",
-            remove: str = "",
-            list: bool = False
+            subcommand: str, add: str = "", remove: str = "", list: bool = False
         ) -> int {
             if subcommand != "microservice" {
                 console.print(
@@ -490,7 +496,10 @@ class JacCmd {
             }
 
             import from jac_scale.microservices.setup {
-                run_setup, add_service, remove_service, list_services
+                run_setup,
+                add_service,
+                remove_service,
+                list_services
             }
 
             if list {
@@ -510,17 +519,23 @@ class JacCmd {
             help="Manage microservice deployments - status, stop, restart, logs",
             args=[
                 Arg.create(
-                    "action", kind=ArgKind.POSITIONAL,
+                    "action",
+                    kind=ArgKind.POSITIONAL,
                     help="Action: status, stop, restart, logs, destroy"
                 ),
                 Arg.create(
-                    "service_name", kind=ArgKind.POSITIONAL, default="",
+                    "service_name",
+                    kind=ArgKind.POSITIONAL,
+                    default="",
                     help="Service name (required for stop, restart, logs)"
                 ),
                 Arg.create(
-                    "lines", typ=int, default=50,
+                    "lines",
+                    typ=int,
+                    default=50,
                     help="Number of log lines to show (for 'logs' action)"
                 ),
+
             ],
             examples=[
                 ("jac scale status", "Show status of all microservices"),
@@ -528,16 +543,13 @@ class JacCmd {
                 ("jac scale restart cart", "Restart the cart service"),
                 ("jac scale logs products", "Show logs for products service"),
                 ("jac scale destroy", "Stop all services"),
+
             ],
             group="microservices",
             priority=CommandPriority.PLUGIN,
             source="jac-scale"
         )
-        def scale_cmd(
-            action: str,
-            service_name: str = "",
-            lines: int = 50
-        ) -> int {
+        def scale_cmd(action: str, service_name: str = "", lines: int = 50) -> int {
             import from jac_scale.microservices.orchestrator { build_registry }
             import from jac_scale.microservices.local_deployer { LocalDeployer }
 
@@ -545,12 +557,16 @@ class JacCmd {
             ms_config = scale_config.get_microservices_config();
 
             if not ms_config.get("enabled", False) {
-                console.print("[bold red]Microservice mode is not enabled in jac.toml[/bold red]");
+                console.print(
+                    "[bold red]Microservice mode is not enabled in jac.toml[/bold red]"
+                );
                 return 1;
             }
 
             if not ms_config.get("routes", {}) {
-                console.print("[bold red]No routes configured in [plugins.scale.microservices.routes][/bold red]");
+                console.print(
+                    "[bold red]No routes configured in [plugins.scale.microservices.routes][/bold red]"
+                );
                 return 1;
             }
 
@@ -579,10 +595,11 @@ class JacCmd {
                     }
                 }
                 console.print();
-
             } elif action == "stop" {
                 if not service_name {
-                    console.print("[bold red]Service name required: jac scale stop <name>[/bold red]");
+                    console.print(
+                        "[bold red]Service name required: jac scale stop <name>[/bold red]"
+                    );
                     return 1;
                 }
                 if deployer.stop_service(service_name) {
@@ -591,10 +608,11 @@ class JacCmd {
                     console.print(f"[red]Failed to stop {service_name}[/red]");
                     return 1;
                 }
-
             } elif action == "restart" {
                 if not service_name {
-                    console.print("[bold red]Service name required: jac scale restart <name>[/bold red]");
+                    console.print(
+                        "[bold red]Service name required: jac scale restart <name>[/bold red]"
+                    );
                     return 1;
                 }
                 if deployer.restart_service(service_name) {
@@ -603,19 +621,18 @@ class JacCmd {
                     console.print(f"[red]Failed to restart {service_name}[/red]");
                     return 1;
                 }
-
             } elif action == "logs" {
                 if not service_name {
-                    console.print("[bold red]Service name required: jac scale logs <name>[/bold red]");
+                    console.print(
+                        "[bold red]Service name required: jac scale logs <name>[/bold red]"
+                    );
                     return 1;
                 }
                 log_output = deployer.get_logs(service_name, lines);
                 console.print(log_output);
-
             } elif action == "destroy" {
                 deployer.destroy_all();
                 console.print("[green]All services stopped[/green]");
-
             } else {
                 console.print(f"[bold red]Unknown action:[/bold red] '{action}'");
                 console.print("Actions: status, stop, restart, logs, destroy");
@@ -693,7 +710,9 @@ class JacScalePlugin {
         import from jaclang.runtimelib { sv_client }
         import from pathlib { Path }
         import from jac_scale.microservices._util {
-            pick_free_port, resolve_jac_binary, wait_for_health
+            pick_free_port,
+            resolve_jac_binary,
+            wait_for_health
         }
 
         # Idempotent: skip if already registered
@@ -721,8 +740,12 @@ class JacScalePlugin {
         child_env["JAC_SV_SIBLING"] = "1";
 
         cmd = [
-            resolve_jac_binary(), "start", str(module_file),
-            "--port", str(port), "--no_client"
+            resolve_jac_binary(),
+            "start",
+            str(module_file),
+            "--port",
+            str(port),
+            "--no_client"
         ];
 
         proc = subprocess.Popen(
@@ -784,9 +807,7 @@ class JacScalePlugin {
     RuntimeError (we cannot replay events that were already consumed).
     """
     @hookimpl
-    static def sv_service_call(
-        module_name: str, func_name: str, args: dict
-    ) -> Any {
+    static def sv_service_call(module_name: str, func_name: str, args: dict) -> Any {
         import time;
         import from jaclang.runtimelib { sv_client }
         import from jaclang.runtimelib.sv_sse { consume_sse_stream }
@@ -807,9 +828,7 @@ class JacScalePlugin {
                 # Wrapper takes ownership of stream_cm.__exit__; do NOT
                 # exit it here. Pass None for client (TestClient is
                 # owned by sv_client._test_clients).
-                return _wrap_sse_keepalive_scale(
-                    stream_cm, resp, None, func_label
-                );
+                return _wrap_sse_keepalive_scale(stream_cm, resp, None, func_label);
             }
             try {
                 # Streaming responses don't auto-read the body; httpx
@@ -825,8 +844,9 @@ class JacScalePlugin {
         # Circuit breaker: short-circuit when OPEN + cooldown not elapsed.
         if _breaker_should_skip(module_name) {
             raise RuntimeError(
-                f"sv-to-sv RPC '{module_name}.{func_name}' blocked by "
-                + f"open circuit breaker (cooldown {int(_BREAKER_COOLDOWN_SECONDS)}s)"
+                f"sv-to-sv RPC '{module_name}.{func_name}' blocked by " + f"open circuit breaker (cooldown {int(
+                    _BREAKER_COOLDOWN_SECONDS
+                )}s)"
             );
         }
 
@@ -835,8 +855,7 @@ class JacScalePlugin {
             import httpx;
         } except ImportError {
             raise RuntimeError(
-                "httpx is required for sv-to-sv RPC calls. "
-                + "Install it via `pip install httpx`."
+                "httpx is required for sv-to-sv RPC calls. " + "Install it via `pip install httpx`."
             );
         }
 
@@ -866,10 +885,7 @@ class JacScalePlugin {
                 # connection is closed in the finally branch.
                 client = httpx.Client(timeout=rpc_timeout);
                 stream_cm = client.stream(
-                    "POST",
-                    f"{url}/function/{func_name}",
-                    json=args,
-                    headers=headers
+                    "POST", f"{url}/function/{func_name}", json=args, headers=headers
                 );
                 resp = stream_cm.__enter__();
                 ct = resp.headers.get("content-type", "");
@@ -909,8 +925,7 @@ class JacScalePlugin {
         _breaker_record_failure(module_name);
 
         raise RuntimeError(
-            f"sv-to-sv RPC '{module_name}.{func_name}' failed after "
-            + f"{max_attempts} attempts: {last_err}"
+            f"sv-to-sv RPC '{module_name}.{func_name}' failed after " + f"{max_attempts} attempts: {last_err}"
         );
     }
 }
@@ -924,8 +939,9 @@ module scope because Jac doesn't support nested defs.
 The TestClient branch passes `client=None` because the TestClient
 instance is owned by sv_client._test_clients and outlives the call.
 """
-def _wrap_sse_keepalive_scale
-(stream_cm: Any, resp: Any, client: Any, func_label: str) -> Any {
+def _wrap_sse_keepalive_scale(
+    stream_cm: Any, resp: Any, client: Any, func_label: str
+) -> Any {
     import from jaclang.runtimelib.sv_sse { consume_sse_stream }
     try {
         for ev in consume_sse_stream(resp, func_label) {
@@ -934,11 +950,15 @@ def _wrap_sse_keepalive_scale
     } finally {
         try {
             stream_cm.__exit__(None, None, None);
-        } except Exception { ; }
+        } except Exception {
+            ;
+        }
         if client {
             try {
                 client.close();
-            } except Exception { ; }
+            } except Exception {
+                ;
+            }
         }
     }
 }
@@ -1018,11 +1038,9 @@ def _breaker_should_skip(provider: str) -> bool {
 }
 
 """Record a successful call to `provider`; resets breaker to CLOSED."""
-def _breaker_record_success(provider: str) -> None {
+def _breaker_record_success(provider: str) {
     with _breaker_lock {
-        _breaker_state[provider] = {
-            "state": "CLOSED", "fails": 0, "opened_at": 0.0
-        };
+        _breaker_state[provider] = {"state": "CLOSED", "fails": 0, "opened_at": 0.0};
     }
 }
 
@@ -1031,12 +1049,11 @@ def _breaker_record_success(provider: str) -> None {
 From CLOSED, after N consecutive failures the breaker trips OPEN.
 From HALF_OPEN, any failure re-trips OPEN immediately (probe failed).
 """
-def _breaker_record_failure(provider: str) -> None {
+def _breaker_record_failure(provider: str) {
     import time;
     with _breaker_lock {
-        st = _breaker_state.get(provider) or {
-            "state": "CLOSED", "fails": 0, "opened_at": 0.0
-        };
+        st = _breaker_state.get(provider)
+        or {"state": "CLOSED", "fails": 0, "opened_at": 0.0};
         current = st.get("state", "CLOSED");
         if current == "HALF_OPEN" {
             st["state"] = "OPEN";
@@ -1053,7 +1070,7 @@ def _breaker_record_failure(provider: str) -> None {
 }
 
 """Test-only: clear breaker state for a provider."""
-def _breaker_reset(provider: str) -> None {
+def _breaker_reset(provider: str) {
     with _breaker_lock {
         if provider in _breaker_state {
             del _breaker_state[provider];
@@ -1073,7 +1090,7 @@ def _breaker_peek(provider: str) -> dict | None {
 _breaker_should_skip call transitions OPEN -> HALF_OPEN without the
 test having to wait _BREAKER_COOLDOWN_SECONDS.
 """
-def _breaker_force_cooldown_elapsed(provider: str) -> None {
+def _breaker_force_cooldown_elapsed(provider: str) {
     with _breaker_lock {
         st = _breaker_state.get(provider);
         if st is not None {

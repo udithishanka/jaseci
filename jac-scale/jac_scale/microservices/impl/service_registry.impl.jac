@@ -1,15 +1,13 @@
 """Implementation of ServiceRegistry methods."""
 
 """Register a service entry. Rebuilds prefix index."""
-impl ServiceRegistry.register
-(service_entry: ServiceEntry) -> None {
+impl ServiceRegistry.register(service_entry: ServiceEntry) -> None {
     self.entries[service_entry.name] = service_entry;
     self._rebuild_prefix_index();
 }
 
 """Remove a service by name. Returns True if found."""
-impl ServiceRegistry.deregister
-(name: str) -> bool {
+impl ServiceRegistry.deregister(name: str) -> bool {
     if name in self.entries {
         del self.entries[name];
         self._rebuild_prefix_index();
@@ -19,8 +17,7 @@ impl ServiceRegistry.deregister
 }
 
 """Find the service matching a request path (longest-prefix match)."""
-impl ServiceRegistry.match_route
-(path: str) -> ServiceEntry | None {
+impl ServiceRegistry.match_route(path: str) -> ServiceEntry | None {
     for (prefix, name) in self._sorted_prefixes {
         if path == prefix or path.startswith(prefix + "/") {
             return self.entries[name];
@@ -30,8 +27,7 @@ impl ServiceRegistry.match_route
 }
 
 """Get all entries as a health summary dict."""
-impl ServiceRegistry.health_summary
--> dict[str, dict] {
+impl ServiceRegistry.health_summary -> dict[str, dict] {
     result: dict[str, dict] = {};
     for (name, entry) in self.entries.items() {
         result[name] = {
@@ -50,9 +46,8 @@ impl ServiceRegistry.health_summary
 
 Sorted by descending prefix length so match_route does longest-prefix match.
 """
-impl ServiceRegistry._rebuild_prefix_index
--> None {
+impl ServiceRegistry._rebuild_prefix_index -> None {
     pairs: list[tuple[str, str]] = [(e.prefix, e.name) for e in self.entries.values()];
-    pairs.sort(key=lambda p: -len(p[0]));
+    pairs.sort(key=lambda p : -len(p[0]));
     self._sorted_prefixes = pairs;
 }

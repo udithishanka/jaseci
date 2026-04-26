@@ -7,7 +7,7 @@ Exposes public functions for cart operations. Callable via:
 
 import from shared.models { Cart, Product, Products, Order }
 
-def _get_or_create_cart() -> Cart {
+def _get_or_create_cart -> Cart {
     carts = [root()-->][?:Cart];
     if carts {
         return carts[0];
@@ -28,16 +28,18 @@ def:pub add_to_cart(
             return {"action": "updated", "product_id": product_id, "qty": item["qty"]};
         }
     }
-    cart.items.append({
-        "product_id": product_id,
-        "product_name": product_name,
-        "price": price,
-        "qty": qty
-    });
+    cart.items.append(
+        {
+            "product_id": product_id,
+            "product_name": product_name,
+            "price": price,
+            "qty": qty
+        }
+    );
     return {"action": "added", "product_id": product_id, "qty": qty};
 }
 
-def:pub view_cart() -> dict {
+def:pub view_cart -> dict {
     carts = [root()-->][?:Cart];
     if not carts {
         return {"items": [], "total": 0, "item_count": 0};
@@ -47,13 +49,15 @@ def:pub view_cart() -> dict {
     display_items: list[dict] = [];
     for item in cart.items {
         line_total: float = float(item.get("price", 0)) * int(item.get("qty", 1));
-        display_items.append({
-            "product_id": item.get("product_id", ""),
-            "product_name": item.get("product_name", ""),
-            "price": item.get("price", 0),
-            "qty": item.get("qty", 1),
-            "line_total": round(line_total, 2)
-        });
+        display_items.append(
+            {
+                "product_id": item.get("product_id", ""),
+                "product_name": item.get("product_name", ""),
+                "price": item.get("price", 0),
+                "qty": item.get("qty", 1),
+                "line_total": round(line_total, 2)
+            }
+        );
         total += line_total;
     }
     return {
@@ -79,7 +83,7 @@ def:pub remove_from_cart(product_id: str) -> dict {
     return {"action": "removed", "product_id": product_id};
 }
 
-def:pub clear_cart() -> dict {
+def:pub clear_cart -> dict {
     carts = [root()-->][?:Cart];
     if not carts {
         return {"action": "cleared", "items_removed": 0};

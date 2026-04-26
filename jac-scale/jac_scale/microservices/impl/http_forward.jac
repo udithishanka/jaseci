@@ -11,16 +11,12 @@ import from typing { Any }
 import from fastapi.responses { Response, StreamingResponse }
 
 glob _logger = logging.getLogger(__name__),
-     _HOP_BY_HOP: set[str] = {"host", "transfer-encoding", "connection", "keep-alive"};
+     _HOP_BY_HOP: set[str] = {"host","transfer-encoding","connection","keep-alive"};
 
 
 """Buffered forward. Returns (status, headers, body) or None on transport error."""
 async def raw_forward(
-    method: str,
-    url: str,
-    headers: dict[str, str],
-    body: bytes,
-    timeout: int = 30
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: int = 30
 ) -> tuple[int, dict[str, str], bytes] | None {
     try {
         async with aiohttp.ClientSession(
@@ -88,9 +84,7 @@ impl ForwardResult.to_response -> StreamingResponse {
     }
 
     return StreamingResponse(
-        body_iter(),
-        status_code=self.status,
-        headers=self.headers
+        body_iter(), status_code=self.status, headers=self.headers
     );
 }
 
@@ -112,22 +106,12 @@ impl ForwardResult.cleanup -> None {
 """Open the upstream request; return None on transport failure so the
 caller can emit a 502."""
 async def stream_forward(
-    method: str,
-    url: str,
-    headers: dict[str, str],
-    body: bytes,
-    timeout: int = 30
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: int = 30
 ) -> ForwardResult | None {
-    session = aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=timeout)
-    );
+    session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout));
     try {
         resp = await session.request(
-            method=method,
-            url=url,
-            headers=headers,
-            data=body,
-            allow_redirects=False
+            method=method, url=url, headers=headers, data=body, allow_redirects=False
         );
     } except (aiohttp.ClientError, OSError) as e {
         _logger.error(f"HTTP stream-forward error: {e}");
@@ -143,9 +127,6 @@ async def stream_forward(
     }
 
     return ForwardResult(
-        status=resp.status,
-        headers=resp_headers,
-        _session=session,
-        _resp=resp
+        status=resp.status, headers=resp_headers, _session=session, _resp=resp
     );
 }

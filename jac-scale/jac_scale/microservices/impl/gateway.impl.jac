@@ -12,7 +12,7 @@ import from fastapi { WebSocket }
 """Register the WebSocket catch-all proxy that dispatches via the
 registry (matching prefix -> upstream URL). Close codes: 1012 drain,
 1008 no route, 1013 unhealthy."""
-def _install_ws_catchall(gw: object) -> None {
+def _install_ws_catchall(gw: object) {
     import from jac_scale.microservices._ws_forward { websocket_forward }
     import from jac_scale.microservices._drain { is_draining }
     import from jac_scale.microservices.service_registry { ServiceStatus }
@@ -56,8 +56,9 @@ Resolution order:
   2. service_entry.url - URL from our process manager
   3. Fallback: error (no known URL)
 """
-impl MicroserviceGateway.resolve_target_url
-(service_entry: ServiceEntry, path: str, query: str) -> str {
+impl MicroserviceGateway.resolve_target_url(
+    service_entry: ServiceEntry, path: str, query: str
+) -> str {
     import jaclang;
 
     # Use the public hookspec; plugins can swap the URL source without
@@ -78,8 +79,7 @@ impl MicroserviceGateway.resolve_target_url
 }
 
 """Serve a static file from the client dist directory. Returns None if not found."""
-impl MicroserviceGateway.serve_static
-(file_path: str) -> Response | None {
+impl MicroserviceGateway.serve_static(file_path: str) -> Response | None {
     dist = Path(self.client_dist_dir);
     target = dist / file_path;
 
@@ -102,8 +102,11 @@ impl MicroserviceGateway.serve_static
         content_type = "application/octet-stream";
     }
 
-    if content_type.startswith("text/") or content_type in ("application/javascript", "application/json") {
-        return Response(content=target.read_text(encoding="utf-8"), media_type=content_type);
+    if content_type.startswith("text/")
+    or content_type in ("application/javascript", "application/json") {
+        return Response(
+            content=target.read_text(encoding="utf-8"), media_type=content_type
+        );
     }
     return Response(content=target.read_bytes(), media_type=content_type);
 }
@@ -111,8 +114,9 @@ impl MicroserviceGateway.serve_static
 """Serve a static file from a configured static_mounts local directory.
 Path-jails to local_dir (rejects symlink/.. escapes via realpath compare).
 Returns None if not found, not a regular file, or outside the jail."""
-impl MicroserviceGateway.serve_extra_static
-(local_dir: str, file_path: str) -> Response | None {
+impl MicroserviceGateway.serve_extra_static(
+    local_dir: str, file_path: str
+) -> Response | None {
     if not local_dir {
         return None;
     }
@@ -138,16 +142,18 @@ impl MicroserviceGateway.serve_extra_static
         content_type = "application/octet-stream";
     }
 
-    if content_type.startswith("text/") or content_type in ("application/javascript", "application/json") {
-        return Response(content=target.read_text(encoding="utf-8"), media_type=content_type);
+    if content_type.startswith("text/")
+    or content_type in ("application/javascript", "application/json") {
+        return Response(
+            content=target.read_text(encoding="utf-8"), media_type=content_type
+        );
     }
     return Response(content=target.read_bytes(), media_type=content_type);
 }
 
 
 """Serve index.html for SPA fallback. Returns None if no index.html exists."""
-impl MicroserviceGateway.serve_spa_fallback
--> Response | None {
+impl MicroserviceGateway.serve_spa_fallback -> Response | None {
     index = Path(self.client_dist_dir) / "index.html";
     if index.is_file() {
         return HTMLResponse(content=index.read_text(encoding="utf-8"));
@@ -161,8 +167,7 @@ Skips when the destination index.html is at least as new as the source,
 so normal restarts don't re-copy. Refreshes on package upgrade (source
 newer) or cold start (destination missing).
 """
-impl MicroserviceGateway.bootstrap_admin
--> None {
+impl MicroserviceGateway.bootstrap_admin -> None {
     admin_dist = Path(self.admin_dist_dir);
     dest_index = admin_dist / "index.html";
 
@@ -177,7 +182,8 @@ impl MicroserviceGateway.bootstrap_admin
             return;
         }
 
-        if dest_index.exists() and dest_index.stat().st_mtime >= src_index.stat().st_mtime {
+        if dest_index.exists()
+        and dest_index.stat().st_mtime >= src_index.stat().st_mtime {
             return;
         }
 
@@ -200,8 +206,7 @@ impl MicroserviceGateway.bootstrap_admin
 }
 
 """Serve an admin asset by path. Returns None if not found."""
-impl MicroserviceGateway.serve_admin_asset
-(asset_path: str) -> Response | None {
+impl MicroserviceGateway.serve_admin_asset(asset_path: str) -> Response | None {
     admin_dist = Path(self.admin_dist_dir);
 
     if not asset_path or asset_path == "/" {
@@ -233,21 +238,29 @@ impl MicroserviceGateway.serve_admin_asset
         content_type = "application/octet-stream";
     }
 
-    if content_type.startswith("text/") or content_type in ("application/javascript", "application/json") {
-        return Response(content=target.read_text(encoding="utf-8"), media_type=content_type);
+    if content_type.startswith("text/")
+    or content_type in ("application/javascript", "application/json") {
+        return Response(
+            content=target.read_text(encoding="utf-8"), media_type=content_type
+        );
     }
     return Response(content=target.read_bytes(), media_type=content_type);
 }
 
 """Paths whose handling is "try every healthy service until non-404"."""
 glob _BUILTIN_PREFIXES: tuple = (
-    "/user/", "/cl/", "/walker/", "/function/",
-    "/sso/", "/api-key/", "/webhook/", "/ws/",
-    "/jobs/", "/graph/"
-),
-     _BUILTIN_EXACT: set[str] = {
-         "/user", "/healthz", "/graph"
-     };
+         "/user/",
+         "/cl/",
+         "/walker/",
+         "/function/",
+         "/sso/",
+         "/api-key/",
+         "/webhook/",
+         "/ws/",
+         "/jobs/",
+         "/graph/"
+     ),
+     _BUILTIN_EXACT: set[str] = {"/user","/healthz","/graph"};
 
 """Copy incoming request headers, dropping hop-by-hop headers.
 
@@ -255,10 +268,10 @@ Also ensures X-Trace-Id is present on every forwarded request (either
 the inbound one or a freshly-minted UUID). Downstream services pick
 it up and thread it through their own logs + sv-import RPC calls.
 """
-impl MicroserviceGateway.build_forward_headers
-(request: Request) -> dict[str, str] {
+impl MicroserviceGateway.build_forward_headers(request: Request) -> dict[str, str] {
     import from jac_scale.microservices._trace_ctx {
-        get_current_trace, ensure_trace_id
+        get_current_trace,
+        ensure_trace_id
     }
     fwd: dict[str, str] = {};
     for (key, value) in request.headers.items() {
@@ -278,10 +291,7 @@ impl MicroserviceGateway.build_forward_headers
 impl MicroserviceGateway.handle_health -> Response {
     return JSONResponse(
         status_code=200,
-        content={
-            "status": "healthy",
-            "services": self.registry.health_summary()
-        }
+        content={"status": "healthy", "services": self.registry.health_summary()}
     );
 }
 
@@ -290,8 +300,9 @@ impl MicroserviceGateway.handle_health -> Response {
 Each service only has its own walkers/functions, so we try every healthy
 service until one returns non-404. Returns None if `path` isn't a built-in.
 """
-impl MicroserviceGateway.handle_builtin_passthrough
-(request: Request, path: str) -> Response | None {
+impl MicroserviceGateway.handle_builtin_passthrough(
+    request: Request, path: str
+) -> Response | None {
     is_builtin = path.startswith(_BUILTIN_PREFIXES) or path in _BUILTIN_EXACT;
     if not is_builtin {
         return None;
@@ -302,7 +313,8 @@ impl MicroserviceGateway.handle_builtin_passthrough
     query: str = str(request.url.query);
 
     for (svc_name, svc_entry) in self.registry.entries.items() {
-        if svc_entry.status in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) and svc_entry.url {
+        if svc_entry.status in (ServiceStatus.HEALTHY, ServiceStatus.STARTING)
+        and svc_entry.url {
             target_url = f"{svc_entry.url}{path}";
             if query {
                 target_url = f"{target_url}?{query}";
@@ -325,8 +337,7 @@ impl MicroserviceGateway.handle_builtin_passthrough
 }
 
 """Admin UI routes - /admin redirects, /admin/* serves assets."""
-impl MicroserviceGateway.handle_admin
-(path: str) -> Response | None {
+impl MicroserviceGateway.handle_admin(path: str) -> Response | None {
     if path == "/admin" {
         import from fastapi.responses { RedirectResponse }
         return RedirectResponse(url="/admin/", status_code=302);
@@ -341,16 +352,13 @@ impl MicroserviceGateway.handle_admin
 """Proxy to the matched microservice. Returns None if no match, 503 if
 unhealthy, 502 on transport failure. Streams the response (SSE /
 chunked / large bodies pass through)."""
-impl MicroserviceGateway.handle_proxy
-(request: Request, path: str) -> Response | None {
+impl MicroserviceGateway.handle_proxy(request: Request, path: str) -> Response | None {
     svc = self.registry.match_route(path);
     if not svc {
         return None;
     }
 
-    import from jac_scale.microservices._errors {
-        service_unavailable, gateway_timeout
-    }
+    import from jac_scale.microservices._errors { service_unavailable, gateway_timeout }
     import from jac_scale.microservices.impl.http_forward { stream_forward }
 
     if svc.status not in (ServiceStatus.HEALTHY, ServiceStatus.STARTING) {
@@ -361,7 +369,7 @@ impl MicroserviceGateway.handle_proxy
     logger.info(f"Proxy: {request.method} {path} -> {target_url}");
 
     fwd_headers = self.build_forward_headers(request);
-    client_addr: str = getattr(getattr(request, "client", None), "host", "unknown");
+    client_addr: str = getattr(request?.client, "host", "unknown");
     fwd_headers["X-Forwarded-For"] = client_addr;
 
     body: bytes = await request.body();
@@ -388,8 +396,7 @@ impl MicroserviceGateway.handle_openapi -> Response {
 impl MicroserviceGateway.handle_docs -> Response {
     import from fastapi.openapi.docs { get_swagger_ui_html }
     return get_swagger_ui_html(
-        openapi_url="/openapi.json",
-        title="Jac Microservice Gateway - API"
+        openapi_url="/openapi.json", title="Jac Microservice Gateway - API"
     );
 }
 
@@ -415,8 +422,7 @@ impl MicroserviceGateway.handle_metrics -> Response {
 }
 
 """Serve static files or SPA fallback for GET requests."""
-impl MicroserviceGateway.handle_static
-(request: Request, path: str) -> Response | None {
+impl MicroserviceGateway.handle_static(request: Request, path: str) -> Response | None {
     if request.method != "GET" {
         return None;
     }
@@ -482,7 +488,9 @@ impl MicroserviceGateway.setup -> FastAPI {
     # so every subsequent log line gets a [trace=...] prefix.
     import from jac_scale.microservices._trace_ctx {
         install_trace_log_filter,
-        set_current_trace, reset_current_trace, ensure_trace_id
+        set_current_trace,
+        reset_current_trace,
+        ensure_trace_id
     }
     install_trace_log_filter();
 
@@ -574,7 +582,9 @@ impl MicroserviceGateway.setup -> FastAPI {
                 ).inc();
                 gw._metrics_duration.labels(
                     service=svc_label, method=request.method
-                ).observe(time.time() - start);
+                ).observe(
+                    time.time() - start
+                );
             }
             return resp;
         } finally {
