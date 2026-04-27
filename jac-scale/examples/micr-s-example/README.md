@@ -230,14 +230,3 @@ ps -ef | grep "jac start" | grep -v grep    # should be empty
 ```
 
 If any subprocess survives, `atexit` did not fire and that is a bug.
-
-## What this example does NOT exercise
-
-The following are deferred (see
-[`../../jac_scale/microservices/ROADMAP.md`](../../jac_scale/microservices/ROADMAP.md)):
-
-- Retry / circuit-breaker on sv_service_call (roadmap 4d, 4e)
-- X-Trace-Id propagation (roadmap 4f, 9)
-- Gateway metrics (roadmap 10)
-- Unified `/docs` Swagger across services (roadmap 12)
-- Kubernetes deployment (roadmap 14, 15)
