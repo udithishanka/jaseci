@@ -40,7 +40,10 @@ async def raw_forward(
             }
         }
     } except (aiohttp.ClientError, OSError) as e {
-        _logger.error(f"HTTP forward error: {e}");
+        # Include the exception type because some aiohttp errors
+        # (notably ServerDisconnectedError) have an empty __str__,
+        # which produces a useless `HTTP forward error: ` log line.
+        _logger.error(f"HTTP forward error: {type(e).__name__}: {e}");
         return None;
     }
 }
