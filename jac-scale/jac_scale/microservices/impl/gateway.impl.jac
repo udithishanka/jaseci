@@ -86,7 +86,10 @@ impl MicroserviceGateway.serve_static(file_path: str) -> Response | None {
     try {
         resolved = target.resolve();
         dist_resolved = dist.resolve();
-        if not str(resolved).startswith(str(dist_resolved)) {
+        # Path-containment, NOT string-prefix: startswith would match a
+        # sibling directory whose name happens to begin with the dist
+        # path (e.g. /var/app/dist_secrets vs /var/app/dist).
+        if not resolved.is_relative_to(dist_resolved) {
             return None;
         }
     } except OSError {
@@ -126,7 +129,7 @@ impl MicroserviceGateway.serve_extra_static(
     try {
         resolved = target.resolve();
         base_resolved = base.resolve();
-        if not str(resolved).startswith(str(base_resolved)) {
+        if not resolved.is_relative_to(base_resolved) {
             return None;
         }
     } except OSError {
@@ -218,7 +221,7 @@ impl MicroserviceGateway.serve_admin_asset(asset_path: str) -> Response | None {
     try {
         resolved = target.resolve();
         dist_resolved = admin_dist.resolve();
-        if not str(resolved).startswith(str(dist_resolved)) {
+        if not resolved.is_relative_to(dist_resolved) {
             return None;
         }
     } except OSError {
