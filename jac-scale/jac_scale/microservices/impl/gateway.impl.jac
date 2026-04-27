@@ -325,14 +325,22 @@ impl MicroserviceGateway.handle_builtin_passthrough(
             logger.info(f"Passthrough: {request.method} {path} -> {target_url}");
 
             result = await raw_forward(request.method, target_url, fwd_headers, body);
-            if result is not None {
-                (sc, rh, rb) = result;
-                # If service returned 404, try next service (walker might be elsewhere)
-                if sc == 404 {
-                    continue;
-                }
-                return Response(status_code=sc, headers=rh, content=rb);
+            if result is None {
+                # Transport error (e.g. ServerDisconnectedError) talking
+                # to a service we know is healthy. Surfacing this as a
+                # 503 keeps the caller from receiving a misleading 405
+                # from a sibling service that doesn't own the route.
+                import from jac_scale.microservices._errors { service_unavailable }
+                return service_unavailable(svc_name, "transport_error");
             }
+            (sc, rh, rb) = result;
+            # 404 = "I don't have this walker"; 405 = "I have the path
+            # but not this method". Both mean "not my route" in the
+            # fan-out context, so try the next healthy service.
+            if sc in (404, 405) {
+                continue;
+            }
+            return Response(status_code=sc, headers=rh, content=rb);
         }
     }
     import from jac_scale.microservices._errors { not_found }
