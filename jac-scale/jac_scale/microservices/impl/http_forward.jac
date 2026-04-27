@@ -16,7 +16,7 @@ glob _logger = logging.getLogger(__name__),
 
 """Buffered forward. Returns (status, headers, body) or None on transport error."""
 async def raw_forward(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: int = 30
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: int = 90
 ) -> tuple[int, dict[str, str], bytes] | None {
     try {
         async with aiohttp.ClientSession(
@@ -109,7 +109,7 @@ impl ForwardResult.cleanup -> None {
 """Open the upstream request; return None on transport failure so the
 caller can emit a 502."""
 async def stream_forward(
-    method: str, url: str, headers: dict[str, str], body: bytes, timeout: int = 30
+    method: str, url: str, headers: dict[str, str], body: bytes, timeout: int = 90
 ) -> ForwardResult | None {
     session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout));
     try {
