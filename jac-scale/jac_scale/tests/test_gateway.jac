@@ -3,6 +3,7 @@
 import os;
 import tempfile;
 import from pathlib { Path }
+import from typing { Any }
 import from jac_scale.microservices.service_registry {
     ServiceRegistry,
     ServiceEntry,
@@ -1122,5 +1123,69 @@ test "CORS preflight still responds during drain (headers reachable on 503)" {
         assert resp2.headers.get("access-control-allow-origin") == "http://app.example.com";
     } finally {
         reset_drain();
+    }
+}
+
+# =============================================================================
+# http_forward_timeout resolver (gateway-to-service forward; configurable)
+# =============================================================================
+
+test "http_forward_timeout falls back to 30s default when config read fails" {
+    import from jac_scale.microservices._util { http_forward_timeout }
+    # No working config -> the except branch in the resolver fires and
+    # returns _DEFAULT_HTTP_FORWARD_TIMEOUT (30.0).
+    t: float = http_forward_timeout("module_with_no_override");
+    assert t == 30.0 , f"expected 30.0 default, got {t}";
+}
+
+test "http_forward_timeout precedence: per-service > global > default" {
+    import from jac_scale.microservices._util { http_forward_timeout }
+    import jac_scale.config_loader as cfg_mod;
+
+    obj _StubCfg {
+        has data: dict[str, Any];
+        def get_microservices_config -> dict[str, Any] {
+            return self.data;
+        }
+    }
+
+    original = getattr(cfg_mod, "get_scale_config");
+    try {
+        # Case A: only global default set
+        setattr(cfg_mod, "get_scale_config", lambda: _StubCfg(
+            data={"http_forward_timeout": 45.0, "services": {}}
+        ));
+        assert http_forward_timeout(None) == 45.0;
+        assert http_forward_timeout("any_service") == 45.0;
+
+        # Case B: per-service override beats the global default
+        setattr(cfg_mod, "get_scale_config", lambda: _StubCfg(
+            data={
+                "http_forward_timeout": 45.0,
+                "services": {"llm_app": {"http_forward_timeout": 300.0}}
+            }
+        ));
+        assert http_forward_timeout("llm_app") == 300.0;
+        assert http_forward_timeout("other_service") == 45.0;
+
+        # Case C: only per-service override; other services fall to default
+        setattr(cfg_mod, "get_scale_config", lambda: _StubCfg(
+            data={"services": {"llm_app": {"http_forward_timeout": 120.0}}}
+        ));
+        assert http_forward_timeout("llm_app") == 120.0;
+        assert http_forward_timeout("other_service") == 30.0;
+
+        # Case D: per-service entry has rpc_timeout but no http_forward_timeout
+        # -> falls through to global default. Verifies the two knobs are
+        # independent.
+        setattr(cfg_mod, "get_scale_config", lambda: _StubCfg(
+            data={
+                "http_forward_timeout": 45.0,
+                "services": {"llm_app": {"rpc_timeout": 120.0}}
+            }
+        ));
+        assert http_forward_timeout("llm_app") == 45.0;
+    } finally {
+        setattr(cfg_mod, "get_scale_config", original);
     }
 }

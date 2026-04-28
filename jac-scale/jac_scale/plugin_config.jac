@@ -215,6 +215,11 @@ class JacScalePluginConfig {
                             "default": 10.0,
                             "description": "Graceful shutdown window (seconds). On SIGTERM, gateway + services flip a drain flag (503s on new requests) and wait up to this many seconds for in-flight requests to finish before uvicorn force-closes. Mirrors K8s `terminationGracePeriodSeconds`."
                         },
+                        "http_forward_timeout": {
+                            "type": "float",
+                            "default": 30.0,
+                            "description": "Gateway-to-service forward timeout (seconds). Applies to `raw_forward` (built-in passthrough fan-out) and `stream_forward` (path-routed proxy). Distinct from `services.NAME.rpc_timeout`, which controls inter-service `sv import` calls. Override per-service with `[plugins.scale.microservices.services.NAME].http_forward_timeout`."
+                        },
                         "routes": {
                             "type": "dict",
                             "default": {},
@@ -223,7 +228,7 @@ class JacScalePluginConfig {
                         "services": {
                             "type": "dict",
                             "default": {},
-                            "description": "Per-service overrides keyed by module name. Each subkey is a dict with optional `rpc_timeout` (float seconds) to override the default 10s `sv_service_call` timeout. Use for LLM/long-running services that need minutes, not seconds. Example: [plugins.scale.microservices.services.llm_app] rpc_timeout = 120.0"
+                            "description": "Per-service overrides keyed by module name. Each subkey is a dict with optional `rpc_timeout` (float seconds; default 10s; controls inter-service `sv import` httpx calls) and/or `http_forward_timeout` (float seconds; default 30s; controls gateway-to-service aiohttp forwarding). Use for LLM/long-running services that need minutes, not seconds. Example: [plugins.scale.microservices.services.llm_app] rpc_timeout = 120.0, http_forward_timeout = 300.0"
                         },
                         "rate_limit": {
                             "type": "dict",

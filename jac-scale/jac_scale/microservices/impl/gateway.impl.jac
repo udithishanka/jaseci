@@ -324,7 +324,11 @@ impl MicroserviceGateway.handle_builtin_passthrough(
             }
             logger.info(f"Passthrough: {request.method} {path} -> {target_url}");
 
-            result = await raw_forward(request.method, target_url, fwd_headers, body);
+            import from jac_scale.microservices._util { http_forward_timeout }
+            timeout = http_forward_timeout(svc_name);
+            result = await raw_forward(
+                request.method, target_url, fwd_headers, body, timeout=int(timeout)
+            );
             if result is None {
                 # Transport error (e.g. ServerDisconnectedError) talking
                 # to a service we know is healthy. Surfacing this as a
@@ -385,7 +389,11 @@ impl MicroserviceGateway.handle_proxy(request: Request, path: str) -> Response |
 
     body: bytes = await request.body();
 
-    fr = await stream_forward(request.method, target_url, fwd_headers, body);
+    import from jac_scale.microservices._util { http_forward_timeout }
+    timeout = http_forward_timeout(svc.name);
+    fr = await stream_forward(
+        request.method, target_url, fwd_headers, body, timeout=int(timeout)
+    );
     if fr is None {
         return gateway_timeout(svc.name);
     }
