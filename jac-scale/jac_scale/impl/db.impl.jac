@@ -279,6 +279,46 @@ impl Db.set_with_ttl(
     );
 }
 
+impl Db.set_nx_with_ttl(
+    key: str, value: dict, ttl: int, col_name: str = 'default'
+) -> bool {
+    if self.db_type == DatabaseType.MONGODB {
+        raise NotImplementedError(
+            "set_nx_with_ttl() is not supported for MongoDB. "
+            "MongoDB has no atomic SET NX EX equivalent."
+        );
+    }
+    _validate_not_read_only(col_name);
+    # redis-py returns True on success, None when NX guard rejected the set.
+    client: Any = self.client;
+    result = client.set(
+        self._get_redis_key(col_name, key), json.dumps(value), nx=True, ex=ttl
+    );
+    return bool(result);
+}
+
+impl Db.delete_if_equals(key: str, expected: dict, col_name: str = 'default') -> bool {
+    if self.db_type == DatabaseType.MONGODB {
+        raise NotImplementedError(
+            "delete_if_equals() is not supported for MongoDB. "
+            "MongoDB has no atomic compare-and-delete equivalent."
+        );
+    }
+    _validate_not_read_only(col_name);
+    # Atomic compare-and-delete: only delete if current value equals expected.
+    # Run as a Lua script so the GET/DEL pair is one round trip and cannot
+    # interleave with another client's writes.
+    client: Any = self.client;
+    lua = (
+        "if redis.call('GET', KEYS[1]) == ARGV[1] then "
+        "return redis.call('DEL', KEYS[1]) else return 0 end"
+    );
+    result = client.eval(
+        lua, 1, self._get_redis_key(col_name, key), json.dumps(expected)
+    );
+    return int(result) == 1;
+}
+
 impl Db.incr(key: str, col_name: str = 'default') -> int {
     if self.db_type == DatabaseType.MONGODB {
         raise NotImplementedError(

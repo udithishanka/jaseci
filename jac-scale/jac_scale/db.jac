@@ -208,6 +208,36 @@ obj Db {
         key: str, value: dict, ttl: int, col_name: str = 'default'
     ) -> bool;
 
+    """Atomically set a value with TTL only if the key does not already exist.
+    The Redis primitive behind a distributed lock or single-winner debounce —
+    two callers racing on the same key cannot both observe a True result.
+    Args:
+        key: Redis key
+        value: Dictionary to store (JSON serialized)
+        ttl: Time to live in seconds
+        col_name: Optional namespace prefix
+    Returns:
+        True if the key was set (caller "won"); False if the key already existed.
+    """
+    def set_nx_with_ttl(
+        key: str, value: dict, ttl: int, col_name: str = 'default'
+    ) -> bool;
+
+    """Atomically delete a key if and only if its current value matches.
+    Companion to `set_nx_with_ttl` for fence-token release patterns: a holder
+    that recorded a unique token under the key can safely release without
+    risking deleting another holder's lock if the original TTL already
+    expired and someone else re-acquired the slot.
+    Args:
+        key: Redis key
+        expected: Dictionary the value must equal (JSON-serialized comparison)
+        col_name: Optional namespace prefix
+    Returns:
+        True if the key was deleted; False if the value did not match
+        (or the key did not exist).
+    """
+    def delete_if_equals(key: str, expected: dict, col_name: str = 'default') -> bool;
+
     """Increment a numeric key."""
     def incr(key: str, col_name: str = 'default') -> int;
 
