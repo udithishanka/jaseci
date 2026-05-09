@@ -461,6 +461,79 @@ obj IngressDeployer {
         }
     }
 
+    """Copy TLS state (spec.tls, rule hosts, TLS-related annotations) from a live
+    Ingress into a freshly built body before a full-object replace.
+
+    `replace_namespaced_ingress` is a PUT that overwrites everything jac-scale
+    does not re-include in the body. enable_tls writes spec.tls, sets host on
+    every rule, and adds cert-manager / ssl-redirect annotations; without this
+    helper, every subsequent `jac start --scale` strips them. See issue #5834.
+
+    Returns new_body unchanged if the Ingress doesn't exist yet, or if it has
+    no TLS configured (so the original "wildcard rule until enable_tls" path
+    is preserved on first deploy).
+    """
+    def _preserve_tls_state(
+        ingress_name: str, namespace: str, new_body: dict, networking_v1: Any
+    ) -> dict {
+        try {
+            existing = networking_v1.read_namespaced_ingress(
+                name=ingress_name, namespace=namespace
+            );
+        } except ApiException as e {
+            if e.status == 404 {
+                return new_body;
+            }
+            raise;
+        }
+
+        api_client = client.ApiClient();
+        existing_dict = api_client.sanitize_for_serialization(existing);
+        existing_spec = existing_dict.get('spec', {}) or {};
+        existing_tls = existing_spec.get('tls', []) or [];
+
+        if not existing_tls {
+            return new_body;
+        }
+
+        existing_host = '';
+        for rule in (existing_spec.get('rules', []) or []) {
+            host = rule.get('host', '') or '';
+            if host {
+                existing_host = host;
+                break;
+            }
+        }
+
+        new_body['spec']['tls'] = existing_tls;
+        if existing_host {
+            for rule in (new_body['spec'].get('rules', []) or []) {
+                rule['host'] = existing_host;
+            }
+        }
+
+        existing_ann = (existing_dict.get('metadata', {}) or {}).get('annotations', {})
+        or {};
+        new_ann = new_body['metadata'].get('annotations', {}) or {};
+        for k in [
+            'cert-manager.io/issuer',
+            'nginx.ingress.kubernetes.io/ssl-redirect',
+            'nginx.ingress.kubernetes.io/force-ssl-redirect'
+        ] {
+            if k in existing_ann {
+                new_ann[k] = existing_ann[k];
+            }
+        }
+        new_body['metadata']['annotations'] = new_ann;
+
+        if self.logger {
+            self.logger.info(
+                f"Preserved TLS state on '{ingress_name}' (host='{existing_host}')"
+            );
+        }
+        return new_body;
+    }
+
     """Deploy Ingress routing rules.
 
     Main Ingress: routes /, /grafana (if enabled), /db-dashboard (if enabled).
@@ -574,6 +647,9 @@ obj IngressDeployer {
             },
             'spec': {'ingressClassName': ingress_class, 'rules': [main_rule]}
         };
+        main_ingress = self._preserve_tls_state(
+            ingress_name, namespace, main_ingress, networking_v1
+        );
         try {
             networking_v1.replace_namespaced_ingress(
                 name=ingress_name, namespace=namespace, body=main_ingress
@@ -689,6 +765,9 @@ obj IngressDeployer {
                 },
                 'spec': {'ingressClassName': ingress_class, 'rules': [redis_rule]}
             };
+            redis_ingress = self._preserve_tls_state(
+                redis_ingress_name, namespace, redis_ingress, networking_v1
+            );
             try {
                 networking_v1.replace_namespaced_ingress(
                     name=redis_ingress_name, namespace=namespace, body=redis_ingress
