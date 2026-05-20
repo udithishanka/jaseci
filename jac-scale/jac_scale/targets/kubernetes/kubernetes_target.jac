@@ -1133,6 +1133,50 @@ obj KubernetesTarget(DeploymentTarget) {
     ) -> str {
         path = health_check_path;
         deployment_details = "";
+
+        # In shared ingress mode the dedicated controller service (NodePort/NLB)
+        # is never created. Instead, check reachability against the domain directly.
+        # Failure is a warning, not an error — the CNAME record may not have
+        # propagated yet or DNS may not be configured yet.
+        if self.k8s_config.shared_ingress {
+            domain_url = f"http://{self.k8s_config.domain}";
+            if self.logger {
+                self.logger.info(
+                    f"Shared ingress mode: checking reachability at {domain_url}{path}"
+                );
+            }
+            (domain_status, domain_details) = check_deployment_status(
+                self.k8s_config.ingress_node_port,
+                path,
+                max_retries=48,
+                nlb_url=domain_url,
+                namespace=namespace,
+                app_name=app_name
+            );
+            if not domain_status {
+                if self.logger {
+                    if cluster_env == 'aws' {
+                        self.logger.warn(
+                            f"Health check against '{domain_url}{path}' did not succeed. "
+                            "This is expected if the CNAME record has not been added yet or "
+                            "DNS has not propagated. The application pods are healthy. "
+                            f"Verify DNS: add a CNAME record for '{self.k8s_config.domain}' "
+                            "pointing to the shared ingress controller's NLB hostname."
+                        );
+                    } else {
+                        self.logger.warn(
+                            f"Health check against '{domain_url}{path}' did not succeed. "
+                            "This is expected if the A record has not been added yet or "
+                            "DNS has not propagated. The application pods are healthy. "
+                            f"Verify DNS: add an A record for '{self.k8s_config.domain}' "
+                            "pointing to the shared ingress controller's node IP."
+                        );
+                    }
+                }
+            }
+            return domain_details;
+        }
+
         if cluster_env == 'aws' {
             time.sleep(self.k8s_config.aws_nlb_wait);
             nlb_url = None;
@@ -1286,7 +1330,8 @@ obj KubernetesTarget(DeploymentTarget) {
             cluster_env = cluster_type();
             # 4b. On local clusters, verify that the requested NodePorts are not
             #     already bound by a service in another namespace.
-            if cluster_env == 'local' {
+            #     Skipped in shared ingress mode — no NodePort is created.
+            if cluster_env == 'local' and not self.k8s_config.shared_ingress {
                 # All services are ClusterIP behind ingress; only the ingress
                 # controller's NodePort needs a free port on the node.
                 check_node_ports_available(
