@@ -143,7 +143,11 @@ def _scale_pre_hook(context: HookContext) -> None {
         # --dry-run cancels execution before the deploy. auto_build and
         # guard_fallback_image stay at their defaults (False) so
         # generate_manifests never tries to build an image.
-        dry_run = context.get_arg("dry-run", False);
+        # Look up by the underscore form: argparse stores --dry-run under
+        # the auto-derived `dry_run` attribute; the hyphen form is a
+        # phantom-True entry from the --no-dry-run companion (see
+        # jaseci-labs/jaseci#6115).
+        dry_run = context.get_arg("dry_run", False);
         if dry_run {
             if target != "kubernetes-microservice" {
                 console.print(

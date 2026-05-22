@@ -295,10 +295,17 @@ impl CommandRegistry._add_argument(parser: argparse.ArgumentParser, arg: Arg) ->
         } else {
             parser.add_argument(f"--{arg.name}", **kwargs);
         }
-        # Add --no-X variant
+        # Add --no-X variant. dest is normalised to match argparse's
+        # auto-derivation for the positive form (hyphens -> underscores),
+        # otherwise hyphenated bool flags surface two namespace keys -- the
+        # underscore one from --X (store_true, default False) and the
+        # literal-hyphen one from --no-X (store_false, default True). The
+        # second key defaults True even when neither flag is passed, and any
+        # plugin reading the hyphen form via vars(args).get(name, default)
+        # gets a phantom True (see jaseci-labs/jaseci#6115).
         no_kwargs = {
             "action": "store_false",
-            "dest": arg.name,
+            "dest": arg.name.replace("-", "_"),
             "help": f"Disable {arg.name}"
         };
         parser.add_argument(f"--no-{arg.name}", **no_kwargs);
