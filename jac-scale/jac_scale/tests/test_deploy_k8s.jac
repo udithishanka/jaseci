@@ -2259,14 +2259,10 @@ test "redis ACL is secret mounted not in configmap and creds validated" {
 # Covers: controller skip, immediate host rule, destroy guard, domain
 # validation, and NodePort validation skip.
 # ---------------------------------------------------------------------------
-
 test "shared ingress skips deploying dedicated nginx controller" {
     # start_controller must be a no-op for _deploy_nginx_controller when
     # shared_ingress=True — a pre-existing cluster-wide controller is used.
-    k8s_config = KubernetesConfig(
-        shared_ingress=True,
-        domain="myapp.example.com"
-    );
+    k8s_config = KubernetesConfig(shared_ingress=True, domain="myapp.example.com");
     ingress_deployer = IngressDeployer(k8s_config, None);
 
     mock_ctrl = unittest.mock.MagicMock();
@@ -2291,14 +2287,13 @@ test "shared ingress rule sets host immediately without waiting for tls" {
     # Shared mode must set the host immediately because the shared controller
     # routes across many namespaces by hostname; without a host two apps would
     # both claim '/' and collide.  Mirror of the L2009 dedicated-mode test.
-    k8s_config = KubernetesConfig(
-        shared_ingress=True,
-        domain="myapp.example.com"
-    );
+    k8s_config = KubernetesConfig(shared_ingress=True, domain="myapp.example.com");
     ingress_deployer = IngressDeployer(k8s_config, None);
 
     mock_networking_v1 = unittest.mock.MagicMock();
-    mock_networking_v1.replace_namespaced_ingress.side_effect = ApiException(status=404);
+    mock_networking_v1.replace_namespaced_ingress.side_effect = ApiException(
+        status=404
+    );
     mock_core_v1 = unittest.mock.MagicMock();
     mock_core_v1.replace_namespaced_secret.side_effect = ApiException(status=404);
 
@@ -2347,7 +2342,6 @@ test "shared ingress destroy skips controller resource teardown" {
         "jac_scale.targets.kubernetes.ingress.client"
     ) as mock_client {
         mock_client.CustomObjectsApi.return_value = mock_custom_api;
-
         ingress_deployer.destroy(
             app_name="myapp",
             namespace="default",
@@ -2378,10 +2372,12 @@ test "shared ingress deploy fails fast when domain is not set" {
     target_config['app_name'] = 'test-app';
     target_config['namespace'] = 'test-ns';
     target_config['shared_ingress'] = True;
-    target_config['domain'] = '';      # explicitly empty — the invalid state
+    target_config['domain'] = '';  # explicitly empty — the invalid state
 
     logger = UtilityFactory.create_logger('standard');
-    deployment_target = DeploymentTargetFactory.create('kubernetes', target_config, logger);
+    deployment_target = DeploymentTargetFactory.create(
+        'kubernetes', target_config, logger
+    );
 
     app_config = AppConfig(
         code_folder='/tmp', file_name='main.jac', build=False, experimental=False
@@ -2409,7 +2405,9 @@ test "shared ingress deploy skips nodeport validation" {
     target_config['domain'] = 'myapp.example.com';
 
     logger = UtilityFactory.create_logger('standard');
-    deployment_target = DeploymentTargetFactory.create('kubernetes', target_config, logger);
+    deployment_target = DeploymentTargetFactory.create(
+        'kubernetes', target_config, logger
+    );
 
     app_config = AppConfig(
         code_folder='/tmp', file_name='main.jac', build=False, experimental=False
