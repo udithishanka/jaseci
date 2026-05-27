@@ -357,6 +357,19 @@ obj IngressDeployer {
         );
     }
 
+    """Return the IngressClass name to use for this deployment.
+
+    In dedicated mode each app owns its own controller, so the class name is
+    scoped to the namespace and app.  In shared mode the class name comes from
+    KubernetesConfig and refers to the pre-existing cluster-wide controller.
+    """
+    def _resolve_ingress_class(app_name: str, namespace: str) -> str {
+        if self.k8s_config.shared_ingress {
+            return self.k8s_config.shared_ingress_class;
+        }
+        return f"{namespace}-{app_name}-nginx";
+    }
+
     """Wait for the NGINX controller Deployment to have at least one ready replica.
 
     Polls every 5 seconds for up to max_wait seconds. This avoids burning the
@@ -722,11 +735,7 @@ obj IngressDeployer {
         core_v1: any,
         networking_v1: any
     ) {
-        if self.k8s_config.shared_ingress {
-            ingress_class = self.k8s_config.shared_ingress_class;
-        } else {
-            ingress_class = f"{namespace}-{app_name}-nginx";
-        }
+        ingress_class = self._resolve_ingress_class(app_name, namespace);
         self._wait_for_nginx_ready(app_name, namespace, apps_v1);
         self._deploy_ingress_resource(
             app_name,
@@ -867,11 +876,7 @@ obj IngressDeployer {
         }
 
         # Create namespace-scoped Issuer
-        if self.k8s_config.shared_ingress {
-            ingress_class_name = self.k8s_config.shared_ingress_class;
-        } else {
-            ingress_class_name = f"{namespace}-{app_name}-nginx";
-        }
+        ingress_class_name = self._resolve_ingress_class(app_name, namespace);
         issuer_body = {
             'apiVersion': 'cert-manager.io/v1',
             'kind': 'Issuer',

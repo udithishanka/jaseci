@@ -1196,25 +1196,31 @@ obj KubernetesTarget(DeploymentTarget) {
                 app_name=app_name
             );
             if not domain_status {
-                if self.logger {
-                    if provider.needs_nlb_wait() {
-                        self.logger.warn(
-                            f"Health check against '{domain_url}{path}' did not succeed. "
-                            "This is expected if the CNAME record has not been added yet or "
-                            "DNS has not propagated. The application pods are healthy. "
-                            f"Verify DNS: add a CNAME record for '{self.k8s_config.domain}' "
-                            "pointing to the shared ingress controller's NLB hostname."
-                        );
-                    } else {
-                        self.logger.warn(
-                            f"Health check against '{domain_url}{path}' did not succeed. "
-                            "This is expected if the A record has not been added yet or "
-                            "DNS has not propagated. The application pods are healthy. "
-                            f"Verify DNS: add an A record for '{self.k8s_config.domain}' "
-                            "pointing to the shared ingress controller's node IP."
-                        );
-                    }
+                if provider.needs_nlb_wait() {
+                    dns_hint = (
+                        f"Add a CNAME record for '{self.k8s_config.domain}' "
+                        "pointing to the shared ingress controller's NLB hostname."
+                    );
+                } else {
+                    dns_hint = (
+                        f"Add an A record for '{self.k8s_config.domain}' "
+                        "pointing to the shared ingress controller's node IP."
+                    );
                 }
+                if self.logger {
+                    self.logger.warn(
+                        f"Health check against '{domain_url}{path}' did not succeed. "
+                        "This is expected if DNS has not propagated yet. "
+                        f"The application pods are healthy. {dns_hint}"
+                    );
+                }
+                # Return an explicit warning marker so the caller's details dict
+                # clearly shows this was a DNS-propagation warning, not a clean
+                # health-check pass.  Raw domain_details (e.g. "Timeout reached")
+                # would be indistinguishable from a real failure to the caller.
+                return (
+                    f"Warning: DNS not propagated yet — health check skipped. {dns_hint}"
+                );
             }
             return domain_details;
         }
