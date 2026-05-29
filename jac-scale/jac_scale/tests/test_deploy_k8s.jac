@@ -2450,7 +2450,7 @@ test "shared ingress rule sets host immediately without waiting for tls" {
     ingress_deployer = IngressDeployer(k8s_config, None);
 
     mock_networking_v1 = unittest.mock.MagicMock();
-    mock_networking_v1.replace_namespaced_ingress.side_effect = ApiException(
+    mock_networking_v1.patch_namespaced_ingress.side_effect = ApiException(
         status=404
     );
     mock_core_v1 = unittest.mock.MagicMock();
