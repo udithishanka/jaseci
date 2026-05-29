@@ -35,6 +35,14 @@ import from jaclang.cli.browser_engine {
 # not the process cwd -- under `jac ai --ui` the process runs in the bundled web
 # app's dir, so process cwd would read the wrong jac.toml. Empty `agent.cwd`
 # (import time, before run_agent sets it) falls back to the default (cwd).
+"""byLLM config rooted at the agent's working dir, not the process cwd.
+
+The single source of truth for which `jac.toml` supplies the model and byLLM
+settings: `agent.cwd` (the user's project). This matters under `jac ai --ui`,
+where the process runs in the bundled web app's directory -- resolving against
+process cwd there would read the wrong `jac.toml`. Falls back to the default
+(process cwd) only before `agent.cwd` is set (import time).
+"""
 impl _byllm_config -> any {
     if agent.cwd {
         return get_byllm_config(Path(agent.cwd));
@@ -42,6 +50,12 @@ impl _byllm_config -> any {
     return get_byllm_config();
 }
 
+"""Pick which model `jac ai` should run.
+
+Priority: the `--model` flag (`model_override`), then `[plugins.byllm.model]
+default_model` in jac.toml, then the bundled local model so the command works
+with no API key. Records the winning source in `agent.cfg.model_source`.
+"""
 impl resolve_model_name(model_override: str = "") -> str {
     flag = model_override.strip();
     if flag {
@@ -68,6 +82,15 @@ impl resolve_model_name(model_override: str = "") -> str {
     return "local:gemma-4-e4b";
 }
 
+"""Build the agent's LLM, supporting any byLLM-compatible model.
+
+The model name is resolved by `resolve_model_name` (flag, then jac.toml, then
+the bundled local default). Cloud models work out of the box: byLLM's `Model`
+pulls `api_key`/`base_url` from `[plugins.byllm.model]` in jac.toml (or the
+usual provider env vars). Local models additionally read the runtime knobs
+(gpu layers, threads, auto-download) from `[plugins.byllm.local]`; a non-zero
+`n_ctx` overrides the configured context window.
+"""
 impl build_model(model_override: str = "", n_ctx: int = 0) -> Model {
     name = resolve_model_name(model_override);
     cfg: dict[str, object] = {};
@@ -90,6 +113,16 @@ impl build_model(model_override: str = "", n_ctx: int = 0) -> Model {
             cfg["n_threads"] = max(1, cores // 2);
         }
         agent.cfg.threads = int(cfg.get("n_threads") or 0);
+    } else {
+        # Cloud model: inject a live-set key / endpoint when the `--ui` settings
+        # panel provided one. byLLM passes these straight to the provider call,
+        # overriding env/jac.toml. Empty leaves byLLM's own resolution intact.
+        if agent.cfg.api_key {
+            cfg["api_key"] = agent.cfg.api_key;
+        }
+        if agent.cfg.base_url {
+            cfg["base_url"] = agent.cfg.base_url;
+        }
     }
     if n_ctx > 0 {
         cfg["n_ctx"] = n_ctx;
@@ -97,6 +130,61 @@ impl build_model(model_override: str = "", n_ctx: int = 0) -> Model {
     return Model(model_name=name, config=cfg);
 }
 
+impl _model_needs_key(name: str) -> tuple[bool, str] {
+    if not name or name.startswith("local:") {
+        return (False, "");
+    }
+    # A key we hold (set live) or one configured in jac.toml satisfies the model.
+    if agent.cfg.api_key {
+        return (False, "");
+    }
+    try {
+        toml_key = str(_byllm_config().get_model_config().get("api_key", "") or "");
+        if toml_key {
+            return (False, "");
+        }
+    } except Exception { }
+    # Otherwise ask litellm what the provider needs and whether the environment
+    # already has it. Only a missing `*_API_KEY` is a key prompt -- a missing
+    # base-url (ollama's `OLLAMA_API_BASE`) is configuration, not a credential.
+    try {
+        import litellm;
+        # Untyped through `any`: litellm's stub signature trips the checker, and
+        # its return is a plain dict we only `.get()` from.
+        ll: any = litellm;
+        info: any = ll.validate_environment(name);
+        if info.get("keys_in_environment") {
+            return (False, "");
+        }
+        missing: list = list(info.get("missing_keys", []) or []);
+        for k in missing {
+            if str(k).endswith("_API_KEY") {
+                return (True, str(k));
+            }
+        }
+    } except Exception { }
+    return (False, "");
+}
+
+impl _refresh_key_status -> None {
+    name = "";
+    try {
+        name = str(agent_model.model_name);
+    } except Exception {
+        name = "";
+    }
+    (needs, env) = _model_needs_key(name);
+    agent.bus.needs_key = needs;
+    agent.bus.key_env = env;
+    agent.bus.model_name = name;
+}
+
+"""Resolve a tool path against the session working directory.
+
+Absolute paths pass through; relative paths are joined onto `agent.cwd` so
+every file tool agrees on what `main.jac` means, regardless of where `jac ai`
+was launched or which subfolder the model has `cd`'d into.
+"""
 impl _resolve(path: str) -> str {
     p = path or ".";
     if os.path.isabs(p) {
@@ -106,6 +194,7 @@ impl _resolve(path: str) -> str {
     return os.path.normpath(os.path.join(base, p));
 }
 
+"""The project root for a directory: nearest ancestor with a `jac.toml`, else it."""
 impl _project_root_of(start: str) -> str {
     cur = os.path.normpath(start);
     while True {
@@ -120,6 +209,14 @@ impl _project_root_of(start: str) -> str {
     }
 }
 
+"""Point the session (and its code intelligence) at a new working directory.
+
+Called when a `run_command` changes the shell's directory. Re-roots the shared
+CodeIntelligence at the new project root (the nearest ancestor holding a
+`jac.toml`, else the directory itself) so semantic queries and the health line
+reflect the project the model actually moved into -- e.g. a freshly scaffolded
+app subfolder -- not the launch directory.
+"""
 impl _set_session_cwd(new_dir: str) {
     real = os.path.normpath(new_dir);
     if not os.path.isdir(real) or real == agent.cwd {
@@ -142,6 +239,7 @@ impl _set_session_cwd(new_dir: str) {
     }
 }
 
+"""Clip oversized tool output so it does not blow the model's context."""
 impl truncate(text: str, limit: int = 12000) -> str {
     if len(text) > limit {
         extra = len(text) - limit;
@@ -150,6 +248,7 @@ impl truncate(text: str, limit: int = 12000) -> str {
     return text;
 }
 
+"""Ask the user to approve a side-effecting action; honours `--yolo`."""
 impl confirm(action: str) -> bool {
     if agent.cfg.yolo_mode {
         return True;
@@ -163,6 +262,7 @@ impl confirm(action: str) -> bool {
     return answer in ("y", "yes");
 }
 
+"""Count a diagnostics list as `(errors, warnings)` by severity."""
 impl _count_diags(diags: list) -> tuple[int, int] {
     n_err = len(
         [
@@ -174,6 +274,17 @@ impl _count_diags(diags: list) -> tuple[int, int] {
     return (n_err, len(diags) - n_err);
 }
 
+"""Rebuild the project model after a write and report the diagnostics it caused.
+
+Returns, as a text block appended to the write tool's result, every compiler
+error and warning now in `path` plus any newly introduced in other project
+files the edit affects -- so the model gets compiler feedback, including
+cross-file breakage, on every write without a separate `jac_check` call. A
+dependent module's pre-existing error is not reported: only the delta this
+edit caused. Warnings are included because an undefined name or unresolved
+type surfaces as a warning, not an error. Empty string when the edit
+introduced nothing (or no code intelligence is available).
+"""
 impl FileTools.write_feedback(path: str) -> str {
     if agent.ci is None or not agent.cfg.inline_feedback {
         # Feedback off: still flag dirty so the next semantic query refreshes.
@@ -210,6 +321,16 @@ impl FileTools.write_feedback(path: str) -> str {
     return "\n".join(lines);
 }
 
+"""Reject a write that is JavaScript/React rather than Jac, with a fix-it.
+
+A weaker model often reverts to its React training and writes JS/TS syntax
+into a `.jac` file (or tries to create a `.js`/`.ts` file outright). This
+returns a non-empty error message naming the offending tokens and the Jac
+form to use, or `""` when the content is clean Jac -- caught at write time so
+one stray file does not cascade into dozens of compile errors. Only `.jac`
+(and code-file extensions) are policed; `.css`/`.json`/`.md`/config writes
+pass through.
+"""
 impl FileTools._js_drift_error(path: str, content: str) -> str {
     base = os.path.basename(path);
     # A code file in this project is always Jac. Block JS/TS source outright --
@@ -408,11 +529,13 @@ impl FileTools.grep(pattern: str, path: str) -> str {
     return "\n".join(hits) or "(no matches)";
 }
 
+"""Combine a finished subprocess's stdout+stderr into a truncated result string."""
 impl ProcessTools._proc_output(result: any) -> str {
     combined = (str(result.stdout or "") + str(result.stderr or "")).strip();
     return truncate(combined or f"(no output; exit code {result.returncode})");
 }
 
+"""Run a `jac` subcommand on a file and return its combined output."""
 impl ProcessTools.run_jac_cli(subcommand: str, path: str) -> str {
     try {
         return agent.proc._proc_output(
@@ -562,6 +685,15 @@ impl ProcessTools.start_app(entry_file: str) -> str {
 
 sem ProcessTools.serve = "Start the web/fullstack dev server and wait until it is actually serving, returning the URL to open. The first start can take a while because it installs the client dependencies and builds the client; this tool blocks until the server is ready (or fails) so you do not have to guess. On success, call browse_open on the returned URL. On failure it returns the server log tail -- read it, go back to Build to fix the cause, and do not conclude the app works.";
 sem ProcessTools.serve.entry_file = "Entry .jac file to serve; empty string means 'main.jac'.";
+"""Start the dev server and wait until it is actually serving, returning its URL.
+
+Launches `jac start <entry>` detached and polls its log until the ready URL
+appears -- the first start can be slow because it installs client deps and
+builds the client -- then returns that URL for `browse_open`. On failure
+returns the log tail so the model can fix the cause. Far more reliable than
+starting the server by hand and scraping the log for a URL within a fixed
+window.
+"""
 impl ProcessTools.serve(entry_file: str) -> str {
     entry_path = entry_file or "main.jac";
     abs_entry = _resolve(entry_path);
@@ -649,11 +781,13 @@ impl ProcessTools.serve(entry_file: str) -> str {
 }
 
 sem ProcessTools.stop_server = "Stop the dev server started by serve. Call this when finished with browser QA.";
+"""Stop the dev server started by `serve` (best-effort)."""
 impl ProcessTools.stop_server -> str {
     agent.proc._serve_shutdown();
     return "OK: dev server stopped.";
 }
 
+"""Kill the `serve` dev server and its child processes if one is running."""
 impl ProcessTools._serve_shutdown{
     if agent.serve_proc is not None {
         try {
@@ -711,6 +845,11 @@ impl GuideTools.read_guide(name: str) -> str {
     return truncate(guide.body, 16000);
 }
 
+"""Return the session's CodeIntelligence, rebuilding it if a write happened.
+
+`write_file`/`edit_file` flag the project as dirty; the first semantic query
+after a write recompiles so symbol lookups reflect what the agent just wrote.
+"""
 impl code_intel -> any {
     if agent.ci is None {
         return None;
@@ -816,6 +955,7 @@ impl SemanticTools.context_slice(name: str) -> str {
     return str(ci.slice_for(name).render());
 }
 
+"""Turn a browser-engine exception into a tool-result string with a next step."""
 impl BrowseTools._browse_err(e: Exception) -> str {
     msg = str(e);
     if "no live browser" in msg {
@@ -824,6 +964,13 @@ impl BrowseTools._browse_err(e: Exception) -> str {
     return f"ERROR: {msg}";
 }
 
+"""Run a browser-engine call under the shared confirm / error / truncate policy.
+
+`confirm_msg` empty means the op is read-only and runs unconfirmed; otherwise
+the action is gated and a declined call returns a DENIED string. `run` is a
+thunk performing the actual `br_*` call; its result is returned (str-cast),
+truncated when `clip` is set. Engine exceptions become a `_browse_err` string.
+"""
 impl BrowseTools._browse(confirm_msg: str, run: any, clip: bool = False) -> str {
     if confirm_msg and not confirm(confirm_msg) {
         return f"DENIED: the user declined to {confirm_msg}.";
@@ -920,6 +1067,7 @@ impl BrowseTools.browse_close -> str {
     return agent.web._browse("", lambda : br_close(agent.browse_session));
 }
 
+"""Close the agent's browser session if one was opened (best-effort)."""
 impl BrowseTools._browse_shutdown{
     try {
         br_close(agent.browse_session);
@@ -928,19 +1076,19 @@ impl BrowseTools._browse_shutdown{
     }
 }
 
+"""Build the agent's system message: the rules and the guide index."""
 impl system_prompt -> str {
     index_lines: list[str] = [];
     for g in gs_list() {
         index_lines.append(f"- {g.name}: {g.description}");
     }
     guide_index = "\n".join(index_lines);
-    cheatsheet = gs_get("jac-core-cheatsheet");
-    cheatsheet_body = cheatsheet.body if cheatsheet is not None else "";
     return (
-        AGENT_RULES + "\n## Reference guides available (open one with read_guide)\n\n" + guide_index + "\n\n## Jac core cheatsheet\n\n" + cheatsheet_body
+        AGENT_RULES + "\n## Reference guides available (open one with read_guide)\n\n" + guide_index
     );
 }
 
+"""Clear the durable session memory (the cross-turn ledger)."""
 impl reset_session{
     agent.ledger = Ledger();
 }
@@ -948,6 +1096,7 @@ impl reset_session{
 # ---------------------------------------------------------------------------
 # Event bus -- structured milestones for the `--ui` web view.
 # ---------------------------------------------------------------------------
+"""Append one event (kind + fields), stamping a monotonic id; thread-safe."""
 impl AgentEventBus.emit(kind: str, fields: dict) -> None {
     if not self.active_feed {
         return;
@@ -964,37 +1113,362 @@ impl AgentEventBus.emit(kind: str, fields: dict) -> None {
     if len(self.events) > self._cap {
         self.events = self.events[-self._cap:];
     }
+    self.publish(ev);
 }
 
+"""Stream a token into the current block, or open a new one.
+
+Reasoning and answer text arrive token-by-token. Rather than one event per
+token (which would flood the feed and evict history), append the token to
+the trailing event when it is a streaming block of the same `kind`; any
+other emitted event closes the block, so the next token starts a fresh one.
+The event's `text` grows in place, so each poll shows more of the stream.
+"""
+impl AgentEventBus.emit_stream(kind: str, token: str) -> None {
+    if not self.active_feed {
+        return;
+    }
+    if (
+        self.events
+        and self.events[-1].get("kind") == kind
+        and self.events[-1].get("streaming")
+    ) {
+        self.events[-1]["text"] = str(self.events[-1].get("text", "")) + token;
+        # Re-push the grown event so the client sees the cleaned text grow live.
+        self.publish(self.events[-1]);
+    } else {
+        ev = {"id": self._next_id, "kind": kind, "text": token, "streaming": True};
+        self._next_id += 1;
+        self.events.append(ev);
+        if len(self.events) > self._cap {
+            self.events = self.events[-self._cap:];
+        }
+        self.publish(ev);
+    }
+}
+
+"""Mark the walker as entering a phase: set active, extend the path, emit."""
 impl AgentEventBus.enter(phase: str) -> None {
     self.active = phase;
     self.path.append(phase);
     self.emit("phase", {"node": phase});
 }
 
+"""Set the run status ("idle" | "running" | "done") and emit a status event."""
 impl AgentEventBus.set_status(s: str) -> None {
     self.status = s;
     self.emit("status", {"status": s});
 }
 
+"""Reset the per-turn graph state (active node and path) for a fresh walk."""
 impl AgentEventBus.begin_turn -> None {
     self.active = "";
     self.path = [];
+    self.cancel_requested = False;
+}
+
+"""A JSON-ready snapshot the `ui_poll` endpoint returns each tick."""
+impl AgentEventBus._state -> dict {
+    # The common top-level state every pushed frame (snapshot/delta/token/
+    # ledger) carries, so the client can refresh status, the walker position,
+    # the stat line, AND the API-key prompt from any message in one place.
+    return {
+        "status": self.status,
+        "active": self.active,
+        "path": list(self.path),
+        "stats": dict(self.last_stats),
+        "needs_key": self.needs_key,
+        "key_env": self.key_env,
+        "model_name": self.model_name
+    };
 }
 
 impl AgentEventBus.snapshot -> dict {
     # Copy in one step so the returned lists are stable even if the turn thread
     # emits concurrently (atomic under the GIL).
-    return {
-        "events": list(self.events),
-        "status": self.status,
-        "active": self.active,
-        "path": list(self.path)
-    };
+    snap = self._state();
+    snap["events"] = list(self.events);
+    snap["ledger"] = self.ledger_view();
+    return snap;
 }
 
+"""A JSON-ready view of the durable session ledger (changes + notes), read
+live off `agent.ledger` so the UI's ledger panel mirrors it."""
+impl AgentEventBus.ledger_view -> dict {
+    led = agent.ledger;
+    if led is None {
+        return {"changes": [], "notes": []};
+    }
+    return {"changes": list(led.changes), "notes": list(led.notes)};
+}
+
+"""Push the current ledger to every subscriber. Called whenever the ledger
+changes (a phase records a step, or `note` leaves a note) so the UI's ledger
+panel updates in real time rather than only on the next poll."""
+impl AgentEventBus.publish_ledger -> None {
+    if not self.active_feed or not self._subscribers {
+        return;
+    }
+    # A ledger-only message: no `ev`/`token`, so the client refreshes its ledger
+    # panel and top-level state without touching the event log.
+    msg = self._state();
+    msg["ledger"] = self.ledger_view();
+    for q in list(self._subscribers) {
+        try {
+            q.put_nowait(msg);
+        } except Exception { }
+    }
+}
+
+"""Register an SSE subscriber queue; returns it. Caller unsubscribes on close."""
+impl AgentEventBus.subscribe -> any {
+    import from queue { Queue }
+    q = Queue();
+    self._subscribers.append(q);
+    return q;
+}
+
+"""Drop a subscriber queue (on stream close/disconnect)."""
+impl AgentEventBus.unsubscribe(q: any) -> None {
+    if q in self._subscribers {
+        self._subscribers.remove(q);
+    }
+}
+
+"""Push one delta message (the changed event + current top-level state) to
+every subscriber. Called from `emit`/`emit_stream`.
+"""
+impl AgentEventBus.publish(ev: dict) -> None {
+    if not self.active_feed or not self._subscribers {
+        return;
+    }
+    # One delta carries the changed event plus the current top-level state, so
+    # the client upserts the event by id and refreshes status/active/path/stats
+    # in one step. Snapshot over a copy of the subscriber list (a stream may
+    # unsubscribe concurrently).
+    msg = self._state();
+    msg["ev"] = ev;
+    for q in list(self._subscribers) {
+        try {
+            q.put_nowait(msg);
+        } except Exception { }
+    }
+}
+
+"""Push a full snapshot (all events + state) to every subscriber -- the
+first frame of a new stream, and after a reset.
+"""
+impl AgentEventBus.publish_full -> None {
+    if not self._subscribers {
+        return;
+    }
+    msg = self._state();
+    msg["full"] = True;
+    msg["events"] = list(self.events);
+    msg["ledger"] = self.ledger_view();
+    for q in list(self._subscribers) {
+        try {
+            q.put_nowait(msg);
+        } except Exception { }
+    }
+}
+
+# Keep at most this many recent calls (and only the conversations they
+# reference) so a long session does not grow the capture store without bound.
+glob _CALL_LOG_CAP = 500;
+
+"""Flatten one conversation message to a JSON-safe record.
+
+Messages arrive as litellm dicts or objects; reduce each to `{role, content,
+tools}` where `content` is the full text and `tools` are one-line `name(args)`
+summaries of any tool calls, so the UI can render them without knowing the
+backend message shape. Content is kept whole -- the detail view is an inspector
+and is fetched lazily per click (never on the per-frame stream), and the modal
+scrolls long blocks rather than clipping them. Messages are already bounded
+upstream (tool reads are truncated at the source; write args by the model's
+max-token ceiling), so there is no separate cap here.
+"""
+impl _san_msg(m: any) -> dict {
+    import json;
+    role_raw: any = m.get("role") if isinstance(m, dict) else (m?.role or "");
+    role = str(role_raw or "");
+    # Roles arrive as a plain string ("assistant") or an enum repr
+    # ("MessageRole.SYSTEM"); normalize to a bare lowercase tag so the UI's
+    # `cd-<role>` class and label are clean.
+    if "." in role {
+        role = role.split(".")[-1];
+    }
+    role = role.lower();
+    content = m.get("content") if isinstance(m, dict) else (m?.content or "");
+    content = "" if content is None else str(content);
+    tcs: any = m.get("tool_calls") if isinstance(m, dict) else m?.tool_calls;
+    tools: list[str] = [];
+    if tcs {
+        for tc in tcs {
+            fn: any = tc?.function;
+            if fn is None and isinstance(tc, dict) {
+                fn = tc.get("function");
+            }
+            name: any = fn?.name;
+            if name is None and isinstance(fn, dict) {
+                name = fn.get("name");
+            }
+            raw: any = fn?.arguments;
+            if raw is None and isinstance(fn, dict) {
+                raw = fn.get("arguments");
+            }
+            args_str = "";
+            try {
+                parsed = json.loads(raw) if isinstance(raw, str) else (raw or {});
+                args_str = json.dumps(parsed) if isinstance(parsed, dict) else str(raw);
+            } except Exception {
+                args_str = str(raw);
+            }
+            tools.append(f"{name or '?'}({args_str})");
+        }
+    }
+    return {"role": role, "content": content, "tools": tools};
+}
+
+# Replace the current conversation's stored snapshot when `snap` is longer (the
+# conversation only grows), so `convos` holds the fullest message list seen.
+def _remember_convo(snap: list) {
+    cur = agent.bus.convos.get(agent.bus._cur_convo, []);
+    if len(snap) > len(cur) {
+        agent.bus.convos[agent.bus._cur_convo] = snap;
+    }
+}
+
+"""Open a fresh conversation for capture, seeded with its starting messages.
+
+Called at the start of a phase (with the phase's starting messages) and before a
+routing call (with a synthetic routing context). Each conversation gets a
+monotonic id so calls from different phases -- and re-entries of the same phase
+-- never blur together in the detail view.
+"""
+impl AgentEventBus.open_convo(msgs: any) -> None {
+    if not self.active_feed {
+        return;
+    }
+    self._convo_seq += 1;
+    self._cur_convo = self._convo_seq;
+    self.convos[self._cur_convo] = [_san_msg(m) for m in msgs];
+}
+
+"""Fold byLLM's live messages for the upcoming call (one ReAct iteration) into
+the current conversation's stored snapshot. This is the real per-call context --
+system prompt, the directive, and every prior assistant/tool turn -- captured as
+the loop runs, so the detail view shows what the model actually saw."""
+impl AgentEventBus.set_pending(msgs: any) -> None {
+    if self.active_feed {
+        _remember_convo([_san_msg(m) for m in msgs]);
+    }
+}
+
+"""Fold the phase's final written-back messages into its conversation store, so
+the last call's output (the answer byLLM appended) is present for the detail."""
+impl AgentEventBus.close_convo(msgs: any) -> None {
+    if self.active_feed {
+        _remember_convo([_san_msg(m) for m in msgs]);
+    }
+}
+
+"""Capture the current conversation's tool JSON schemas -- the exact `tools` API
+parameter byLLM sends with every call in this phase, which the token count
+includes but the messages do not. Rebuilt from the phase's tool functions with
+the same `Tool` byLLM uses, so the schemas (and their token weight) match."""
+impl AgentEventBus.set_convo_tools(tools: list[Callable]) -> None {
+    if not self.active_feed {
+        return;
+    }
+    import json;
+    import from byllm.types { Tool }
+    recs: list[dict] = [];
+    for fn in tools {
+        name = str(getattr(fn, "__name__", "?") or "?");
+        try {
+            schema: any = Tool(fn).get_json_schema();
+            fdef: any = schema.get("function", {});
+            recs.append(
+                {
+                    "name": str(fdef.get("name", "") or name),
+                    "description": str(fdef.get("description", "")),
+                    "schema": json.dumps(schema, indent=2)
+                }
+            );
+        } except Exception as e {
+            recs.append(
+                {
+                    "name": name,
+                    "description": "",
+                    "schema": f"(schema unavailable: {e})"
+                }
+            );
+        }
+    }
+    self.convo_tools[self._cur_convo] = recs;
+}
+
+"""Emit a `call` event AND record the call for the detail view.
+
+The lightweight `call` event (token counts, tagged by phase) drives the live
+token-usage stream; alongside it, this records which conversation the call
+belongs to and its token counts. The conversation's messages themselves are
+captured by `open_convo`/`set_pending`/`close_convo`; the detail view splits them
+into per-call input/output using the assistant messages as boundaries, so memory
+stays O(conversation), not O(calls x conversation).
+"""
+impl AgentEventBus.emit_call(fields: dict) -> None {
+    if not self.active_feed {
+        return;
+    }
+    # The id `emit` is about to assign, so the call_log row keys to the same id
+    # the `call` event carries (the UI fetches detail by that id).
+    cid = self._next_id;
+    self.emit("call", fields);
+    self.call_log.append(
+        {
+            "id": cid,
+            "node": str(fields.get("node", "")),
+            "convo": self._cur_convo,
+            "tokens_in": int(fields.get("tokens_in", 0) or 0),
+            "tokens_out": int(fields.get("tokens_out", 0) or 0)
+        }
+    );
+    if len(self.call_log) > _CALL_LOG_CAP {
+        self.call_log = self.call_log[-_CALL_LOG_CAP:];
+        keep = {c["convo"] for c in self.call_log};
+        self.convos = {
+            k: v
+            for (k, v) in self.convos.items()
+            if k in keep
+        };
+        self.convo_tools = {
+            k: v
+            for (k, v) in self.convo_tools.items()
+            if k in keep
+        };
+    }
+}
+
+"""Stop a turn that keeps rewriting the same file without making progress.
+
+byLLM calls this before each ReAct iteration. It counts how often each file has
+been written so far this turn (from the assistant tool-call history); once any
+single file crosses `_REWRITE_LIMIT`, the model is looping on an error it cannot
+fix, so end the turn with a summary instead of spending the whole budget.
+"""
 impl _progress_guard(ctx: any) -> str {
     import json;
+    # User pressed Stop (UI): abort the phase at this checkpoint.
+    if agent.bus.cancel_requested {
+        return IterationAction.ABORT_WITH_SUMMARY;
+    }
+    # Capture the conversation this iteration's model call will see, for the
+    # token-usage detail view (a no-op off the --ui path). on_iteration fires
+    # before each call from the 2nd on; the 1st call's input is seeded by
+    # `open_convo` in PhaseState.run.
+    agent.bus.set_pending(ctx.messages);
     counts: dict[str, int] = {};
     # Ordered signature ("name|args") of every tool call, to spot a model stuck
     # re-issuing the SAME call (read or write) -- e.g. read_file(main.jac) 40x.
@@ -1081,6 +1555,7 @@ impl TurnRenderer.print_help{
     console.print("  /exit     quit the session", style="muted");
 }
 
+"""Format a tool call as `name(key=value, ...)`, clipping long values."""
 impl TurnRenderer.fmt_tool_call(tool: str, args: object) -> str {
     parts: list[str] = [];
     if isinstance(args, dict) {
@@ -1095,10 +1570,16 @@ impl TurnRenderer.fmt_tool_call(tool: str, args: object) -> str {
     return f"{tool}(" + ", ".join(parts) + ")";
 }
 
+"""Render a token count compactly: 12400 -> '12.4k', 840 -> '840'."""
 impl TurnRenderer._short_num(n: int) -> str {
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n);
 }
 
+"""Best-effort USD cost for the turn from litellm's price map; 0 if unknown.
+
+Local models and any model litellm does not price raise here and fall back
+to 0 -- which is correct for a local model, and a benign omission otherwise.
+"""
 impl TurnRenderer._estimate_cost(prompt_tokens: int, completion_tokens: int) -> float {
     try {
         import litellm;
@@ -1113,6 +1594,7 @@ impl TurnRenderer._estimate_cost(prompt_tokens: int, completion_tokens: int) -> 
     }
 }
 
+"""Render token usage (and cost, when priced) from a byLLM `usage` total."""
 impl TurnRenderer._format_tokens(usage: dict[str, object]) -> str {
     prompt = int(usage.get("prompt_tokens", 0) or 0);
     completion = int(usage.get("completion_tokens", 0) or 0);
@@ -1129,6 +1611,15 @@ impl TurnRenderer._format_tokens(usage: dict[str, object]) -> str {
     return text;
 }
 
+"""Render the project's compiler health from the session's CodeIntelligence.
+
+The count is project-wide, so it catches breakage the turn left in any file.
+Reported only when the turn already built the project model (a write or a
+semantic-tool query): a stat line must stay cheap and must never trigger a
+whole-project compile -- in a large repo that would stall every turn. When
+the model is not yet built there is nothing the turn touched, so the stat is
+simply omitted.
+"""
 impl TurnRenderer._format_health -> str {
     ci = code_intel();
     if ci is None or not ci.is_loaded() {
@@ -1146,6 +1637,7 @@ impl TurnRenderer._format_health -> str {
     return f"project: {n_err} error(s), {n_warn} warning(s)";
 }
 
+"""Print the one-line turn summary: duration, tools, files, tokens, health."""
 impl TurnRenderer.print_stats(
     elapsed: float,
     n_read: int,
@@ -1189,6 +1681,12 @@ impl TurnRenderer.print_stats(
     console.print("  " + "  ·  ".join(parts), style="muted");
 }
 
+"""Strip a model's stray control tokens from streamed reasoning prose.
+
+Some local templates wrap tool syntax in `<|channel>`/`<token|>` markers and
+render quotes as `<|"|>`; clear them so only clean prose reaches the terminal.
+The tool-call JSON itself is excluded upstream by `_split_reasoning`.
+"""
 impl TurnRenderer._strip_control(text: str) -> str {
     import re;
     t = text.replace("<|\"|>", "\"").replace("<|'|>", "'");
@@ -1197,6 +1695,13 @@ impl TurnRenderer._strip_control(text: str) -> str {
     return t;
 }
 
+"""Split accumulated reasoning into the prose safe to show and a hit flag.
+
+A reply is reasoning prose followed by the `<tool_call>` JSON the protocol
+recovers into a structured event. Return only the prose before the marker,
+and hold back a trailing partial `<tool_call` so a marker split across stream
+tokens is never shown. `hit` is True once the marker has appeared.
+"""
 impl TurnRenderer._split_reasoning(raw: str) -> tuple[str, bool] {
     mark = "<tool_call>";
     idx = raw.find(mark);
@@ -1215,6 +1720,7 @@ impl TurnRenderer._split_reasoning(raw: str) -> tuple[str, bool] {
     return (raw[:len(raw) - hold], False);
 }
 
+"""Up to `max_lines` lines of a tool result, each clipped, with a more-marker."""
 impl TurnRenderer._result_snippet(text: str, max_lines: int) -> list[str] {
     stripped = text.strip();
     if not stripped {
@@ -1232,10 +1738,12 @@ impl TurnRenderer._result_snippet(text: str, max_lines: int) -> list[str] {
     return shown;
 }
 
+"""Format a millisecond duration compactly: '820ms', '1.8s', '13.0s'."""
 impl TurnRenderer._fmt_ms(ms: float) -> str {
     return f"{int(ms)}ms" if ms < 1000 else f"{ms / 1000:.1f}s";
 }
 
+"""Format a step's model timing as `(24.6s, 113 tps)`, omitting tps if unknown."""
 impl TurnRenderer._fmt_gen(ms: float, tokens: int) -> str {
     if ms <= 0 {
         return "";
@@ -1247,6 +1755,15 @@ impl TurnRenderer._fmt_gen(ms: float, tokens: int) -> str {
     return f"   ({agent.view._fmt_ms(ms)})";
 }
 
+"""Render a code-intelligence compile, set as `CodeIntelligence.on_event`.
+
+Fires whenever the compiler-backed project model rebuilds -- the initial
+load, and the incremental recompile after each write or the first query
+following one. Printed inline with the tool stream (it runs inside a tool's
+execution) so the hidden compiler work behind write_file/find_symbol/etc. is
+visible: which file, how many modules were recompiled out of the project, and
+how long it took.
+"""
 impl TurnRenderer._ci_event(info: any) {
     op = str(info.get("op", "?"));
     recompiled = int(info.get("recompiled", 0));
@@ -1273,6 +1790,42 @@ impl TurnRenderer._ci_event(info: any) {
     );
 }
 
+"""Emit one per-model-call usage record to the UI bus from a byLLM `llm_timing`
+event's data, tagged with the phase it belongs to ("Plan"/"Build"/"QA", or
+"route" for the routing call). Drives the live token-usage stream in `--ui`;
+a no-op on the terminal path (the bus is inactive there)."""
+impl TurnRenderer._emit_call_usage(data: any, phase: str) -> None {
+    if not agent.bus.active_feed {
+        return;
+    }
+    d = data if isinstance(data, dict) else {};
+    tin = int(d.get("prompt_tokens", 0) or 0);
+    tout = int(d.get("completion_tokens", 0) or 0);
+    # Skip empty records (a backend that returned no streamed usage).
+    if tin == 0 and tout == 0 {
+        return;
+    }
+    # emit_call emits the `call` event AND captures this call's input snapshot
+    # for the detail view, keyed to the same event id.
+    agent.bus.emit_call(
+        {
+            "node": phase,
+            "tokens_in": tin,
+            "tokens_out": tout,
+            "cache_read": int(d.get("cache_read_input_tokens", 0) or 0),
+            "cache_create": int(d.get("cache_creation_input_tokens", 0) or 0),
+            "ms": float(d.get("duration_ms", 0) or 0)
+        }
+    );
+}
+
+"""Consume one byLLM phase event stream, rendering it live.
+
+A phase ability calls this with the stream returned by the `run_phase` byLLM
+call (typed `-> str` for the streaming contract, but with `logging=True` it
+yields StreamEvent objects). Renders reasoning, tool calls, and the answer
+live, and returns this phase's tool-call tallies for the walker to accumulate.
+"""
 impl TurnRenderer.render_stream(event_stream: any) -> dict {
     out: any = sys.stdout;
     # `\r` animation only makes sense on a tty; piped output gets static lines.
@@ -1316,7 +1869,7 @@ impl TurnRenderer.render_stream(event_stream: any) -> dict {
         }
         (result, ms) = (pend_result["result"], pend_result["ms"]);
         pend_result = None;
-        agent.bus.emit("tool_result", {"text": truncate(str(result), 600)});
+        agent.bus.emit("tool_result", {"text": truncate(str(result), 4000)});
         lines = agent.view._result_snippet(result, 3 if agent.cfg.verbose else 1);
         tail = f"   {agent.view._fmt_ms(ms)}"
             if (agent.cfg.verbose and ms is not None)
@@ -1328,6 +1881,11 @@ impl TurnRenderer.render_stream(event_stream: any) -> dict {
     }
     try {
         for event in event_stream {
+            # Stop pressed in the UI: quit consuming the stream immediately so
+            # the feed stops updating; the progress guard ends the ReAct loop.
+            if agent.bus.cancel_requested {
+                break;
+            }
             kind = event.event_type;
             data = event.data;
             if kind == "thought" {
@@ -1351,7 +1909,7 @@ impl TurnRenderer.render_stream(event_stream: any) -> dict {
                     out.write(cleaned);
                     out.flush();
                     streamed = True;
-                    agent.bus.emit("reasoning", {"text": cleaned});
+                    agent.bus.emit_stream("reasoning", cleaned);
                 }
                 # Generating but no prose yet (streaming as JSON): show a
                 # ticking activity line so a slow model is not silent.
@@ -1369,9 +1927,13 @@ impl TurnRenderer.render_stream(event_stream: any) -> dict {
                 out.write(tok);
                 out.flush();
                 streamed = True;
+                # Stream the answer into the conversation token-by-token.
+                agent.bus.emit_stream("answer", tok);
             } elif kind == "llm_timing" {
                 last_llm_ms = float(data.get("duration_ms", 0) or 0);
                 last_llm_tokens = int(data.get("completion_tokens", 0) or 0);
+                # Feed the live per-call token-usage stream (--ui only).
+                agent.view._emit_call_usage(data, agent.bus.active);
             } elif kind == "tool_call" {
                 clear_think();
                 end_line();
@@ -1444,9 +2006,6 @@ impl TurnRenderer.render_stream(event_stream: any) -> dict {
             traceback.print_exc();
         }
     }
-    if answer.strip() {
-        agent.bus.emit("answer", {"text": answer.strip()});
-    }
     return {
         "n_read": n_read,
         "n_write": n_write,
@@ -1457,14 +2016,17 @@ impl TurnRenderer.render_stream(event_stream: any) -> dict {
     };
 }
 
+"""Record what a phase accomplished, as a one-line ledger entry."""
 impl Ledger.record(phase: str, summary: str) {
     self.changes.append({"phase": phase, "summary": truncate(summary, 400)});
 }
 
+"""Leave a free-form note visible to every later phase and turn."""
 impl Ledger.remember(text: str) {
     self.notes.append(text);
 }
 
+"""Render the ledger as compact text for injection into a phase prompt."""
 impl Ledger.render -> str {
     if not self.changes and not self.notes {
         return "(nothing done yet)";
@@ -1479,6 +2041,7 @@ impl Ledger.render -> str {
     return "\n".join(lines);
 }
 
+"""Fold one phase's render_stream result into the running totals."""
 impl TurnStats.absorb(st: dict) {
     self.n_read += int(st["n_read"]);
     self.n_write += int(st["n_write"]);
@@ -1489,6 +2052,7 @@ impl TurnStats.absorb(st: dict) {
     }
 }
 
+"""Compose the system message for a state, given the objective and memory."""
 impl Prompt.for_phase(state_ty: type, objective: str, ledger: Ledger) -> str {
     role = str(getattr(state_ty, "_jac_semstr", "") or "");
     return (
@@ -1498,9 +2062,16 @@ impl Prompt.for_phase(state_ty: type, objective: str, ledger: Ledger) -> str {
 
 sem AgentRuntime.note = "Record a short note that stays visible to every later phase (Plan, Build, QA) and in later turns. Use it to flag a decision, an assumption, or something to verify.";
 sem AgentRuntime.note.text = "The note to remember.";
+"""Record a note onto the active session's ledger (the `note` tool).
+
+A memory capability rather than a domain toolbox: it writes to the live
+walker's ledger, which the runtime owns, so notes stay visible to every
+later phase and turn.
+"""
 impl AgentRuntime.note(text: str) -> str {
     if agent.active_session is not None {
         agent.active_session.ledger.remember(text);
+        agent.bus.publish_ledger();
         return f"noted: {text}";
     }
     return "(no active session to note onto)";
@@ -1509,6 +2080,12 @@ impl AgentRuntime.note(text: str) -> str {
 # A state's tools are the TOOLS rows tagged with its phase, in registry order.
 # The phase is the node's class name lowercased (Plan -> "plan"), the same name
 # `run` uses as the phase label -- so Plan/Build/QA need no override.
+"""The tools this state exposes: the TOOLS rows tagged with its phase.
+
+Derived from the node's own class name (Plan/Build/QA -> plan/build/qa),
+so a state's allowed actions follow from its identity with no per-state
+override -- the same name `run` uses as the phase label.
+"""
 impl PhaseState.tools -> list {
     phase = type(self).__name__.lower();
     return [
@@ -1524,6 +2101,13 @@ sem Build = "the BUILDING state: carry out the plan. For a new app, scaffold it 
 
 sem QA = "the QA state: verify the work end to end and fix what you find. Run `jac check .` (zero errors required). For a runnable app, start_app and confirm it boots cleanly. For a web or fullstack app, drive the built-in browser: call serve(entry) to start the dev server -- it waits until the server is actually ready and returns its URL (the first start is slow, as it installs client deps and builds the client). Then browse_open that URL, browse_snapshot to read the page, exercise the main flows with browse_click / browse_fill / browse_type / browse_press (snapshotting after each), check for errors with browse_eval, then browse_close and stop_server. If serve reports the server failed to start, read the log tail it returns and go back to Build to fix the cause -- do not conclude the app works until you have actually run and exercised it.";
 
+"""The imperative kickoff line for a phase, by state label (Plan/Build/QA).
+
+The phase `sem` describes the role; this is the turn's actual instruction. A
+weaker model tends to stop after merely exploring or describing a plan, so the
+Build line insists on writing code and the QA line insists on actually running
+the result -- finishing is not an option until the work exists and is verified.
+"""
 impl _phase_directive(label: str) -> str {
     if label == "Plan" {
         return (
@@ -1560,6 +2144,10 @@ sem run_phase.directive = "A short instruction kicking off the current phase.";
 impl PhaseState.run{
     agent.active_session = visitor;
     label = type(self).__name__;
+    # Stop pressed in the UI: halt the walker before entering another phase.
+    if agent.bus.cancel_requested {
+        return;
+    }
     console.print(f"\n  ● {label}", style="bold blue");
     # Move the walker on the live graph: the UI animates the edge from the
     # previous phase to this one.
@@ -1575,11 +2163,29 @@ impl PhaseState.run{
     } else {
         self.ctx[0] = sysmsg;
     }
-    result = agent.view.render_stream(
-        run_phase(_phase_directive(label), self.tools(), self.ctx)
-    );
+    # Hand the phase's tools and conversation to `run_phase` via the runtime
+    # (not as parameters -- byLLM would serialize them into the prompt).
+    agent.phase_tools = self.tools();
+    agent.phase_ctx = self.ctx;
+    # Open a fresh capture conversation seeded with this phase's starting
+    # messages (the 1st call's input); later calls' inputs come from the
+    # progress guard. Close it afterward so the last call's written-back output
+    # is captured. Both are no-ops off the --ui path.
+    agent.bus.open_convo(self.ctx);
+    # Capture the phase's tool schemas (the API `tools` param) for this convo.
+    agent.bus.set_convo_tools(agent.phase_tools);
+    result = agent.view.render_stream(run_phase(_phase_directive(label)));
+    agent.bus.close_convo(self.ctx);
     visitor.stats.absorb(result);
     visitor.ledger.record(label, str(result.get("answer", "") or "(no summary)"));
+    # Surface the new ledger entry to the UI panel right away (the next bus emit
+    # would carry it anyway, but this lands it the instant the phase records).
+    agent.bus.publish_ledger();
+    # Stop pressed during the phase: halt here, don't route onward (and don't
+    # make the QA route-selection LLM call).
+    if agent.bus.cancel_requested {
+        return;
+    }
     # Route to the next state along this node's own out-edges.
     visitor.steps += 1;
     if visitor.steps > visitor.max_steps {
@@ -1614,8 +2220,25 @@ impl PhaseState.run{
             style="yellow"
         );
         visit self;
+    } elif label == "Plan" {
+        # Read-only fast path: classify whether carrying out the request needs
+        # any file created or edited. A pure question/inspection finishes
+        # straight from Plan (skipping Build and its wrote-nothing nudge loop,
+        # and QA); anything that touches code routes to Build, the default. Uses
+        # a typed bool classifier with a Build-biased default -- robust where
+        # `visit [-->] by`'s LLM edge filter can crash on a weak model's bad
+        # index.
+        if request_needs_code_changes(visitor.objective, visitor.ledger.render()) {
+            visit [-->][?:Build];
+        } else {
+            console.print(
+                "  ↳ read-only request -- answered in Plan, skipping Build/QA",
+                style="green"
+            );
+            visit [-->][?:Done];
+        }
     } elif len([-->]) == 1 {
-        # Single successor (Plan -> Build, Build -> QA): advance, no LLM call.
+        # Single successor (Build -> QA): advance, no LLM call.
         visit [-->];
     } elif _project_errors() {
         # Hard gate: the project does not compile, so finishing is not an option.
@@ -1628,10 +2251,31 @@ impl PhaseState.run{
         );
         visit [-->][?:Build];
     } else {
-        # Several successors (QA -> Build / Plan / Done) and the project compiles:
-        # let the model choose, reading each candidate state's `sem`, the
-        # objective, and the ledger.
+        # Several successors (QA -> Build / Plan / Done) and the project
+        # compiles: let the model choose along this node's own out-edges,
+        # reading each candidate state's `sem`, the objective, and the ledger.
+        # Streamed via a stream_handler so the routing call's reasoning reaches
+        # the live feed and its token usage the token-usage stream, while
+        # `visit [-->] by` still constrains the choice to a real successor edge
+        # (no free-text parsing, no manual default).
+        # byLLM builds the routing prompt internally, so seed the capture with a
+        # synthetic input mirroring the incl_info -- enough for the detail view to
+        # show what the routing call was deciding on.
+        agent.bus.open_convo(
+            [
+                {
+                    "role": "system",
+                    "content": "Routing: pick the single next state along this node's out-edges (Build to fix, Plan to rethink, Done only once verified)."
+                },
+                {
+                    "role": "user",
+                    "content": f"Objective:\n{visitor.objective}\n\nProgress so far:\n{visitor.ledger.render()}\n\nStep: {visitor.steps} of at most {visitor.max_steps}"
+                }
+            ]
+        );
         visit [-->] by agent_model(
+            stream=True,
+            stream_handler=agent.view.route_stream_event,
             incl_info={
                 "Objective": visitor.objective,
                 "Progress so far": visitor.ledger.render(),
@@ -1642,30 +2286,85 @@ impl PhaseState.run{
     }
 }
 
-sem Done = "the DONE state: choose this only when the objective is fully built AND QA has actually verified it (type-checked, and for an app, run and exercised). Ends the session.";
+"""Forward one byLLM StreamEvent from a `visit [-->] by model` routing call.
+
+Passed as the `stream_handler` to the QA routing model so the structured
+edge selection still streams: clean reasoning prose is shown in the feed and
+the call's synthetic `llm_timing` feeds the token-usage stream (tagged
+"route"), while `visit [-->] by` keeps the choice constrained to a real
+successor edge. Lighter than `render_stream` -- routing is one cheap call,
+not a phase, so it skips the tool and turn-stat bookkeeping.
+"""
+impl TurnRenderer.route_stream_event(event: any) -> None {
+    # Stop pressed in the UI: drop further routing tokens immediately.
+    if agent.bus.cancel_requested {
+        return;
+    }
+    # The routing call runs outside the ReAct loop, so byLLM emits one synthetic
+    # `llm_timing` carrying this call's usage -- feed it to the token-usage stream
+    # tagged "route" so the expensive routing decision is visible.
+    if event.event_type == "llm_timing" {
+        self._emit_call_usage(event.data, "route");
+        return;
+    }
+    tok = str(event.data.get("content", "")) if event.data else "";
+    if not tok {
+        return;
+    }
+    # Routing tokens are the structured choice JSON, or reasoning a backend
+    # streams ahead of it; show only clean reasoning prose in the live feed.
+    if event.event_type == "thought" {
+        cleaned = self._strip_control(tok);
+        if cleaned {
+            agent.bus.emit_stream("reasoning", cleaned);
+        }
+    }
+}
+
+sem Done = "the DONE state: the session is complete. Reach it from QA once the objective is fully built AND verified (type-checked, and for an app, run and exercised), or directly from Plan when the request was a pure question or read-only inspection that needed no file changes and has been answered. Ends the session.";
 impl Done.finish{
     # No onward visit: the walker's queue empties here and the session ends.
     console.print("\n  ● Done", style="bold green");
     agent.bus.enter("Done");
 }
 
-impl AgentSession.begin{
-    # Wire the pipeline once, then enter at Plan. The edges encode the legal
-    # transitions: Plan -> Build -> QA, and QA loops back to Build/Plan or
-    # finishes at Done.
+"""Build the phase pipeline and return its entry (Plan).
+
+The single source of truth for the workflow topology: which states exist and
+the legal transitions between them. Both the walker (`AgentSession.begin`) and
+the UI (`ui_graph`, which traces the result) consume this, so changing an edge
+here updates the agent's behavior and the rendered graph at once.
+"""
+impl build_pipeline -> Plan {
+    # Wire the phase pipeline. The edges ARE the legal transitions: Plan -> Build
+    # -> QA, with QA looping back to Build/Plan or finishing at Done, plus a
+    # read-only fast path Plan -> Done for requests that change no files. This is
+    # the only place the topology is written down; `ui_graph` traces these same
+    # nodes and edges so the rendered graph can never drift from the real workflow.
     plan = Plan();
     build = Build();
     qa = QA();
     done = Done();
-    here ++> plan;
     plan ++> build;
+    # Read-only fast path: a pure question or inspection that needs no file
+    # changes finishes straight from Plan, so it never enters Build (and its
+    # wrote-nothing nudge loop) or QA. Build remains the default Plan successor.
+    plan ++> done;
     build ++> qa;
     qa ++> build;
     qa ++> plan;
     qa ++> done;
-    visit plan;
+    return plan;
 }
 
+impl AgentSession.begin{
+    # Build the pipeline as a free-standing graph and enter at Plan. The session
+    # does not hang off root: these nodes exist only for the walker to traverse,
+    # so there is no Root -> Plan edge to confuse the topology or the trace.
+    visit build_pipeline();
+}
+
+"""Run one agent turn: spawn the session walker, then render the turn summary."""
 impl run_turn(message: str) {
     agent.turn_wrote = False;
     # The session ledger persists across turns; create it on first use.
@@ -1684,19 +2383,55 @@ impl run_turn(message: str) {
             time.time() - started, st.n_read, st.n_write, st.n_run, st.files, st.usage
         );
     }
-    st2 = session.stats;
-    elapsed = time.time() - started;
-    agent.bus.emit(
-        "stats",
-        {
-            "text": (
-                f"{elapsed:.1f}s  ·  {st2.n_read} reads  ·  "
-                f"{st2.n_write} writes  ·  {st2.n_run} runs  ·  {len(st2.files)} files"
-            )
+    # Publish the same summary the CLI prints (print_stats) as structured data
+    # for the UI's stats bar: duration, tool breakdown, files, tokens, cost,
+    # throughput, and project health.
+    if agent.bus.active_feed {
+        st2 = session.stats;
+        elapsed = time.time() - started;
+        usage = st2.usage;
+        prompt = int(usage.get("prompt_tokens", 0) or 0);
+        completion = int(usage.get("completion_tokens", 0) or 0);
+        cost = (
+            agent.view._estimate_cost(prompt, completion)
+                if (prompt > 0 or completion > 0)
+                else 0.0
+        );
+        tok_per_s = completion / elapsed if (completion > 0 and elapsed > 0) else 0.0;
+        # Project health, only when the model is already built (cheap) -- same
+        # guard the CLI uses so a stat line never forces a whole-project compile.
+        n_err = 0;
+        n_warn = 0;
+        health_loaded = False;
+        ci = code_intel();
+        if ci is not None and ci.is_loaded() {
+            try {
+                (n_err, n_warn) = _count_diags(list(ci.diagnostics()));
+                health_loaded = True;
+            } except Exception {
+                health_loaded = False;
+            }
         }
-    );
+        agent.bus.last_stats = {
+            "elapsed": round(elapsed, 1),
+            "tools": st2.n_read + st2.n_write + st2.n_run,
+            "reads": st2.n_read,
+            "writes": st2.n_write,
+            "runs": st2.n_run,
+            "files": len(st2.files),
+            "tokens_in": prompt,
+            "tokens_out": completion,
+            "cost": cost,
+            "tok_per_s": round(tok_per_s, 1),
+            "errors": n_err,
+            "warnings": n_warn,
+            "health_loaded": health_loaded,
+            "has_run": True
+        };
+    }
 }
 
+"""The project's current error diagnostics, or [] if no model is built yet."""
 impl _project_errors -> list {
     ci = code_intel();
     if ci is None or not ci.is_loaded() {
@@ -1713,6 +2448,15 @@ impl _project_errors -> list {
     }
 }
 
+"""After a one-shot build, keep going until the project compiles.
+
+A weaker model often declares a multi-file task done while the project still
+has compile errors. Rather than accept broken code, feed the outstanding
+errors back and let the agent fix them -- bounded by `max_rounds`, and stopping
+as soon as a round fails to reduce the error count, so a model that cannot make
+progress exits instead of looping. No-op when the initial turn changed no code
+(e.g. a read-only query) or the project already compiles.
+"""
 impl verify_and_continue(max_rounds: int = 3) {
     if not agent.turn_wrote {
         return;
@@ -1752,6 +2496,17 @@ impl verify_and_continue(max_rounds: int = 3) {
     }
 }
 
+"""Entry point for `jac ai` -- the default `run_ai_agent` hook implementation.
+
+`req` is an `AgentRequest`: the resolved `--model`, `--n_ctx`, and `--safe`
+flags, the working directory, and a shared `CodeIntelligence` handle the
+semantic tools query. With a non-empty `prompt`, runs a single turn and exits;
+otherwise starts an interactive read-eval-print loop. Always returns 0 -- a
+failed turn reports its error but does not abort the session.
+
+When `req.ui` is set, hands off to `_run_ui_server`: launches the bundled Jac
+web app as a subprocess and opens it in the browser instead of the REPL.
+"""
 impl run_agent(req: object) -> int {
     global agent_model;
     # Access `req` untyped so attribute reads type-check without importing
@@ -1860,6 +2615,13 @@ impl run_agent(req: object) -> int {
 # ---------------------------------------------------------------------------
 # Web UI bridge -- backend the bundled `ai_ui` server endpoints call.
 # ---------------------------------------------------------------------------
+"""Configure the agent for a UI session from the launcher's environment.
+
+Called once at the UI server's boot. Reads the user's project directory and
+model knobs from the `JAC_AI_UI_*` env vars the launcher set, points `agent.cwd`
+and a fresh `CodeIntelligence` at that project, builds the model, and forces
+yolo mode (the server has no terminal to confirm at). Idempotent.
+"""
 impl ui_configure -> None {
     global agent_model;
     # The launcher set these when it spawned this server process.
@@ -1885,6 +2647,7 @@ impl ui_configure -> None {
     # Building the model can fail (missing API key, no local weights). Keep the
     # server up regardless: the UI still loads and reports the problem in the
     # feed, rather than the whole web app failing to boot.
+    agent.cfg.n_ctx = n_ctx;
     try {
         agent_model = build_model(model_flag, n_ctx);
         agent.bus.emit(
@@ -1897,29 +2660,73 @@ impl ui_configure -> None {
             {"text": f"Connected to {agent.cwd}, but the model failed to load: {e}"}
         );
     }
+    # Detect whether the chosen model still needs an API key. This rides along in
+    # every pushed state frame, so the client opens the settings panel on the
+    # key field the moment it connects -- before the user wastes a turn.
+    _refresh_key_status();
+    if agent.bus.needs_key {
+        agent.bus.emit(
+            "system",
+            {
+                "text": f"{agent_model.model_name} needs an API key ({agent.bus.key_env}). Open Settings (⚙) to add one."
+            }
+        );
+    }
 }
 
 def _ui_turn_worker(prompt: str) {
     try {
         run_turn(prompt);
-        verify_and_continue();
+        # A stop request skips the auto-continue (don't restart work the user
+        # just halted).
+        if not agent.bus.cancel_requested {
+            verify_and_continue();
+        }
     } except Exception as e {
         agent.bus.emit("error", {"text": f"agent error: {e}"});
+        # An auth failure mid-turn means the key is missing or invalid even if we
+        # thought one was present -- force the settings panel open so the user can
+        # fix it without hunting through the feed.
+        msg = str(e).lower();
+        if (
+            "authenticationerror" in msg
+            or "api key" in msg
+            or "api_key" in msg
+            or "401" in msg
+            or "unauthorized" in msg
+        ) {
+            (_, env) = _model_needs_key(str(agent_model.model_name));
+            agent.bus.needs_key = True;
+            if env {
+                agent.bus.key_env = env;
+            }
+            agent.bus.publish_full();
+        }
     }
-    # The walker leaves `active` on its final node (Done, or wherever it
-    # stopped); fall back to idle so the status pill stops pulsing.
-    if agent.bus.status != "done" {
+    if agent.bus.cancel_requested {
+        agent.bus.emit("system", {"text": "Stopped."});
+        agent.bus.cancel_requested = False;
+        agent.bus.set_status("idle");
+    } elif agent.bus.status != "done" {
+        # The walker leaves `active` on its final node (Done, or wherever it
+        # stopped); fall back to idle so the status pill stops pulsing.
         agent.bus.set_status("idle");
     }
 }
 
+"""Start one agent turn for `prompt` on a background thread; never blocks.
+
+Returns False (and does nothing) if a turn is already running, so the UI can
+disable its input while busy. The turn writes its milestones to `agent.bus`,
+which `ui_poll` drains.
+"""
 impl ui_send(prompt: str) -> bool {
     text = prompt.strip();
     if not text {
         return False;
     }
-    if agent.bus.status == "running" {
-        return False;  # one turn at a time
+    if agent.bus.status == "running" or agent.bus.status == "stopping" {
+        return False;  # one turn at a time (and not while a stop is unwinding)
     }
     agent.bus.begin_turn();
     agent.bus.emit("user", {"text": text});
@@ -1928,38 +2735,321 @@ impl ui_send(prompt: str) -> bool {
     return True;
 }
 
+"""The current event feed and walker state -- the UI's per-tick poll payload.
+
+Returns `agent.bus.snapshot()`: the bounded event log plus `status`, the
+`active` phase node, and the `path` walked this turn.
+"""
 impl ui_poll -> dict {
     return agent.bus.snapshot();
 }
 
-impl ui_graph -> dict {
-    # The phase pipeline the AgentSession walker traverses. Nodes carry a short
-    # role blurb for the UI; edges are the legal transitions (QA fans out).
+"""Reconstruct one model call's detail for the token-usage detail view.
+
+Given the `call` event's id, returns that call's full input conversation, the
+diff vs the prior call in the same conversation (`shared` = the cached prefix
+length, `new_input` = the messages added since), its output, the prior / next
+call ids for stepping, and the call's token counts. `found` is False for an
+unknown id.
+
+Call boundaries come from the assistant messages in the stored conversation:
+each model call produces exactly one assistant message, so the k-th call's input
+is everything before the k-th assistant message, and its output is that assistant
+message plus the tool result(s) up to the next one. (This is why the input shows
+the real per-call context -- system prompt, directive, prior turns -- rather than
+the seed the phase opened with.) Note the token counts ALSO include the tool JSON
+schemas, which the API sends as a separate parameter, not as a message, so they
+do not appear among the messages below.
+"""
+impl ui_call_detail(call_id: int) -> dict {
+    log = list(agent.bus.call_log);
+    entry: any = None;
+    for c in log {
+        if int(c["id"]) == call_id {
+            entry = c;
+        }
+    }
+    if entry is None {
+        return {"found": False};
+    }
+    convo: int = int(entry["convo"]);
+    msgs: list = agent.bus.convos.get(convo, []);
+    # Same-convo calls in call order (the log is appended in order).
+    same = [
+        c
+        for c in log
+        if int(c["convo"]) == convo
+    ];
+    pos = 0;
+    i = 0;
+    for c in same {
+        if int(c["id"]) == call_id {
+            pos = i;
+        }
+        i += 1;
+    }
+    # Indices of the assistant messages -- one per call -- used as boundaries.
+    asst: list = [];
+    j = 0;
+    for m in msgs {
+        if str(m.get("role", "")) == "assistant" {
+            asst.append(j);
+        }
+        j += 1;
+    }
+    n = len(asst);
+    # This call's output begins at its assistant message; its input is everything
+    # before it. When the assistant message is not captured yet (a live, still-
+    # running call), fall back to showing the whole snapshot as input.
+    a_k = int(asst[pos]) if pos < n else len(msgs);
+    a_prev = int(asst[pos - 1]) if (pos > 0 and pos - 1 < n) else 0;
+    a_next = int(asst[pos + 1]) if (pos + 1 < n) else len(msgs);
+    prev_id = int(same[pos - 1]["id"]) if pos > 0 else -1;
+    next_id = int(same[pos + 1]["id"]) if pos + 1 < len(same) else -1;
+    out_slice = [
+        m
+        for m in msgs[a_k:a_next]
+        if str(m.get("role", "")) in ("assistant", "tool")
+    ];
+    # The phase's tool schemas (the API `tools` param) -- the same for every call
+    # in this conversation. Their char total feeds the modal's "~tokens" estimate
+    # so the row's tokens_in reconciles (messages + tool schemas).
+    tools: list = agent.bus.convo_tools.get(convo, []);
+    tool_chars = 0;
+    for t in tools {
+        td: any = t;
+        tool_chars += len(str(td.get("schema", "")));
+    }
     return {
-        "nodes": [
-            {"id": "Plan", "label": "Plan", "desc": "Explore and decide the approach"},
-            {"id": "Build", "label": "Build", "desc": "Write and edit the code"},
-            {"id": "QA", "label": "QA", "desc": "Type-check, run, and verify"},
-            {"id": "Done", "label": "Done", "desc": "Objective built and verified"}
-        ],
-        "edges": [
-            {"source": "Plan", "target": "Build"},
-            {"source": "Build", "target": "QA"},
-            {"source": "QA", "target": "Build"},
-            {"source": "QA", "target": "Plan"},
-            {"source": "QA", "target": "Done"}
-        ],
-        "state": agent.bus.snapshot()
+        "found": True,
+        "id": call_id,
+        "node": str(entry["node"]),
+        "input": msgs[:a_k],
+        "new_input": msgs[a_prev:a_k],
+        "output": out_slice,
+        "shared": a_prev,
+        "total": a_k,
+        "tokens_in": int(entry.get("tokens_in", 0) or 0),
+        "tokens_out": int(entry.get("tokens_out", 0) or 0),
+        "tools": tools,
+        "tool_chars": tool_chars,
+        "prev_id": prev_id,
+        "next_id": next_id
     };
 }
 
+"""Live SSE event stream: yields a full snapshot, then one message per bus
+emit (token by token for reasoning/answer), plus periodic heartbeats so a
+client disconnect is detected. jac-scale frames each yielded dict as an
+`text/event-stream` `data: {json}` chunk. The `agent_stream` endpoint returns
+this; the client reads it to update the UI per token instead of polling.
+"""
+impl ui_stream -> any {
+    import from queue { Empty }
+    q = agent.bus.subscribe();
+    try {
+        # First frame: a full snapshot so a fresh (or reconnecting) client has
+        # the complete state; subsequent frames are per-emit deltas. Events that
+        # race between subscribe and snapshot may arrive twice -- harmless, the
+        # client upserts by id.
+        snap = agent.bus.snapshot();
+        snap["full"] = True;
+        yield snap;
+        while True {
+            try {
+                # Timeout yields a heartbeat so a disconnected client is noticed
+                # (the generator reaches a yield and the server can close it).
+                yield q.get(timeout=10.0);
+            } except Empty {
+                yield {"heartbeat": True};
+            }
+        }
+    } finally {
+        agent.bus.unsubscribe(q);
+    }
+}
+
+"""The static phase graph (nodes + edges) the UI renders in cytoscape, with state.
+
+Nodes are Plan/Build/QA/Done; edges are the legal transitions the walker may
+take. Returned once on mount; live position comes from `ui_poll`.
+"""
+impl ui_graph -> dict {
+    # Trace the actual phase pipeline instead of hardcoding it, so the rendered
+    # graph always matches the walker's real topology: build the graph once, then
+    # BFS from the entry, emitting one node per state (id/label from its class
+    # name, blurb from its own `desc`) and one edge per out-edge. Change an edge
+    # in `build_pipeline` and this -- and the UI -- follow automatically.
+    nodes = [];
+    edges = [];
+    seen = set();
+    # Untyped so successors (Any, via the edge ref) append cleanly alongside the
+    # Plan entry.
+    frontier: list = [build_pipeline()];
+    while frontier {
+        nd = frontier.pop(0);
+        nid = type(nd).__name__;
+        if nid in seen {
+            continue;
+        }
+        seen.add(nid);
+        # `sem` is the node class's role prompt (`_jac_semstr`, the same string
+        # the router shows the model); `tools` are the phase's exposed tool names
+        # (Done has none). Both ride along so the UI inspector can show a state's
+        # full definition when its graph node is clicked -- no separate lookup.
+        tool_names = (
+            [getattr(t, "__name__", "") for t in nd.tools()] if nd?.tools else []
+        );
+        nodes.append(
+            {
+                "id": nid,
+                "label": nid,
+                "desc": nd.desc,
+                "sem": str(getattr(type(nd), "_jac_semstr", "") or ""),
+                "tools": tool_names
+            }
+        );
+        for succ in [nd-->] {
+            edges.append({"source": nid, "target": type(succ).__name__});
+            frontier.append(succ);
+        }
+    }
+    return {"nodes": nodes, "edges": edges, "state": agent.bus.snapshot()};
+}
+
+"""Clear the cross-turn ledger and the event feed for a fresh UI session."""
 impl ui_reset -> None {
     reset_session();
     agent.bus.events = [];
+    # Drop the per-call capture store too, so a fresh session starts empty.
+    agent.bus.call_log = [];
+    agent.bus.convos = {};
+    agent.bus.convo_tools = {};
     agent.bus.begin_turn();
     agent.bus.set_status("idle");
+    # Tell live streams the feed was cleared (set_status only sends a delta).
+    agent.bus.publish_full();
 }
 
+"""Request that the running turn stop. Sets the bus cancel flag; the progress
+guard aborts the current phase and the walker halts at the next checkpoint.
+No-op when nothing is running.
+"""
+impl ui_stop -> None {
+    # Only meaningful while a turn is running. Set the cancel flag and flip to a
+    # "stopping" status immediately so the UI confirms the click right away --
+    # the actual halt lands at the next stream/iteration checkpoint (which can
+    # be a second or two with a large local model). The worker clears the flag
+    # and drops to idle once the turn unwinds.
+    if agent.bus.status == "running" {
+        agent.bus.cancel_requested = True;
+        agent.bus.set_status("stopping");
+        agent.bus.emit("system", {"text": "Stopping…"});
+    }
+}
+
+"""The settings panel's current values: the active model, whether a key is held
+(never the key itself), base_url, temperature, context window, the model source,
+the live key-status, and the quick-pick presets.
+"""
+impl ui_settings -> dict {
+    name = "";
+    try {
+        name = str(agent_model.model_name);
+    } except Exception {
+        name = "";
+    }
+    t = agent.cfg.temperature;
+    return {
+        "model": name,
+        # Whether a key is currently held -- the actual secret is never sent back.
+        "api_key_set": bool(agent.cfg.api_key),
+        "base_url": agent.cfg.base_url,
+        # -1 signals "provider default" (cloud models leave temperature unset).
+        "temperature": (float(t) if t is not None else -1.0),
+        "n_ctx": agent.cfg.n_ctx,
+        "model_source": agent.cfg.model_source,
+        "needs_key": agent.bus.needs_key,
+        "key_env": agent.bus.key_env,
+        "presets": list(_MODEL_PRESETS)
+    };
+}
+
+"""Apply settings from the `--ui` panel and rebuild the model live.
+
+`temperature`/`n_ctx` arrive as strings (blank = leave at default). An empty
+`api_key` keeps the currently held one (the field is blank unless the user is
+changing it), so re-applying other settings never clears the key. Rebuilds the
+model with the new name/config, refreshes the key status, and pushes a fresh
+state frame so the client closes the panel (or shows the error). Session-only:
+nothing is written to disk.
+"""
+impl ui_apply_settings(
+    model: str, api_key: str, base_url: str, temperature: str, n_ctx: str
+) -> dict {
+    global agent_model;
+    if api_key.strip() {
+        agent.cfg.api_key = api_key.strip();
+    }
+    agent.cfg.base_url = base_url.strip();
+    nctx = 0;
+    try {
+        if n_ctx.strip() {
+            nctx = max(0, int(n_ctx.strip()));
+        }
+    } except Exception {
+        nctx = 0;
+    }
+    agent.cfg.n_ctx = nctx;
+    # Parse the temperature override now; applied after build_model (which sets
+    # its own default) so a user value is not clobbered.
+    temp_override: float | None = None;
+    try {
+        if temperature.strip() and float(temperature) >= 0.0 {
+            temp_override = float(temperature);
+        }
+    } except Exception {
+        temp_override = None;
+    }
+    try {
+        agent_model = build_model(model.strip(), nctx);
+        if temp_override is not None {
+            agent.cfg.temperature = temp_override;
+        }
+        _refresh_key_status();
+        agent.bus.emit(
+            "system", {"text": f"Settings applied; using {agent_model.model_name}."}
+        );
+        agent.bus.publish_full();
+        return {
+            "ok": True,
+            "error": "",
+            "model": str(agent_model.model_name),
+            "needs_key": agent.bus.needs_key,
+            "key_env": agent.bus.key_env
+        };
+    } except Exception as e {
+        _refresh_key_status();
+        agent.bus.emit("error", {"text": f"Settings error: {e}"});
+        agent.bus.publish_full();
+        return {
+            "ok": False,
+            "error": str(e),
+            "model": "",
+            "needs_key": agent.bus.needs_key,
+            "key_env": agent.bus.key_env
+        };
+    }
+}
+
+"""Launch the bundled web UI for `jac ai --ui` and block until the user quits.
+
+Spawns `jac start` on the bundled `ai_ui` Jac app as a child process -- passing
+the user's project directory and model flags through `JAC_AI_UI_*` env vars --
+polls its log for the ready URL, opens the browser there, and waits. Ctrl-C
+shuts the child down. Returns 0 on a clean exit, 1 if the client plugin is
+missing or the server never came up.
+"""
 impl _run_ui_server(r: any) -> int {
     import jaclang;
     import from importlib.util { find_spec }

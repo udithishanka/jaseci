@@ -11,6 +11,7 @@ directly and builds the model from them before the session starts.
 """
 
 # Implementations live in impl/ai_agent.impl.jac.
+import from typing { Callable }
 import from byllm.lib { Model }
 import from byllm.parallel { mark_serialize }
 
@@ -31,7 +32,15 @@ obj AgentConfig {
         show_stats: bool = True,
         # Rich live view; `--quiet` turns it off, `/verbose` toggles.
         verbose: bool = True,
-        inline_feedback: bool = True;
+        inline_feedback: bool = True,
+        # Provider API key set live from the `--ui` settings panel; injected into
+        # the byLLM model config on (re)build for cloud models. Empty falls back
+        # to jac.toml `[plugins.byllm.model] api_key` or the provider env var.
+        api_key: str = "",
+        # Optional custom endpoint / gateway base_url (cloud models only).
+        base_url: str = "",
+        # Context-window override (0 = model default); used on rebuild.
+        n_ctx: int = 0;
 }
 
 # ---------------------------------------------------------------------------
@@ -54,29 +63,7 @@ obj FileTools {
     def edit_file(path: str, old_text: str, new_text: str) -> str;
     def list_dir(path: str) -> str;
     def grep(pattern: str, path: str) -> str;
-    """Rebuild the project model after a write and report the diagnostics it caused.
-
-    Returns, as a text block appended to the write tool's result, every compiler
-    error and warning now in `path` plus any newly introduced in other project
-    files the edit affects -- so the model gets compiler feedback, including
-    cross-file breakage, on every write without a separate `jac_check` call. A
-    dependent module's pre-existing error is not reported: only the delta this
-    edit caused. Warnings are included because an undefined name or unresolved
-    type surfaces as a warning, not an error. Empty string when the edit
-    introduced nothing (or no code intelligence is available).
-    """
     def write_feedback(path: str) -> str;
-
-    """Reject a write that is JavaScript/React rather than Jac, with a fix-it.
-
-    A weaker model often reverts to its React training and writes JS/TS syntax
-    into a `.jac` file (or tries to create a `.js`/`.ts` file outright). This
-    returns a non-empty error message naming the offending tokens and the Jac
-    form to use, or `""` when the content is clean Jac -- caught at write time so
-    one stray file does not cascade into dozens of compile errors. Only `.jac`
-    (and code-file extensions) are policed; `.css`/`.json`/`.md`/config writes
-    pass through.
-    """
     def _js_drift_error(path: str, content: str) -> str;
 }
 
@@ -91,27 +78,10 @@ obj ProcessTools {
     def run_command(command: str) -> str;
     def jac_check(path: str) -> str;
     def start_app(entry_file: str) -> str;
-    """Start the dev server and wait until it is actually serving, returning its URL.
-
-    Launches `jac start <entry>` detached and polls its log until the ready URL
-    appears -- the first start can be slow because it installs client deps and
-    builds the client -- then returns that URL for `browse_open`. On failure
-    returns the log tail so the model can fix the cause. Far more reliable than
-    starting the server by hand and scraping the log for a URL within a fixed
-    window.
-    """
     def serve(entry_file: str) -> str;
-
-    """Stop the dev server started by `serve` (best-effort)."""
     def stop_server -> str;
-
-    """Combine a finished subprocess's stdout+stderr into a truncated result string."""
     def _proc_output(result: any) -> str;
-
-    """Run a `jac` subcommand on a file and return its combined output."""
     def run_jac_cli(subcommand: str, path: str) -> str;
-
-    """Kill the `serve` dev server and its child processes if one is running."""
     def _serve_shutdown;
 }
 
@@ -156,19 +126,8 @@ obj BrowseTools {
     def browse_get(what: str, selector: str) -> str;
     def browse_eval(expression: str) -> str;
     def browse_close -> str;
-    """Turn a browser-engine exception into a tool-result string with a next step."""
     def _browse_err(e: Exception) -> str;
-
-    """Run a browser-engine call under the shared confirm / error / truncate policy.
-
-    `confirm_msg` empty means the op is read-only and runs unconfirmed; otherwise
-    the action is gated and a declined call returns a DENIED string. `run` is a
-    thunk performing the actual `br_*` call; its result is returned (str-cast),
-    truncated when `clip` is set. Engine exceptions become a `_browse_err` string.
-    """
     def _browse(confirm_msg: str, run: any, clip: bool = False) -> str;
-
-    """Close the agent's browser session if one was opened (best-effort)."""
     def _browse_shutdown;
 }
 
@@ -185,34 +144,11 @@ formatters are pure; `render_stream` keeps its per-stream state in locals.
 obj TurnRenderer {
     def print_banner;
     def print_help;
-    """Format a tool call as `name(key=value, ...)`, clipping long values."""
     def fmt_tool_call(tool: str, args: object) -> str;
-
-    """Render a token count compactly: 12400 -> '12.4k', 840 -> '840'."""
     def _short_num(n: int) -> str;
-
-    """Best-effort USD cost for the turn from litellm's price map; 0 if unknown.
-
-    Local models and any model litellm does not price raise here and fall back
-    to 0 -- which is correct for a local model, and a benign omission otherwise.
-    """
     def _estimate_cost(prompt_tokens: int, completion_tokens: int) -> float;
-
-    """Render token usage (and cost, when priced) from a byLLM `usage` total."""
     def _format_tokens(usage: dict[str, object]) -> str;
-
-    """Render the project's compiler health from the session's CodeIntelligence.
-
-    The count is project-wide, so it catches breakage the turn left in any file.
-    Reported only when the turn already built the project model (a write or a
-    semantic-tool query): a stat line must stay cheap and must never trigger a
-    whole-project compile -- in a large repo that would stall every turn. When
-    the model is not yet built there is nothing the turn touched, so the stat is
-    simply omitted.
-    """
     def _format_health -> str;
-
-    """Print the one-line turn summary: duration, tools, files, tokens, health."""
     def print_stats(
         elapsed: float,
         n_read: int,
@@ -222,51 +158,15 @@ obj TurnRenderer {
         usage: dict[str, object]
     );
 
-    """Strip a model's stray control tokens from streamed reasoning prose.
-
-    Some local templates wrap tool syntax in `<|channel>`/`<token|>` markers and
-    render quotes as `<|"|>`; clear them so only clean prose reaches the terminal.
-    The tool-call JSON itself is excluded upstream by `_split_reasoning`.
-    """
     def _strip_control(text: str) -> str;
-
-    """Split accumulated reasoning into the prose safe to show and a hit flag.
-
-    A reply is reasoning prose followed by the `<tool_call>` JSON the protocol
-    recovers into a structured event. Return only the prose before the marker,
-    and hold back a trailing partial `<tool_call` so a marker split across stream
-    tokens is never shown. `hit` is True once the marker has appeared.
-    """
     def _split_reasoning(raw: str) -> tuple[str, bool];
-
-    """Up to `max_lines` lines of a tool result, each clipped, with a more-marker."""
     def _result_snippet(text: str, max_lines: int) -> list[str];
-
-    """Format a millisecond duration compactly: '820ms', '1.8s', '13.0s'."""
     def _fmt_ms(ms: float) -> str;
-
-    """Format a step's model timing as `(24.6s, 113 tps)`, omitting tps if unknown."""
     def _fmt_gen(ms: float, tokens: int) -> str;
-
-    """Render a code-intelligence compile, set as `CodeIntelligence.on_event`.
-
-    Fires whenever the compiler-backed project model rebuilds -- the initial
-    load, and the incremental recompile after each write or the first query
-    following one. Printed inline with the tool stream (it runs inside a tool's
-    execution) so the hidden compiler work behind write_file/find_symbol/etc. is
-    visible: which file, how many modules were recompiled out of the project, and
-    how long it took.
-    """
     def _ci_event(info: any);
-
-    """Consume one byLLM phase event stream, rendering it live.
-
-    A phase ability calls this with the stream returned by the `run_phase` byLLM
-    call (typed `-> str` for the streaming contract, but with `logging=True` it
-    yields StreamEvent objects). Renders reasoning, tool calls, and the answer
-    live, and returns this phase's tool-call tallies for the walker to accumulate.
-    """
     def render_stream(event_stream: any) -> dict;
+    def route_stream_event(event: any) -> None;
+    def _emit_call_usage(data: any, phase: str) -> None;
 }
 
 """A live, in-process feed of structured agent events for the `--ui` web view.
@@ -292,24 +192,70 @@ obj AgentEventBus {
         # Phase nodes in visit order this turn; the UI animates the edge between
         # each consecutive pair to show the walker moving.
         path: list[str] = [],
+        # The latest turn's summary stats (the same set the CLI prints): duration,
+        # tool breakdown, files, tokens, cost, throughput, and project health.
+        # Surfaced in `snapshot` and rendered as chips by the UI's stats bar.
+        last_stats: dict = {},
+        # Set by `ui_stop`; the progress guard aborts the phase and the walker
+        # halts, so the user can stop a turn mid-flight.
+        cancel_requested: bool = False,
+        # Live subscribers (one `queue.Queue` per open SSE stream). Every emit
+        # pushes a message to each, so the UI updates per token instead of
+        # polling. `emit_stream` re-pushes the growing event each token, so the
+        # client sees reasoning/answer text arrive a token at a time.
+        _subscribers: list = [],
         _next_id: int = 1,
-        # Keep the feed bounded so a long session does not grow without limit.
-        _cap: int = 400;
+        # Large enough to keep a full session's history (reasoning/answer stream
+        # into single growing events via `emit_stream`, so the count stays low).
+        _cap: int = 4000,
+        # API-key status for the `--ui` settings panel, refreshed by
+        # `_refresh_key_status`. `needs_key` drives the panel auto-opening; the
+        # current model name and the missing provider env var (e.g.
+        # `ANTHROPIC_API_KEY`) are shown to the user. Ride along in every pushed
+        # state frame so the client always knows whether a key is required.
+        needs_key: bool = False,
+        key_env: str = "",
+        model_name: str = "",
+        # Per-call conversation capture backing the token-usage detail view. Each
+        # model call records the conversation it belongs to (`_cur_convo`) and its
+        # token counts into `call_log`; the growing message snapshot for each
+        # conversation lives once in `convos`, kept as the longest seen. From those,
+        # `ui_call_detail` reconstructs a call's full input and output using the
+        # assistant messages as call boundaries (each call yields one assistant
+        # message), plus the diff vs the prior call. Kept OUT of the event ring /
+        # `snapshot` -- heavy, fetched lazily per click, not pushed every frame.
+        call_log: list[dict] = [],
+        convos: dict[int, list] = {},
+        # The tool JSON schemas the phase sends with every call in a conversation.
+        # These ride the API's `tools` parameter -- NOT the messages -- so they
+        # are captured separately (per convo, since a phase's tool set is fixed)
+        # and surfaced in the detail view so the row's `tokens_in` reconciles.
+        convo_tools: dict[int, list] = {},
+        _cur_convo: int = 0,
+        _convo_seq: int = 0;
 
-    """Append one event (kind + fields), stamping a monotonic id; thread-safe."""
     def emit(kind: str, fields: dict) -> None;
-
-    """Mark the walker as entering a phase: set active, extend the path, emit."""
+    def emit_stream(kind: str, token: str) -> None;
     def enter(phase: str) -> None;
-
-    """Set the run status ("idle" | "running" | "done") and emit a status event."""
     def set_status(s: str) -> None;
-
-    """Reset the per-turn graph state (active node and path) for a fresh walk."""
     def begin_turn -> None;
-
-    """A JSON-ready snapshot the `ui_poll` endpoint returns each tick."""
     def snapshot -> dict;
+    def subscribe -> any;
+    def unsubscribe(q: any) -> None;
+    def publish(ev: dict) -> None;
+    def publish_full -> None;
+    def ledger_view -> dict;
+    def publish_ledger -> None;
+    def _state -> dict;
+    # Per-call conversation capture (token-usage detail view). `msgs` is the
+    # backend's heterogeneous message list (litellm dicts or objects), so it is
+    # `any` rather than a concrete element type.
+    def emit_call(fields: dict) -> None;
+    def open_convo(msgs: any) -> None;
+    def set_pending(msgs: any) -> None;
+    def close_convo(msgs: any) -> None;
+    # Capture the current conversation's tool JSON schemas (the `tools` API param).
+    def set_convo_tools(tools: list[Callable]) -> None;
 }
 
 
@@ -354,14 +300,17 @@ obj AgentRuntime {
         guides: GuideTools = GuideTools(),
         web: BrowseTools = BrowseTools(),
         # The live terminal view and turn-summary renderer.
-        view: TurnRenderer = TurnRenderer();
+        view: TurnRenderer = TurnRenderer(),
+        # The current phase's tools and conversation, set by `PhaseState.run`
+        # right before it calls `run_phase`. They live here -- not as `run_phase`
+        # parameters -- because byLLM serializes a `by` function's parameters into
+        # the prompt as text inputs; passing the conversation as a parameter would
+        # duplicate the whole history (it is already fed via `conversation=`) and
+        # dump the tool list as object reprs. As globals the `by` clause reads,
+        # only `directive` remains a (genuine) prompt input.
+        phase_tools: list = [],
+        phase_ctx: list = [];
 
-    """Record a note onto the active session's ledger (the `note` tool).
-
-    A memory capability rather than a domain toolbox: it writes to the live
-    walker's ledger, which the runtime owns, so notes stay visible to every
-    later phase and turn.
-    """
     def note(text: str) -> str;
 }
 
@@ -382,85 +331,26 @@ obj ToolSpec {
         phases: set[str] = set();
 }
 
-"""Resolve a tool path against the session working directory.
-
-Absolute paths pass through; relative paths are joined onto `agent.cwd` so
-every file tool agrees on what `main.jac` means, regardless of where `jac ai`
-was launched or which subfolder the model has `cd`'d into.
-"""
 def _resolve(path: str) -> str;
-
-"""Point the session (and its code intelligence) at a new working directory.
-
-Called when a `run_command` changes the shell's directory. Re-roots the shared
-CodeIntelligence at the new project root (the nearest ancestor holding a
-`jac.toml`, else the directory itself) so semantic queries and the health line
-reflect the project the model actually moved into -- e.g. a freshly scaffolded
-app subfolder -- not the launch directory.
-"""
 def _set_session_cwd(new_dir: str);
-
-"""The project root for a directory: nearest ancestor with a `jac.toml`, else it."""
 def _project_root_of(start: str) -> str;
-
-"""The imperative kickoff line for a phase, by state label (Plan/Build/QA).
-
-The phase `sem` describes the role; this is the turn's actual instruction. A
-weaker model tends to stop after merely exploring or describing a plan, so the
-Build line insists on writing code and the QA line insists on actually running
-the result -- finishing is not an option until the work exists and is verified.
-"""
 def _phase_directive(label: str) -> str;
-
-"""Pick which model `jac ai` should run.
-
-Priority: the `--model` flag (`model_override`), then `[plugins.byllm.model]
-default_model` in jac.toml, then the bundled local model so the command works
-with no API key. Records the winning source in `agent.cfg.model_source`.
-"""
 def resolve_model_name(model_override: str = "") -> str;
-
-"""byLLM config rooted at the agent's working dir, not the process cwd.
-
-The single source of truth for which `jac.toml` supplies the model and byLLM
-settings: `agent.cwd` (the user's project). This matters under `jac ai --ui`,
-where the process runs in the bundled web app's directory -- resolving against
-process cwd there would read the wrong `jac.toml`. Falls back to the default
-(process cwd) only before `agent.cwd` is set (import time).
-"""
 def _byllm_config -> any;
-
-"""Build the agent's LLM, supporting any byLLM-compatible model.
-
-The model name is resolved by `resolve_model_name` (flag, then jac.toml, then
-the bundled local default). Cloud models work out of the box: byLLM's `Model`
-pulls `api_key`/`base_url` from `[plugins.byllm.model]` in jac.toml (or the
-usual provider env vars). Local models additionally read the runtime knobs
-(gpu layers, threads, auto-download) from `[plugins.byllm.local]`; a non-zero
-`n_ctx` overrides the configured context window.
-"""
 def build_model(model_override: str = "", n_ctx: int = 0) -> Model;
 
 # Built at import so every `by` clause has a model; `run_agent` rebuilds on flags.
 glob agent_model = build_model();
 
-"""Clip oversized tool output so it does not blow the model's context."""
 def truncate(text: str, limit: int = 12000) -> str;
-
-"""Ask the user to approve a side-effecting action; honours `--yolo`."""
 def confirm(action: str) -> bool;
-
-
-"""Count a diagnostics list as `(errors, warnings)` by severity."""
 def _count_diags(diags: list) -> tuple[int, int];
-
-
-"""Return the session's CodeIntelligence, rebuilding it if a write happened.
-
-`write_file`/`edit_file` flag the project as dirty; the first semantic query
-after a write recompiles so symbol lookups reflect what the agent just wrote.
-"""
 def code_intel -> any;
+
+# Flatten one conversation message (litellm dict or object) to a small JSON-safe
+# record (role + truncated content + tool-call summaries) for the token-usage
+# detail snapshots.
+def _san_msg(m: any) -> dict;
 
 
 glob AGENT_RULES = """\
@@ -477,42 +367,20 @@ Universal habits:
   exact; reserve grep for plain text -- comments, strings, TODOs.
 - Never guess. Read a file before editing it, and consult the bundled guides
   before writing unfamiliar Jac -- they are the authoritative spec for correct,
-  idiomatic Jac.
+  idiomatic Jac. read_guide("jac-core-cheatsheet") is the core-syntax primer;
+  read it before writing Jac when you are unsure of the basics.
 - Leave a note. When you make a decision, rely on an assumption, or spot
   something a later state should check, call `note` -- notes stay visible to
   every later state and turn.
 
-You write JAC, not JavaScript, TypeScript, or React. Jac is Python-flavored
-with braces. A UI component looks like Python, NOT like a React class or
-function component. If you catch yourself writing React, STOP and write Jac:
-- A component is `def:pub Name(props) -> JsxElement { ... }` -- never a
-  `class`, never `function`, never `() => {}`, never `constructor`/`render`,
-  never `this.props` (props are plain function parameters; state is `has`).
-- NEVER `import React`, never `from "react"`, never `export` / `export default`.
-- Define functions with `def`, not `function`; use `lambda(x: int) -> int {...}`,
-  not `x => ...`. Declare variables `x: int = 1`, never `const`/`let`/`var`.
-- Refer to the current object as `self`, not `this`. Use `==`/`!=`, not
-  `===`/`!==`. Use `None`, not `null`/`undefined`. End statements with `;`.
-- Every source file is `.jac` (a client component is `.cl.jac`). Never create
-  a `.js`, `.ts`, `.jsx`, or `.tsx` file. JSX still uses `className` and
-  `{expr}` -- that part is the same.
-When unsure of the Jac form for any UI pattern, call read_guide("jac-cl-components")
-and copy its shapes exactly.
-
-Jac gotchas -- the type checker rejects all of these, so never write them:
-- There is no `pass` statement. For an empty block, write empty braces: `{}`.
-- A docstring (`\"\"\"...\"\"\"`) goes immediately BEFORE a declaration, never as
-  the first statement inside a function body -- in a body it is a parse error.
-- The gradual / untyped type is lowercase `any`, with no import. Never write
-  capital `Any`, and never `import from typing { Any }`.
+You write JAC -- Python-flavored with braces -- never JavaScript, TypeScript, or
+React. A UI component is Jac (`def:pub Name(props) -> JsxElement { ... }`), not a
+React class or function. Before writing any UI code, call
+read_guide("jac-cl-components") and copy its shapes exactly.
 """;
 
 
-"""Build the agent's system message: rules, the guide index, and the cheatsheet."""
 def system_prompt -> str;
-
-
-"""Clear the durable session memory (the cross-turn ledger)."""
 def reset_session;
 
 
@@ -521,13 +389,6 @@ def reset_session;
 glob _REWRITE_LIMIT = 5;
 
 
-"""Stop a turn that keeps rewriting the same file without making progress.
-
-byLLM calls this before each ReAct iteration. It counts how often each file has
-been written so far this turn (from the assistant tool-call history); once any
-single file crosses `_REWRITE_LIMIT`, the model is looping on an error it cannot
-fix, so end the turn with a summary instead of spending the whole budget.
-"""
 def _progress_guard(ctx: any) -> str;
 
 
@@ -541,13 +402,8 @@ obj Ledger {
     has changes: list = [],
         notes: list = [];
 
-    """Record what a phase accomplished, as a one-line ledger entry."""
     def record(phase: str, summary: str);
-
-    """Leave a free-form note visible to every later phase and turn."""
     def remember(text: str);
-
-    """Render the ledger as compact text for injection into a phase prompt."""
     def render -> str;
 }
 
@@ -560,32 +416,57 @@ obj TurnStats {
         files: set[str] = set(),
         usage: dict = {};
 
-    """Fold one phase's render_stream result into the running totals."""
     def absorb(st: dict);
 }
 
 
 """Builds a phase's system prompt: base rules + the node's own role + the ledger."""
 obj Prompt {
-    """Compose the system message for a state, given the objective and memory."""
     static def for_phase(state_ty: type, objective: str, ledger: Ledger) -> str;
 }
 
 
 # One byLLM ReAct call serving every phase. `max_tokens=8192` is a generous
-# ceiling so large write_file arguments are not truncated mid-stream.
-"""Run the current phase: the LLM works with `tools` over the phase's own `ctx`."""
-def run_phase(directive: str, tools: list, ctx: list) -> str by agent_model(
-    tools=tools,
-    conversation=ctx,
+# ceiling so large write_file arguments are not truncated mid-stream. The phase's
+# tools and conversation are read from the `agent` glob (set by `PhaseState.run`)
+# rather than passed as parameters: byLLM serializes a `by` function's parameters
+# into the prompt, so passing them would duplicate the whole conversation and dump
+# the tool list as object reprs. Only `directive` stays a parameter -- it is the
+# real per-call instruction byLLM should put in the prompt.
+"""Run the current phase: the LLM works with the phase's tools over its own ctx."""
+def run_phase(directive: str) -> str by agent_model(
+    tools=agent.phase_tools,
+    conversation=agent.phase_ctx,
     stream=True,
     logging=True,
     temperature=agent.cfg.temperature,
     max_tokens=8192,
     parallelize=True,
     max_react_iterations=60,
-    on_iteration=_progress_guard
+    on_iteration=_progress_guard,
+    max_tool_result_length=4000
 );
+
+
+# The read-only fast path's triage. A single typed-bool model call (no tools, no
+# conversation) decides, after Plan, whether the request actually needs code
+# written -- so a pure question or inspection can finish at Done without entering
+# Build (and its wrote-nothing nudge loop) or QA. A bool return routes
+# deterministically in Jac, sidestepping `visit [-->] by`'s LLM edge filter,
+# which a weak model can crash with an out-of-range index. Biased toward True
+# (Build) so a misjudgement never silently skips real work.
+"""True if carrying out the request requires creating or editing any file.
+
+Return True for ANYTHING that writes or changes code -- this is the default, so
+when in doubt return True. Return False only for a pure question, explanation,
+or read-only inspection that changes no files at all (e.g. "what does this do?",
+"list the files", "is there a bug here?")."""
+def request_needs_code_changes(objective: str, plan: str) -> bool by agent_model(
+    temperature=agent.cfg.temperature
+);
+
+sem request_needs_code_changes.objective = "The user's original request for this turn.";
+sem request_needs_code_changes.plan = "The plan and findings produced by the Plan phase so far.";
 
 
 # The single source of truth for the agent's tools. Each row pairs a tool
@@ -717,29 +598,37 @@ with entry {
 # set (`tools()`).
 """A phase state: a self-contained step with its own prompt, tools, and context."""
 node PhaseState {
-    has ctx: list = [];
+    has ctx: list = [],
+        desc: str = "";
 
-    """The tools this state exposes: the TOOLS rows tagged with its phase.
-
-    Derived from the node's own class name (Plan/Build/QA -> plan/build/qa),
-    so a state's allowed actions follow from its identity with no per-state
-    override -- the same name `run` uses as the phase label.
-    """
+    # One-line role blurb the UI shows under the node. Lives here so tracing the
+    # real graph yields the label too -- no separate hardcoded list to keep in
+    # sync with the pipeline.
     def tools -> list;
-
     can run with AgentSession entry;
 }
 
-node Plan(PhaseState) {}
+node Plan(PhaseState) {
+    has desc: str = "Explore and decide the approach";
+}
 
-node Build(PhaseState) {}
+node Build(PhaseState) {
+    has desc: str = "Write and edit the code";
+}
 
-node QA(PhaseState) {}
+node QA(PhaseState) {
+    has desc: str = "Type-check, run, and verify";
+}
 
 """The terminal state: the task is complete and verified."""
 node Done {
+    has desc: str = "Objective built and verified";
+
     can finish with AgentSession entry;
 }
+
+def build_pipeline -> Plan;
+
 
 walker AgentSession {
     has objective: str,
@@ -756,37 +645,9 @@ walker AgentSession {
 }
 
 
-"""Run one agent turn: spawn the session walker, then render the turn summary."""
 def run_turn(message: str);
-
-
-"""The project's current error diagnostics, or [] if no model is built yet."""
 def _project_errors -> list;
-
-
-"""After a one-shot build, keep going until the project compiles.
-
-A weaker model often declares a multi-file task done while the project still
-has compile errors. Rather than accept broken code, feed the outstanding
-errors back and let the agent fix them -- bounded by `max_rounds`, and stopping
-as soon as a round fails to reduce the error count, so a model that cannot make
-progress exits instead of looping. No-op when the initial turn changed no code
-(e.g. a read-only query) or the project already compiles.
-"""
 def verify_and_continue(max_rounds: int = 3);
-
-
-"""Entry point for `jac ai` -- the default `run_ai_agent` hook implementation.
-
-`req` is an `AgentRequest`: the resolved `--model`, `--n_ctx`, and `--safe`
-flags, the working directory, and a shared `CodeIntelligence` handle the
-semantic tools query. With a non-empty `prompt`, runs a single turn and exits;
-otherwise starts an interactive read-eval-print loop. Always returns 0 -- a
-failed turn reports its error but does not abort the session.
-
-When `req.ui` is set, hands off to `_run_ui_server`: launches the bundled Jac
-web app as a subprocess and opens it in the browser instead of the REPL.
-"""
 def run_agent(req: object) -> int;
 
 
@@ -796,46 +657,43 @@ def run_agent(req: object) -> int;
 # That child process re-imports this module, so its `agent` glob -- and the
 # `agent.bus` the turn thread writes to -- is the same object `ui_poll` reads.
 # ---------------------------------------------------------------------------
-"""Configure the agent for a UI session from the launcher's environment.
-
-Called once at the UI server's boot. Reads the user's project directory and
-model knobs from the `JAC_AI_UI_*` env vars the launcher set, points `agent.cwd`
-and a fresh `CodeIntelligence` at that project, builds the model, and forces
-yolo mode (the server has no terminal to confirm at). Idempotent.
-"""
 def ui_configure -> None;
-
-"""Start one agent turn for `prompt` on a background thread; never blocks.
-
-Returns False (and does nothing) if a turn is already running, so the UI can
-disable its input while busy. The turn writes its milestones to `agent.bus`,
-which `ui_poll` drains.
-"""
 def ui_send(prompt: str) -> bool;
-
-"""The current event feed and walker state -- the UI's per-tick poll payload.
-
-Returns `agent.bus.snapshot()`: the bounded event log plus `status`, the
-`active` phase node, and the `path` walked this turn.
-"""
 def ui_poll -> dict;
-
-"""The static phase graph (nodes + edges) the UI renders in cytoscape, with state.
-
-Nodes are Plan/Build/QA/Done; edges are the legal transitions the walker may
-take. Returned once on mount; live position comes from `ui_poll`.
-"""
 def ui_graph -> dict;
-
-"""Clear the cross-turn ledger and the event feed for a fresh UI session."""
 def ui_reset -> None;
+def ui_stop -> None;
+def ui_stream -> any;
+# Lazily fetched detail for one token-usage row (model call): its full input
+# conversation, the diff vs the prior call, and its output messages.
+def ui_call_detail(call_id: int) -> dict;
+def ui_settings -> dict;
+def ui_apply_settings(
+    model: str, api_key: str, base_url: str, temperature: str, n_ctx: str
+) -> dict;
 
-"""Launch the bundled web UI for `jac ai --ui` and block until the user quits.
-
-Spawns `jac start` on the bundled `ai_ui` Jac app as a child process -- passing
-the user's project directory and model flags through `JAC_AI_UI_*` env vars --
-polls its log for the ready URL, opens the browser there, and waits. Ctrl-C
-shuts the child down. Returns 0 on a clean exit, 1 if the client plugin is
-missing or the server never came up.
-"""
 def _run_ui_server(r: any) -> int;
+
+# Quick-pick model names offered in the `--ui` settings panel; the field is
+# free-form (any byLLM/litellm name works), these are just one-click defaults.
+glob _MODEL_PRESETS: list[str] = [
+         "anthropic/claude-opus-4-7",
+         "anthropic/claude-sonnet-4-6",
+         "openai/gpt-4o",
+         "ollama/gemma4:31b",
+         "local:gemma-4-e4b"
+     ];
+
+"""Whether the given model needs an API key the session does not yet have.
+
+Returns `(needs_key, env_var)`. Local (`local:`) models never need one. A
+cloud model is satisfied when a key is already held (`agent.cfg.api_key`), set
+in jac.toml, or present in the environment (litellm reads provider env vars).
+Only a missing `*_API_KEY` var counts -- a missing base-url (e.g. ollama's
+`OLLAMA_API_BASE`) is not a key, so it does not trigger the panel.
+"""
+def _model_needs_key(name: str) -> tuple[bool, str];
+
+"""Recompute the bus's key status (`needs_key`/`key_env`/`model_name`) from the
+currently built model, so the next pushed state frame reflects it."""
+def _refresh_key_status -> None;

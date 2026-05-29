@@ -25,6 +25,7 @@ Bug index:
   #IMPL-1 - Has var reassigned in impl body loses its type (shadow local)
   #BASE-1 - Base class name resolved in class's own scope (should be enclosing)
   #SUPER-1 - super() call returns Unknown instead of parent instance
+  #DSTR-1  - Docstring before declaration inside function body triggers W0060 instead of attaching
   #DLOC-1 - Decorated class inside function body parsed as Ability instead of Archetype
   #STUB-VGUARD - Module-level version-guarded stub symbols (e.g. datetime.UTC) resolve as Unknown
 """
@@ -484,6 +485,14 @@ test "bug_tvar5_module_typevar_shadowed_by_class_param" {
     assert 23 not in error_lines , f"Line 23 should NOT error, got {error_lines}.";
 }
 
+# Bug #TVAR-6: glob-form TypeVar not solved at free-function call sites.
+test "bug_tvar6_glob_typevar_in_free_function" {
+    program = compile_and_check("checker_bug_typevar_glob_free_func.jac");
+    assert len(program.errors_had) == 0 , f"Bug #TVAR-6: Expected 0 errors but got {len(
+        program.errors_had
+    )}: {[e.msg for e in program.errors_had]}.";
+}
+
 # =========================================================================
 # Bug #IMPL-1: `has` var reassigned in impl body shadows the parent type
 #
@@ -585,6 +594,15 @@ test "bug_super1_super_call_returns_parent_instance" {
         "parent instance so that attribute access dispatches through the "
         "parent's MRO. "
         f"Got errors: {[str(e) for e in program.errors_had]}"
+    );
+}
+
+test "bug_dstr1_docstring_before_local_declaration" {
+    program = compile_and_check("checker_bug_docstring_local_decl.jac");
+
+    assert len(program.errors_had) == 0 , (
+        "Bug #DSTR-1: a docstring before a declaration inside a function body "
+        "must attach to the declaration without producing W0060 or parse errors. "
     );
 }
 

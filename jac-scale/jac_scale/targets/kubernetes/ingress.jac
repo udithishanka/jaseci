@@ -525,7 +525,6 @@ obj IngressDeployer {
         if self.k8s_config.cert_manager_email {
             ingress_annotations['jac-scale/cert-email'] = self.k8s_config.cert_manager_email;
         }
-
         main_ingress = {
             'apiVersion': 'networking.k8s.io/v1',
             'kind': 'Ingress',
@@ -538,7 +537,7 @@ obj IngressDeployer {
             'spec': {'ingressClassName': ingress_class, 'rules': [main_rule]}
         };
         try {
-            networking_v1.replace_namespaced_ingress(
+            networking_v1.patch_namespaced_ingress(
                 name=ingress_name, namespace=namespace, body=main_ingress
             );
         } except ApiException as e {
@@ -664,7 +663,7 @@ obj IngressDeployer {
                 'spec': {'ingressClassName': ingress_class, 'rules': [redis_rule]}
             };
             try {
-                networking_v1.replace_namespaced_ingress(
+                networking_v1.patch_namespaced_ingress(
                     name=redis_ingress_name, namespace=namespace, body=redis_ingress
                 );
             } except ApiException as e {
