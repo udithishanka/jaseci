@@ -2205,8 +2205,22 @@ obj KubernetesTarget(DeploymentTarget) {
             } except ConfigException {
                 k8s_cluster_config.load_incluster_config();
             }
-            core_v1 = client.CoreV1Api();
             namespace = self.k8s_config.namespace;
+            # In shared ingress mode no dedicated controller Service is created;
+            # the load balancer hostname is published on the Ingress object's
+            # status by the ingress controller (AWS LB Controller, nginx, etc).
+            if self.k8s_config.shared_ingress {
+                networking_v1 = client.NetworkingV1Api();
+                ingress = networking_v1.read_namespaced_ingress(
+                    name=f"{app_name}-ingress", namespace=namespace
+                );
+                ing_lb = ingress.status.load_balancer.ingress;
+                if ing_lb and len(ing_lb) > 0 {
+                    return ing_lb[0].hostname or ing_lb[0].ip;
+                }
+                return None;
+            }
+            core_v1 = client.CoreV1Api();
             ingress_svc_name = f"{app_name}-ingress-nginx-service";
             svc = core_v1.read_namespaced_service(
                 name=ingress_svc_name, namespace=namespace
