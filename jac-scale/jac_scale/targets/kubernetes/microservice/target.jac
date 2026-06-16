@@ -170,9 +170,15 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
         # and wait-for-DB init containers) populates every microservice
         # pod-spec. Skipped silently in tests (no kube config / not on a
         # real cluster); the provisioning helper is idempotent for re-deploys.
+        # Enabled for both the built-image (`--scale`, auto_build) and the
+        # code-injection path so a code-sync fleet gets the same DB env as a
+        # built-image fleet; the provisioner itself no-ops unless the config
+        # has mongodb_enabled / redis_enabled.
         try {
             self._deploy_context = MicroserviceDatabaseProvisioner(
-                k8s_target=self, logger=self.logger, enabled=self.auto_build
+                k8s_target=self,
+                logger=self.logger,
+                enabled=self.auto_build or self._code_inject_enabled()
             ).provision(
                 app_name
             );
