@@ -462,7 +462,14 @@ obj MicroserviceManifestBuilder {
             memory_limit_val = cfg.memory_limit;
         }
         if memory_limit_val is None {
-            memory_limit_val = "2Gi" if is_gateway else "1Gi";
+            # Code-injection pods build the client (vite) in-pod, which OOMs
+            # (exit 137) at the 1Gi service default; give every code-inject pod
+            # 2Gi by default. The gateway already defaults to 2Gi.
+            if self._ms_cfg().get("code_inject", False) {
+                memory_limit_val = "2Gi";
+            } else {
+                memory_limit_val = "2Gi" if is_gateway else "1Gi";
+            }
         }
         cpu_request_val = svc_cfg.get("cpu_request");
         if cpu_request_val is None {
@@ -540,6 +547,22 @@ obj MicroserviceManifestBuilder {
             "periodSeconds": cfg.liveness_period,
             "timeoutSeconds": 3,
             "failureThreshold": cfg.liveness_failure_threshold
+        };
+    }
+
+    """Startup probe for code-injection mode (added only when code_inject is
+    set). The pod installs jaseci and builds the client at runtime, which can
+    take many minutes; until this probe first succeeds K8s suppresses the
+    liveness AND readiness probes, so the slow first boot can't be SIGKILLed
+    mid-install. failureThreshold * periodSeconds is the boot budget (~15min);
+    once it passes, the normal liveness probe governs restarts."""
+    def _build_startup_probe -> dict[str, any] {
+        cfg = self.k8s_config;
+        return {
+            "httpGet": {"path": "/healthz/live", "port": cfg.container_port},
+            "periodSeconds": 10,
+            "timeoutSeconds": 3,
+            "failureThreshold": 90
         };
     }
 
@@ -767,6 +790,14 @@ obj MicroserviceManifestBuilder {
             "livenessProbe": self._build_liveness_probe(),
             "lifecycle": {"preStop": self._build_prestop_hook()}
         };
+        # Code-injection pods install jaseci + build the client AT RUNTIME
+        # (minutes). A startup probe holds liveness/readiness off until the app
+        # first answers, so the slow first boot is never mistaken for a hang
+        # and SIGKILLed by the (tight) liveness probe. Built-image pods boot
+        # fast and don't need it, so it's gated on code_inject.
+        if self._ms_cfg().get("code_inject", False) {
+            container["startupProbe"] = self._build_startup_probe();
+        }
         resources = self._build_resources(svc_cfg, svc_name == GATEWAY_NAME);
         if resources {
             container["resources"] = resources;

@@ -168,6 +168,42 @@ test "code-injection dispatch exports JAC_SV_SIBLING and dispatches on JAC_SV_NA
 
 # G4 of #6728: a platform deploying a DIFFERENT app injects that app's
 # config; with it set, the process jac.toml is never consulted.
+test "code-injection pods get a startup probe; built-image pods do not" {
+    cfg = KubernetesConfig(app_name="jac-shop", namespace="jac-shop-dev");
+    ci = MicroserviceManifestBuilder(
+        k8s_config=cfg, microservices_config={"code_inject": True}
+    );
+
+    c = ci._build_service_pod_spec("orders", "img:1")["containers"][0];
+    assert "startupProbe" in c;
+    assert c["startupProbe"]["httpGet"]["path"] == "/healthz/live";
+    # 90 * 10s = ~15min boot budget; liveness/readiness suppressed until it passes.
+    assert c["startupProbe"]["failureThreshold"] == 90;
+
+    plain = MicroserviceManifestBuilder(k8s_config=cfg);
+    pc = plain._build_service_pod_spec("orders", "img:1")["containers"][0];
+    assert "startupProbe" not in pc;
+}
+
+
+test "code-injection sibling defaults to 2Gi memory; built-image sibling stays 1Gi" {
+    cfg = KubernetesConfig(app_name="jac-shop", namespace="jac-shop-dev");
+    ci = MicroserviceManifestBuilder(
+        k8s_config=cfg, microservices_config={"code_inject": True}
+    );
+    ci_mem = ci._build_service_pod_spec("orders", "img:1")["containers"][0]["resources"][
+        "limits"
+    ]["memory"];
+    assert ci_mem == "2Gi";
+
+    plain = MicroserviceManifestBuilder(k8s_config=cfg);
+    plain_mem = plain._build_service_pod_spec("orders", "img:1")["containers"][0][
+        "resources"
+    ]["limits"]["memory"];
+    assert plain_mem == "1Gi";
+}
+
+
 test "injected microservices_config overrides the process config (G4)" {
     cfg = KubernetesConfig(app_name="jac-shop", namespace="jac-shop-dev");
     injected = {"routes": {"orders": "/api/orders"}, "code_inject": True};
