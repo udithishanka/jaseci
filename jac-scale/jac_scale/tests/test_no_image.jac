@@ -176,11 +176,15 @@ test "build_source_configmap rejects oversized source trees" {
     shutil.rmtree(tmp);
 }
 
-test "pinned_install_specs pins jaclang and jac-scale" {
+test "pinned_install_specs pins jaclang and jac-scale[all]" {
     specs = pinned_install_specs();
     joined = " ".join(specs);
     assert "jaclang" in joined;
-    assert "jac-scale" in joined;
+    assert "jac-scale[all]" in joined;
+    # requests is a scale-plugin runtime dep but ships only in jac-scale's
+    # `test` extra, so it must be installed explicitly or the plugin can't load
+    # in-pod (gateway crashes, services 404 on /healthz).
+    assert "requests" in joined;
 }
 
 test "bootstrap init container extracts source and installs to pydeps" {
@@ -190,6 +194,8 @@ test "bootstrap init container extracts source and installs to pydeps" {
     script = init["args"][0];
     assert "tar xzf" in script;
     assert f"--target={PYDEPS_DIR}" in script;
+    # jac-scale[all] must be quoted so `sh -c` doesn't glob the `[all]` marker.
+    assert "'jac-scale[all]" in script;
     mount_names = {m["name"] for m in init["volumeMounts"]};
     assert "jac-app" in mount_names;
     assert "jac-source" in mount_names;

@@ -284,18 +284,28 @@ def build_source_configmap(
 }
 
 
-"""Resolve the jaclang/jac-scale versions installed locally so the in-pod
-install pins the same releases the developer ran. Returns pip-style specs
-(e.g. 'jaclang==0.16.4'); unpinned package name when the version can't be
-read."""
+"""In-pod pip specs, pinned to the versions the developer ran. `requests` is a
+runtime dep of the scale plugin but jac-scale ships it only in the `test`
+extra, so it (and the `[all]` deploy extras) must be installed explicitly or
+the plugin fails to load in every pod. jac-client is added only when present
+locally (fullstack apps)."""
 def pinned_install_specs -> list[str] {
     import importlib.metadata as _md;
     specs: list[str] = [];
-    for pkg in ["jaclang", "jac-scale"] {
+    # (pip spec name, distribution name, required-even-if-absent).
+    targets: list[tuple[str, str, bool]] = [
+        ("jaclang", "jaclang", True),
+        ("jac-scale[all]", "jac-scale", True),
+        ("requests", "requests", True),
+        ("jac-client", "jac-client", False)
+    ];
+    for (pip_name, dist_name, required) in targets {
         try {
-            specs.append(f"{pkg}=={_md.version(pkg)}");
+            specs.append(f"{pip_name}=={_md.version(dist_name)}");
         } except Exception {
-            specs.append(pkg);
+            if required {
+                specs.append(pip_name);
+            }
         }
     }
     return specs;
@@ -306,7 +316,9 @@ def pinned_install_specs -> list[str] {
 and pip-installs jac into a target dir on that same volume. The slow install
 runs here (no probes) so the main container starts fast against a ready tree."""
 def build_bootstrap_init_container(base_image: str) -> dict[str, any] {
-    install = " ".join(pinned_install_specs());
+    # Single-quote each spec so the `[all]` extras marker isn't treated as a
+    # shell glob char-class by the `sh -c` bootstrap.
+    install = " ".join([f"'{spec}'" for spec in pinned_install_specs()]);
     script = (
         "set -eu; "
         f"tar xzf {SOURCE_MOUNT_PATH}/{SOURCE_ARCHIVE_KEY} -C {APP_MOUNT_PATH}; "
