@@ -316,6 +316,18 @@ def pinned_install_specs -> list[str] {
 }
 
 
+"""Shell command that writes a minimal jac.toml into the extracted source if
+one isn't there. The real jac.toml is excluded from the bundle (it can hold
+credentials), but `jac start <svc>.jac` requires a project jac.toml to exist,
+so the service pods need at least a stub."""
+def _ensure_jac_toml_cmd -> str {
+    return (
+        f"[ -f {APP_MOUNT_PATH}/jac.toml ] || "
+        f"printf '[project]\\nname = \"app\"\\n' > {APP_MOUNT_PATH}/jac.toml"
+    );
+}
+
+
 """The `&&`-joined shell script the bootstrap initContainer runs in
 experimental mode: extract the source, then clone the jaseci repo/branch into a
 venv on the shared app volume and editable-install jac + jac-scale[all] +
@@ -337,6 +349,7 @@ def experimental_bootstrap_script(repo_url: str, branch: str, commit: str) -> st
         "apt-get update",
         "apt-get install -y --no-install-recommends git",
         f"tar xzf {SOURCE_MOUNT_PATH}/{SOURCE_ARCHIVE_KEY} -C {APP_MOUNT_PATH}",
+        _ensure_jac_toml_cmd(),
         f"python3 -m venv {VENV_DIR}",
         f". {VENV_DIR}/bin/activate",
         f"rm -rf {APP_MOUNT_PATH}/jaseci",
@@ -381,6 +394,7 @@ def build_bootstrap_init_container(
         script = (
             "set -eu; "
             f"tar xzf {SOURCE_MOUNT_PATH}/{SOURCE_ARCHIVE_KEY} -C {APP_MOUNT_PATH}; "
+            f"{_ensure_jac_toml_cmd()}; "
             f"pip install --no-cache-dir --target={PYDEPS_DIR} {install}"
         );
     }
