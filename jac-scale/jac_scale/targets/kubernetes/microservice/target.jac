@@ -205,6 +205,19 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
             }
         }
 
+        # Block until the fleet actually rolls out, so callers don't surface a
+        # live link at a not-yet-ready (or crash-looping) fleet - matching the
+        # monolith path, which waits via _wait_for_deployment.
+        try {
+            self._wait_for_fleet_rollout(bundle);
+        } except Exception as e {
+            return DeploymentResult(
+                success=False,
+                message=f"fleet did not become ready: {e}",
+                details=bundle
+            );
+        }
+
         svc_count = len(bundle["pod_specs"]) - 1;
         success_msg = (
             f"Applied {svc_count} service Deployment+Service pair(s) "
@@ -224,6 +237,72 @@ obj KubernetesMicroserviceTarget(KubernetesTarget) {
             );
         }
         return DeploymentResult(success=True, message=success_msg, details=bundle);
+    }
+
+    """Block until every fleet Deployment has a ready replica (or `timeout`
+    elapses). Raises on a crash-looping pod so a broken fleet fails fast
+    instead of timing out. No-image pods build jac in-pod, hence the long
+    default timeout."""
+    def _wait_for_fleet_rollout(bundle: dict[str, any], timeout: int = 1200) -> None {
+        import time;
+        import from kubernetes { client }
+        names: list[str] = [];
+        for dep in bundle.get("deployments", {}).values() {
+            names.append(dep["metadata"]["name"]);
+        }
+        if not names {
+            return;
+        }
+        self._load_kube_config();
+        apps_v1 = client.AppsV1Api();
+        core_v1 = client.CoreV1Api();
+        ns = self.k8s_config.namespace;
+        elapsed = 0;
+        ready = 0;
+        while elapsed < timeout {
+            ready = 0;
+            for name in names {
+                try {
+                    d = apps_v1.read_namespaced_deployment(name=name, namespace=ns);
+                    if (d.status.ready_replicas or 0) >= 1 {
+                        ready += 1;
+                    }
+                } except Exception {
+                    _ = 0;
+                }
+            }
+            if ready == len(names) {
+                if self.logger {
+                    self.logger.info(
+                        f"Fleet ready: {ready}/{len(names)} deployments serving"
+                    );
+                }
+                return;
+            }
+            crash = "";
+            try {
+                for p in core_v1.list_namespaced_pod(namespace=ns).items {
+                    for cs in (p.status.container_statuses or []) {
+                        if (cs.restart_count or 0) >= 3 {
+                            crash = (
+                                f"pod '{p.metadata.name}' crash-looping "
+                                f"({cs.restart_count} restarts)"
+                            );
+                        }
+                    }
+                }
+            } except Exception {
+                _ = 0;
+            }
+            if crash {
+                raise Exception(crash);
+            }
+            time.sleep(10);
+            elapsed += 10;
+        }
+        raise Exception(
+            f"timed out after {timeout}s ({ready}/{len(names)} deployments ready)"
+        );
     }
 
     """Deploy the observability stack (Loki/Tempo + Grafana Alloy + the
