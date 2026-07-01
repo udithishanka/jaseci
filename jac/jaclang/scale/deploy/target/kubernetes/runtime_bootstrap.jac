@@ -172,6 +172,12 @@ def build_bootstrap_init_container(
 ) -> dict[str, any] {
     commands = build_runtime_install_commands(k8s_config, experimental, ship_binary);
     commands.append(f'cd {APP_MOUNT_PATH}');
+    # Seed setuptools+wheel into the jac binary's site before the app install.
+    # pip builds legacy sdists (e.g. http-ece via pywebpush) in a subprocess that
+    # inherits the jac binary's PYTHONHOME/PYTHONPATH (jaseci#7063 / the #7047 leak
+    # family), so it resolves the build backend against the jac site, not the app
+    # venv -- setuptools must live there. Mirrors the image build + CI runner.
+    commands.append('jac -m pip install --no-cache-dir setuptools wheel');
     commands.append('jac install');
     script = ' && '.join(commands);
     return {
